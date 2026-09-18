@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FORCE_COLOR: "1"
+
+jobs:
+  test:
+    name: Lint and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Create the environment
+        run: uv sync
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format check
+        run: uv run ruff format --check .
+
+      - name: Prove this environment has no provider credentials
+        # Asserted, never assumed. The tool claims its deterministic verbs run
+        # with no provider configured. If a credential ever leaked into CI, those
+        # checks would keep passing -- for the wrong reason -- and nothing would
+        # say so. This step is what makes the green tick mean what it says.
+        shell: bash
+        run: |
+          leaked=""
+          for var in ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY \
+                     GEMINI_API_KEY AZURE_OPENAI_API_KEY; do
+            if [ -n "${!var:-}" ]; then leaked="$leaked $var"; fi
+          done
+          if [ -n "$leaked" ]; then
+            echo "::error::provider credentials present in CI:$leaked"
+            exit 1
+          fi
+          echo "no provider credentials present"
+
+      - name: Tests
+        run: uv run pytest -q
+
+  conformance:
+    name: Smart-tool conformance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this tool
+        uses: actions/checkout@v4
+        with:
+          path: tool
+
+      - name: Check out the conformance kit
+        # Fetched fresh rather than vendored: the bar is whatever the
+        # specification says today, not whatever it said when someone last
+        # copied it into this repository.
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/amplifier-smart-tools
+          path: kit
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install aud so cli_argv resolves
+        # The kit launches the tool through smart-tool.json's cli_argv, which is
+        # ["aud"] -- it must be findable on PATH. Conformance therefore grades an
+        # installed tool, not a bare checkout.
+        run: |
+          uv tool install ./tool
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Conformance
+        working-directory: kit
+        run: uv run conformance/run.py ../tool
+
+  install-from-git:
+    name: Install from git
+    # Why this job exists: every other job here runs against the checkout, and a
+    # local or editable install masks a broken git reference forever -- the
+    # packaging seam is the one thing a checkout cannot exercise. This is the
+    # only job that would notice a tool that builds perfectly in place and
+    # cannot be installed by anyone else.
+    #
+    # Restricted to push and manual dispatch: a pull_request run's github.sha is
+    # a merge commit that is not fetchable by bare sha from the repository URL,
+    # so running it there would fail for a reason that has nothing to do with the
+    # change under review.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install this exact commit from git, with no checkout present
+        run: |
+          uv tool install "aud @ git+https://github.com/${{ github.repository }}@${{ github.sha }}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run the deterministic smoke capabilities
+        run: |
+          aud manifest
+          aud check

@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Builds
+build/
+dist/
+*.whl
+
+# uv / virtual environments
+.venv/
+venv/
+
+# Rendered audio. Tests write .wav output next to where they run; checked-in
+# fixtures are the exception and are kept deliberately.
+*.wav
+*.flac
+*.aiff
+!tests/fixtures/**/*.wav
+!tests/fixtures/**/*.flac
+!tests/fixtures/**/*.aiff
+
+# Reference material used while developing an EQ-match curve. Someone else's
+# master is not ours to redistribute, so it never enters the repository.
+reference/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/

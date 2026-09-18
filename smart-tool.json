@@ -1,0 +1,5 @@
+{
+  "manifest": "src/aud/SMART_TOOL.md",
+  "cli_argv": ["aud"],
+  "deterministic_smoke": ["manifest"]
+}

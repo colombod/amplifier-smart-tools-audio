@@ -1,0 +1,61 @@
+[project]
+name = "aud"
+version = "0.1.0"
+description = "Master and clean up audio: analyse a file, then run it through a mastering chain -- de-ess, de-verb, EQ, EQ-match to a reference, multiband compression, saturation, controlled reverb, loudness and true-peak limiting. Chainable: every verb appends to a mastering plan and one render applies the whole chain"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0,<3.0",
+    "scipy>=1.14,<2.0",
+    "soundfile>=0.13,<0.14",
+    "pyloudnorm>=0.1.1,<0.2.0",
+    "pydantic>=2.9,<3.0",
+    "pyyaml>=6.0,<7.0",
+]
+
+[project.optional-dependencies]
+# Time-stretch and pitch-shift beyond the built-in phase vocoder. Signalsmith
+# Stretch is MIT and ships wheels; Rubber Band is GPL and deliberately NOT a
+# dependency of this tool. Installed as an extra rather than a follow-up step:
+#
+#   uv tool install 'aud[stretch] @ git+https://github.com/colombod/amplifier-smart-tools-audio'
+stretch = [
+    "python-stretch>=0.3,<1.0",
+]
+
+[project.urls]
+Repository = "https://github.com/colombod/amplifier-smart-tools-audio"
+
+[project.scripts]
+aud = "aud.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.8,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "aud"
+
+[tool.uv]
+add-bounds = "major"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.16",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["F", "E", "I", "N", "UP", "RUF", "B", "C4", "PIE", "PT", "PTH", "SIM", "TID"]
+ignore = ["E501"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
