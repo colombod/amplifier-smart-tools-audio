@@ -46,3 +46,31 @@ class AudError(Exception):
 
     def to_dict(self) -> dict[str, str]:
         return {"code": self.code, "message": self.message, "remedy": self.remedy}
+
+
+class NotImplementedStageError(ValueError):
+    """Raised by aud.dsp.engine for a plan stage with no DSP implementation yet.
+
+    A plan stage name can be valid (accepted by plan.py's STAGE_ORDER) while
+    still having no DSP handler -- eq_match, deess, dereverb, reverb, stretch
+    and pitch are all planned but not yet built (see dsp/engine.py). That is
+    a known, named gap, not an internal bug, so it gets its own type rather
+    than a bare ValueError: aud.lib catches this specific type and reports it
+    as a `not_implemented` AudError instead of letting the CLI's catch-all
+    wrap it as `internal_error` and tell the caller to file a bug about a
+    gap the tool already knows about.
+
+    Subclasses ValueError (rather than AudError) because `dsp/` modules take
+    arrays and parameters and return arrays -- they do not raise user-facing
+    errors (see AGENTS.md #8); AudError construction stays a job for
+    aud.lib, above the dsp/ boundary. Subclassing ValueError also means a
+    caller that only knows "engine dispatch failures are ValueErrors" (see
+    dsp/engine.py's own docstring) keeps working unchanged.
+    """
+
+    def __init__(self, stage: str, implemented: tuple[str, ...]) -> None:
+        self.stage = stage
+        self.implemented = implemented
+        super().__init__(
+            f"Stage '{stage}' is not yet implemented in this DSP engine. Implemented stages: {', '.join(implemented)}."
+        )

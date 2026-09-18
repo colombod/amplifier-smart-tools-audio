@@ -19,7 +19,6 @@ import json
 import os
 import sys
 import traceback
-from pathlib import Path
 from typing import Any, NoReturn
 
 from aud import lib
@@ -224,6 +223,26 @@ def _build_parser() -> _Parser:
     strip_silence_parser.add_argument("--keep", type=float, default=150.0)
     _add_edit_point_arguments(strip_silence_parser, pad_default=80.0)
 
+    # advise / master: model-backed, not yet built (see _NOT_YET_BUILT below), but
+    # documented with the exact positional surface their own --help worked
+    # examples show ('aud advise in.wav', 'aud master in.wav out.wav') -- a bare
+    # registration would make a caller discover the flag doesn't parse instead of
+    # getting `not_implemented`.
+    advise_parser = sub.add_parser("advise")
+    advise_parser.add_argument("path")
+
+    master_parser = sub.add_parser("master")
+    master_parser.add_argument("in_path")
+    master_parser.add_argument("out_path")
+
+    # preset: documented two ways -- 'aud preset --list' (verbdoc.py) and
+    # 'aud preset show <name>' (docs/ARCHITECTURE.md, README.md, SMART_TOOL.md).
+    preset_parser = sub.add_parser("preset")
+    preset_parser.add_argument("--list", action="store_true")
+    preset_sub = preset_parser.add_subparsers(dest="preset_action", required=False)
+    preset_show_parser = preset_sub.add_parser("show")
+    preset_show_parser.add_argument("name")
+
     for name in sorted(_NOT_YET_BUILT):
         if name not in sub.choices:  # the ones above registered their real arguments
             sub.add_parser(name)
@@ -254,7 +273,7 @@ def _dispatch_stage(verb: str, plan: Any, args: argparse.Namespace) -> Any:
     if verb == "eq":
         return lib.eq(plan, hpf=args.hpf, lpf=args.lpf, peaks=args.peaks or [])
     if verb == "eq-match":
-        curve = json.loads(Path(args.curve).read_text(encoding="utf-8"))
+        curve = lib.load_json_file(args.curve)
         return lib.eq_match(plan, curve=curve, mix=args.mix)
     if verb == "compress":
         return lib.compress(plan, bands=args.bands, ratio=args.ratio)
@@ -290,7 +309,7 @@ def _dispatch(verb: str, args: argparse.Namespace, stdin_text: str | None) -> An
         )
     if verb == "plan":
         if args.from_file:
-            return read_plan(Path(args.from_file).read_text(encoding="utf-8"))
+            return read_plan(lib.read_text_file(args.from_file))
         return read_plan(None)
     if verb in STAGE_VERB_NAMES:
         plan = read_plan(stdin_text)

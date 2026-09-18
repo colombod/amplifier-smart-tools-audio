@@ -117,9 +117,51 @@ def test_analyze_verb_is_registered_and_reachable(tiny_wav: Path) -> None:
 # --- DEFECT 3: an unexpected exception must never leak a raw traceback ---
 
 
-def test_unexpected_exception_is_wrapped_in_error_envelope_not_a_raw_traceback(tmp_path: Path) -> None:
+def test_missing_input_file_is_a_file_not_found_error_not_an_internal_bug(tmp_path: Path) -> None:
+    """A missing/unreadable file is wrong INPUT, not an aud bug -- see AGENTS.md #4.
+
+    Regression guard: this used to come back as {"code": "internal_error",
+    "remedy": "...not something wrong with your input..."} for exactly the
+    case where the input IS what is wrong.
+    """
     missing = tmp_path / "does-not-exist.wav"
     proc = _run(["verify", str(missing), "--target", "-14"])
+    assert proc.returncode != 0
+    payload = json.loads(proc.stdout)
+    assert set(payload) == {"error"}
+    assert payload["error"]["code"] == "file_not_found"
+    assert str(missing) in payload["error"]["message"]
+    assert str(missing) in payload["error"]["remedy"]
+    # A handled, named user error -- not an internal bug -- so no traceback either.
+    assert "Traceback" not in proc.stderr
+
+
+def test_eq_match_missing_curve_file_is_a_file_not_found_error(tmp_path: Path) -> None:
+    """The inverted case: a missing --curve file is the caller's input error."""
+    missing_curve = tmp_path / "does-not-exist.json"
+    plan_proc = _run(["plan"])
+    assert plan_proc.returncode == 0, plan_proc.stderr
+    proc = _run(["eq-match", "--curve", str(missing_curve)], input_text=plan_proc.stdout)
+    assert proc.returncode != 0
+    payload = json.loads(proc.stdout)
+    assert payload["error"]["code"] == "file_not_found"
+    assert str(missing_curve) in payload["error"]["message"]
+
+
+def test_unexpected_exception_is_wrapped_in_error_envelope_not_a_raw_traceback(tiny_wav: Path, tmp_path: Path) -> None:
+    """A genuinely unforeseen exception -- not a named, mapped condition --
+    still gets the internal_error catch-all treatment. Using an out_path
+    whose parent path component is itself a regular file forces the
+    os.mkdir call inside io.write_audio to raise NotADirectoryError, which
+    nothing maps -- exactly the class of bug this catch-all exists for.
+    """
+    blocking_file = tmp_path / "blocking.wav"
+    blocking_file.write_bytes(b"not a real wav, just needs to exist as a file")
+    bogus_out = blocking_file / "sub" / "out.wav"
+
+    plan_proc = _run(["plan"])
+    assert plan_proc.returncode == 0, plan_proc.stderr
+    proc = _run(["render", str(tiny_wav), str(bogus_out)], input_text=plan_proc.stdout)
     assert proc.returncode != 0
     # The whole of stdout must still be exactly one JSON document -- a raw
     # Python traceback on stdout would fail this parse outright.
@@ -132,11 +174,19 @@ def test_unexpected_exception_is_wrapped_in_error_envelope_not_a_raw_traceback(t
     assert "Traceback" not in proc.stderr
 
 
-def test_debug_flag_puts_the_real_traceback_on_stderr(tmp_path: Path) -> None:
-    missing = tmp_path / "does-not-exist.wav"
-    proc = _run(["verify", str(missing), "--target", "-14", "--debug"])
+def test_debug_flag_puts_the_real_traceback_on_stderr(tiny_wav: Path, tmp_path: Path) -> None:
+    blocking_file = tmp_path / "blocking.wav"
+    blocking_file.write_bytes(b"not a real wav, just needs to exist as a file")
+    bogus_out = blocking_file / "sub" / "out.wav"
+
+    plan_proc = _run(["plan"])
+    assert plan_proc.returncode == 0, plan_proc.stderr
+    proc = _run(
+        ["render", str(tiny_wav), str(bogus_out), "--debug"],
+        input_text=plan_proc.stdout,
+    )
     assert proc.returncode != 0
     payload = json.loads(proc.stdout)
     assert payload["error"]["code"] == "internal_error"
     assert "Traceback" in proc.stderr
-    assert "FileNotFoundError" in proc.stderr
+    assert "NotADirectoryError" in proc.stderr

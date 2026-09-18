@@ -9,8 +9,10 @@ Only five stages are implemented in this module: eq, compress, saturate,
 loudness, limit. Three further stages (eq-match, de-ess, de-reverb, reverb,
 time-stretch/pitch-shift) are a separate, later milestone; `apply_plan`
 does not special-case their names -- ANY stage not in the registry raises
-a clear, named error, so the caller always gets an honest "not implemented
-yet" rather than a silent no-op or a confusing KeyError.
+`NotImplementedStageError` (a `ValueError` subclass), so the caller always
+gets an honest "not implemented yet" rather than a silent no-op or a
+confusing KeyError. aud.lib maps that exception to a `not_implemented`
+AudError; it is not an internal aud bug.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ import numpy as np
 
 from aud.dsp import dynamics, limiter, loudness, saturation
 from aud.dsp import filters as _filters
+from aud.schemas import NotImplementedStageError
 
 __all__ = ["apply_plan"]
 
@@ -188,11 +191,7 @@ def apply_plan(x: np.ndarray, sr: int, stages: list[_Stage]) -> tuple[np.ndarray
         name = stage.stage
         handler = _REGISTRY.get(name)
         if handler is None:
-            raise ValueError(
-                f"Stage '{name}' is not yet implemented in this DSP engine "
-                "(planned for a later milestone: eq-match, de-ess, de-reverb, "
-                "reverb, and time-stretch/pitch-shift are not built yet)."
-            )
+            raise NotImplementedStageError(name, tuple(_REGISTRY))
         params = stage.params or {}
         y, stage_report = handler(y, sr, params)
         stage_report = {"stage": name, **stage_report}

@@ -26,7 +26,7 @@ from typing import Any
 from aud.core.manifest import load_manifest
 from aud.core.skill import render_skill
 from aud.plan import Plan, append
-from aud.schemas import AudError
+from aud.schemas import AudError, NotImplementedStageError
 
 # ---------------------------------------------------------------------------
 # manifest / check / config / skill
@@ -456,13 +456,85 @@ def _not_implemented(feature: str, exc: Exception) -> AudError:
     )
 
 
+def _read_audio(io_module: Any, path: str) -> tuple[Any, int]:
+    """Read an audio file, mapping io's I/O exceptions to a user-facing AudError.
+
+    A missing or undecodable file is wrong input, not an internal aud bug --
+    see AudError's docstring. `io.read_audio` raises plain `FileNotFoundError`
+    and `RuntimeError`, by design (dsp/ modules do not raise user-facing
+    errors -- AGENTS.md #8); this is the boundary where those become the two
+    `AudError` codes a caller can act on. Anything else is left to propagate
+    and is a genuine internal_error.
+    """
+    try:
+        return io_module.read_audio(path)
+    except FileNotFoundError as exc:
+        raise AudError(
+            code="file_not_found",
+            message=str(exc),
+            remedy=f"Check that '{path}' exists and is a readable audio file.",
+        ) from exc
+    except RuntimeError as exc:
+        raise AudError(
+            code="audio_decode_error",
+            message=str(exc),
+            remedy=(
+                "Check that the file is a valid, uncorrupted audio file in a supported format. "
+                "WAV/FLAC/AIFF need nothing extra; mp3/m4a/ogg need ffmpeg on PATH -- see "
+                "docs/CONFIGURATION.md."
+            ),
+        ) from exc
+
+
+def read_text_file(path: str) -> str:
+    """Read a text file, mapping I/O failures to an AudError.
+
+    Every path a caller hands us is read through here, so a missing or
+    unreadable file always names the path as the problem instead of reaching
+    the CLI's catch-all and being reported as an internal bug in `aud`.
+    """
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise AudError(
+            code="file_not_found",
+            message=str(exc),
+            remedy=f"Check that '{path}' exists.",
+        ) from exc
+    except OSError as exc:
+        raise AudError(
+            code="file_not_found",
+            message=f"Could not read '{path}': {exc}",
+            remedy=f"Check that '{path}' exists and is readable.",
+        ) from exc
+
+
+def load_json_file(path: str) -> Any:
+    """Read and parse a JSON file, mapping I/O and parse failures to an AudError.
+
+    Shared by `curve_apply` and the CLI's `eq-match --curve` handling, so a
+    missing or unparsable file gets the same honest `file_not_found`/
+    `bad_param` envelope wherever it is read, rather than surfacing as an
+    `internal_error` the caller has no way to act on.
+    """
+    text = read_text_file(path)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise AudError(
+            code="bad_param",
+            message=f"'{path}' is not valid JSON: {exc}",
+            remedy="Provide a curve JSON file produced by 'aud curve extract'.",
+        ) from exc
+
+
 def analyze(path: str) -> dict:
     """What is actually in a file: LUFS, true peak, crest, bands, sibilance, ambience."""
     try:
         from aud.dsp import analysis, io
     except ImportError as exc:
         raise _not_implemented("analyze", exc) from exc
-    samples, sample_rate = io.read_audio(path)
+    samples, sample_rate = _read_audio(io, path)
     return analysis.analyze(samples, sample_rate)
 
 
@@ -474,8 +546,18 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
         raise _not_implemented("render", exc) from exc
     from aud.plan import ordered
 
-    samples, sample_rate = io.read_audio(in_path)
-    rendered, report = engine.apply_plan(samples, sample_rate, ordered(plan))
+    samples, sample_rate = _read_audio(io, in_path)
+    try:
+        rendered, report = engine.apply_plan(samples, sample_rate, ordered(plan))
+    except NotImplementedStageError as exc:
+        raise AudError(
+            code="not_implemented",
+            message=f"'{exc.stage}' is not built yet in this release of aud.",
+            remedy=(
+                f"Build the chain with implemented stages only ({', '.join(exc.implemented)}); "
+                f"'{exc.stage}' lands in a later release."
+            ),
+        ) from exc
     output_subtype = config()["output_subtype"]["value"]
     io.write_audio(out_path, rendered, sample_rate, subtype=output_subtype)
     return {"out_path": out_path, "report": report}
@@ -487,7 +569,7 @@ def verify(path: str, target_lufs: float | None = None, ceiling_dbtp: float | No
         from aud.dsp import analysis, io
     except ImportError as exc:
         raise _not_implemented("verify", exc) from exc
-    samples, sample_rate = io.read_audio(path)
+    samples, sample_rate = _read_audio(io, path)
     measured = analysis.analyze(samples, sample_rate)
     result: dict[str, Any] = {"measured": measured}
     if target_lufs is not None:
@@ -507,7 +589,7 @@ def curve_extract(path: str, out: str) -> dict:
         from aud.dsp import eqmatch, io
     except ImportError as exc:
         raise _not_implemented("curve_extract", exc) from exc
-    samples, sample_rate = io.read_audio(path)
+    samples, sample_rate = _read_audio(io, path)
     curve = eqmatch.spectrum_profile(samples, sample_rate)
     Path(out).write_text(json.dumps(curve), encoding="utf-8")
     return {"curve_path": out}
@@ -519,8 +601,8 @@ def curve_apply(path: str, curve_path: str, out_path: str) -> dict:
         from aud.dsp import eqmatch, io
     except ImportError as exc:
         raise _not_implemented("curve_apply", exc) from exc
-    curve = json.loads(Path(curve_path).read_text(encoding="utf-8"))
-    samples, sample_rate = io.read_audio(path)
+    curve = load_json_file(curve_path)
+    samples, sample_rate = _read_audio(io, path)
     matched = eqmatch.apply_curve(samples, sample_rate, curve)
     io.write_audio(out_path, matched, sample_rate)
     return {"out_path": out_path}

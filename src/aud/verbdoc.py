@@ -578,12 +578,22 @@ What it does:
   hosting, streaming platforms) that would otherwise be built by hand with
   plan/deess/eq/compress/loudness/limit.
 
+    preset --list       List the available preset names.
+    preset show NAME    Print the named preset's chain (a plan document).
+
 Status:
-  Not yet built in this release. Every deterministic verb it would chain
-  together already works standalone; use them directly until presets land.
+  Not yet built in this release: the flags above parse, and the verb
+  returns {"error": {"code": "not_implemented", ...}}. Every deterministic
+  verb a preset would chain together already works standalone; use them
+  directly until presets land.
+
+Parameters:
+  --list          List the available preset names.
+  show NAME       Print the named preset's chain.
 
 Example:
-  aud preset --list   # (planned)
+  aud preset --list                                  # (planned)
+  aud preset show podcast | aud render in.wav out.wav # (planned)
 """,
     "check": """\
 check -- report what this host has installed and can reach
@@ -653,8 +663,13 @@ Requires:
   or AZURE_OPENAI_API_KEY.
 
 Status:
-  Not yet built in this release. Use 'aud analyze' plus the deterministic
-  stage verbs to build a chain by hand until this lands.
+  Not yet built in this release: the argument below parses, and the verb
+  returns {"error": {"code": "not_implemented", ...}}. Use 'aud analyze'
+  plus the deterministic stage verbs to build a chain by hand until this
+  lands.
+
+Parameters:
+  path (positional)  Path to the audio file to analyze.
 
 Example:
   aud advise in.wav   # (planned)
@@ -671,8 +686,14 @@ Requires:
   or AZURE_OPENAI_API_KEY.
 
 Status:
-  Not yet built in this release. Use 'aud plan | ... | aud render' plus
-  'aud verify' to get the same result by hand until this lands.
+  Not yet built in this release: the arguments below parse, and the verb
+  returns {"error": {"code": "not_implemented", ...}}. Use
+  'aud plan | ... | aud render' plus 'aud verify' to get the same result
+  by hand until this lands.
+
+Parameters:
+  in_path (positional)   Source audio file.
+  out_path (positional)  Destination audio file to write.
 
 Example:
   aud master in.wav out.wav   # (planned)

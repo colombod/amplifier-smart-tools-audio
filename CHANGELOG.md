@@ -9,6 +9,52 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-18
+
+Two contract-violation defect classes found by installing the published 0.3.0 build on a clean
+container and invoking every verb at the exact example its own `--help` documents, both fixed;
+plus a sweep test driven off the CLI's own registered-verb list and `verbdoc.py` so this class of
+bug cannot silently recur when a new verb is added.
+
+### Fixed
+
+- **`advise`, `master` and `preset` were registered with no arguments at all.** Their own
+  `--help` worked examples (`aud advise in.wav`, `aud master in.wav out.wav`, `aud preset --list`)
+  failed with `usage_error` -- "unrecognized arguments" -- instead of the `not_implemented`
+  envelope the tool's own convention promises for an unbuilt capability (the pattern `curve
+  extract`, `detect` and `strip-silence` already followed correctly). All three now parse their
+  full documented argument surface -- `advise PATH`, `master IN OUT`, `preset --list` / `preset
+  show NAME` -- and return `not_implemented`, same as before, but for the right reason. No DSP or
+  verb behaviour changed; only the argument parser.
+- **A planned DSP gap was reported as an internal aud bug.** Rendering a plan containing
+  `eq_match`, `deess`, `dereverb`, `reverb`, `stretch` or `pitch` raised a bare `ValueError` from
+  `dsp/engine.py`'s dispatcher, which the CLI's catch-all wrapped as `{"code": "internal_error",
+  ..., "remedy": "...report it..."}` -- telling the caller to file a bug about a gap the tool
+  already knew about and named in its own message. `dsp/engine.py` now raises a dedicated
+  `NotImplementedStageError` (a `ValueError` subclass, so existing engine-level callers are
+  unaffected); `aud.lib.render` maps it to the existing `not_implemented` code with a remedy
+  naming the implemented stages. The generic catch-all is untouched and still guards genuinely
+  unexpected exceptions.
+- **The inverted case: a missing input file was also reported as an internal aud bug**, with a
+  remedy asserting "not something wrong with your input" for exactly the case where the input
+  *is* what is wrong (`aud eq-match --curve /nonexistent.json`, and the same for `analyze`,
+  `verify`, `render`, `curve extract`, `curve apply`). `aud.lib` now maps a missing/unreadable
+  file to `file_not_found` and an undecodable one to `audio_decode_error`, each with a remedy
+  naming the path, before either can reach the catch-all.
+
+### Added
+
+- `aud/schemas.py::NotImplementedStageError` -- carries the stage name and the tuple of
+  currently-implemented stages.
+- `aud.lib.load_json_file` -- shared JSON-file read/parse helper (mapping `file_not_found` /
+  `bad_param`), used by `curve_apply` and by the CLI's `eq-match --curve` handling so both get the
+  same honest envelope for a missing or malformed file.
+- `tests/test_verb_examples_sweep.py` -- for every verb `aud.cli.registered_verbs()` reports, runs
+  the tool as a real subprocess at the exact invocation(s) `verbdoc.py` documents as correct, and
+  asserts the result parses as one clean JSON document that is never a `usage_error` for a
+  documented-correct invocation and never a raw traceback without `--debug`. Driven off the CLI's
+  own verb registry and `verbdoc.py`, so a newly added verb is covered automatically.
+
 ## [0.3.0] - 2026-09-18
 
 One idea enters the design: **an edit point is resolved, not taken literally.** A detector says
