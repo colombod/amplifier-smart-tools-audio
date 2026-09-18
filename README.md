@@ -1,8 +1,9 @@
 # aud
 
 Master and clean up audio from the command line or from Python. `aud` measures a finished
-programme — loudness, true peak, crest factor, spectral balance, sibilance, ambience — then
-runs it through a mastering chain and reports what it did.
+programme — loudness, true peak, crest factor, spectral balance, sibilance, ambience — finds
+what is in it — onsets, silences, filler words — then runs it through an editing and mastering
+chain and reports what it did.
 
 It is an [Amplifier Smart Tool](https://github.com/microsoft/amplifier-smart-tools): a library
 with a manifest and a thin CLI over the top. Most of it is deterministic signal processing and
@@ -34,6 +35,13 @@ With the optional time-stretch extra (Signalsmith Stretch, MIT):
 uv tool install 'aud[stretch] @ git+https://github.com/colombod/amplifier-smart-tools-audio'
 ```
 
+With the optional speech extra, needed only by `aud detect fillers` (faster-whisper, MIT — a
+**local** model, no provider and no credential):
+
+```bash
+uv tool install 'aud[speech] @ git+https://github.com/colombod/amplifier-smart-tools-audio'
+```
+
 Then check what the host can actually do:
 
 ```bash
@@ -52,6 +60,19 @@ aud analyze in.wav
 
 One JSON document on stdout: loudness in LUFS, true peak, crest factor, per-band energy, a
 sibilance estimate and an ambience estimate. Nothing is modified.
+
+## One command, not a conversation
+
+Get the whole job done in a **single shell command**. Do not run a stage, read the result,
+decide the next one, run that — every round trip back through the caller is latency, tokens and
+another chance to lose the thread, and none of it buys anything, because the whole chain can be
+written down before any of it runs. Three ways in, for three kinds of caller:
+
+| You know | Use |
+|---|---|
+| what the chain should be | `aud plan \| aud eq ... \| aud render in.wav out.wav` |
+| only what the result should be like | `aud master in.wav out.wav` — model-backed, decides for you |
+| that a known-good chain exists | `aud preset show podcast \| aud render in.wav out.wav` |
 
 ## Build a chain by piping
 
@@ -72,12 +93,63 @@ aud plan \
 That is one decode, one filter graph, one encode. Do not run each stage as its own render —
 every extra render is another round of quantisation and another chance to clip.
 
-`render` applies stages in canonical mastering order regardless of the order you appended them:
+`render` applies stages in canonical order regardless of the order you appended them:
 
 ```
-repair (de-ess, de-verb) -> tone (EQ, EQ-match) -> dynamics (multiband compression)
-  -> character (saturation, ambience) -> loudness -> limiting
+editing (cut, strip-silence) -> repair (de-ess, de-verb) -> tone (EQ, EQ-match)
+  -> dynamics (multiband compression) -> character (saturation, ambience)
+  -> loudness -> limiting
 ```
+
+## Find things, then cut them — still one command
+
+`aud detect` finds things and prints a **regions document**
+([contracts/regions.v1.md](contracts/regions.v1.md)) — where the silences are, where the onsets
+are, where the "umm"s are. `aud cut` consumes one. So finding and removing is one invocation,
+not three turns:
+
+```bash
+aud detect silence in.wav | aud cut | aud render in.wav out.wav
+```
+
+Or carry a rule instead of a list, which is reusable across every episode:
+
+```bash
+aud plan | aud strip-silence --min-len 400 --keep 150 | aud render in.wav out.wav
+```
+
+Three things worth knowing:
+
+- **Editing renders first**, ahead of repair and tone. Cutting changes the timeline everything
+  downstream measures — target −14 LUFS across material a cut later removes and the number you
+  hit describes a file that no longer exists.
+- **The silence threshold is relative to the file's measured noise floor**, not a fixed dBFS
+  value. A fixed number is right for exactly one recording: a treated room may floor at
+  −70 dBFS and a phone in a kitchen at −38 dBFS, and one number finds nothing in the first file
+  and eats words in the second. The measured floor is written into the regions document, so the
+  judgement can be checked.
+- **A detector's boundary is not where the blade falls.** The position is *nominal*; the edit
+  point is resolved from it — padded, then snapped inside a bounded window to a zero crossing, a
+  quiet spot, or just before an onset — because a cut through the attack of a word truncates it
+  and a cut at a non-zero sample clicks. A snap that finds nothing acceptable keeps the original
+  position and says so in the report rather than failing quietly:
+
+  ```bash
+  # trim the pauses without chopping the start of a word
+  aud detect silence in.wav \
+    | aud cut --pad-in 80 --pad-out 80 --snap transient --snap-window 60 \
+    | aud render in.wav out.wav
+  ```
+
+`detect fillers` needs the optional `speech` extra. Without it, that one verb refuses and names
+the extra; it never falls back to an energy-only guess, because those regions would look like
+words and `cut` would remove them.
+
+> **Status:** `detect`, `cut` and `strip-silence` are specified and registered but **not
+> implemented** in 0.3.0 — they parse their full documented argument surface, including every
+> edit-point flag above, and return `{"error": {"code": "not_implemented", ...}}`. No padding,
+> snap, fade or crossfade code exists. The two contract documents are written so callers can be
+> built against them.
 
 ### Keep the chain, re-use it
 
@@ -105,7 +177,11 @@ limiter's job. `verify` measures the finished file so the claim is checked rathe
 | Verb | | What it does |
 |---|---|---|
 | `analyze` | deterministic | What is actually in the file: LUFS, true peak, crest, bands, sibilance, ambience |
+| `detect transients` `detect silence` | deterministic | Where things are: onsets, quiet spans. Emits a regions document, not a plan |
+| `detect fillers` | deterministic, needs `aud[speech]` | "umm", "uh", "ehm" and long hesitations, with word-level timings |
 | `plan` | deterministic | Start an empty chain, or load one from a file |
+| `cut` | deterministic | Editing stage: remove a listed set of regions, crossfaded at every join |
+| `strip-silence` | deterministic | Editing stage: remove or shorten the silences, by a rule rather than a list |
 | `deess` `dereverb` | deterministic | Repair stage |
 | `eq` `eq-match` `curve` | deterministic | Tone stage, including extracting a curve from one file and applying it to another |
 | `compress` | deterministic | Multiband compression and dynamic range control |
@@ -122,7 +198,9 @@ limiter's job. `verify` measures the finished file so the claim is checked rathe
 ## Deterministic paths need no credentials
 
 Everything marked deterministic above runs with no AI provider configured and no credential
-present. It spends nothing and is safe to call freely, including from an agent in a loop.
+present. It spends nothing and is safe to call freely, including from an agent in a loop. That
+includes `detect fillers`: the `speech` extra is a **local** model, not a provider — it needs
+an install, never a credential.
 
 Only `advise` and `master --auto` need a provider. Without one they refuse and say so, naming
 the remedy, rather than guessing a chain. Any one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
@@ -138,7 +216,8 @@ a plan; the same deterministic engine renders that plan as it would one you type
 One JSON document on stdout. Success is `{"result": ...}`; failure is
 `{"error": {"code", "message", "remedy"}}` with a non-zero exit. Progress and diagnostics go to
 stderr, never stdout. A plan on stdout is the plan document itself, so verbs pipe into each
-other without unwrapping.
+other without unwrapping — and so is a regions document, which is why `detect` pipes straight
+into `cut`.
 
 ## From Python
 
@@ -155,6 +234,7 @@ same results.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it is built: plan document, chain topology, module layout |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Settings, credentials, precedence |
 | [contracts/plan.v1.md](contracts/plan.v1.md) | The plan document another program may parse |
+| [contracts/regions.v1.md](contracts/regions.v1.md) | The regions document `detect` emits and `cut` consumes |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, lint, test, conformance |
 
 ## Licence

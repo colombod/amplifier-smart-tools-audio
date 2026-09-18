@@ -19,8 +19,18 @@ from aud.schemas import AudError
 
 PLAN_FORMAT = 1
 
-# Canonical mastering order: repair -> tone -> dynamics -> character -> loudness -> limiting.
+# Canonical order: editing -> repair -> tone -> dynamics -> character -> loudness -> limiting.
+#
+# Editing is FIRST, and not by preference. `cut` carries absolute positions measured on the
+# source timeline, so every stage that alters that timeline -- `stretch` included -- has to run
+# after it. And every measurement downstream is a measurement of a duration: loudness targeted
+# over material that is later removed describes a file that does not exist.
+#
+# This list is the executable form of contracts/plan.v1.md's canonical order. If they disagree,
+# one of them is lying to a caller.
 STAGE_ORDER: list[str] = [
+    "cut",
+    "strip_silence",
     "stretch",
     "pitch",
     "dereverb",

@@ -12,6 +12,7 @@ src/aud/SMART_TOOL.md    # the manifest -- what the tool is and what it needs
 src/aud/core/            # io, analysis, plan, engine, config, errors
 src/aud/dsp/             # filters, crossover, dynamics, limiter, saturation, loudness
 contracts/plan.v1.md     # the plan document other programs may parse
+contracts/regions.v1.md  # the regions document `detect` emits and `cut` consumes
 docs/                    # VISION (why), ARCHITECTURE (how), CONFIGURATION (settings)
 tests/
 ```
@@ -35,7 +36,8 @@ decision an implementation task gets to make; it is a relicensing proposal and m
 one. See [docs/VISION.md](docs/VISION.md).
 
 Permitted today: `numpy` (BSD), `scipy` (BSD), `soundfile` (BSD-3), `pyloudnorm` (MIT),
-`pydantic` (MIT), `pyyaml` (MIT), and the optional `python-stretch` (Signalsmith Stretch, MIT).
+`pydantic` (MIT), `pyyaml` (MIT), and the optional extras `python-stretch` (Signalsmith Stretch,
+MIT) and `faster-whisper` (MIT).
 **Any new dependency needs its licence checked and named in the pull request** — MIT, BSD, ISC,
 Apache-2.0 or PSF. Anything GPL-family, or unlicensed, is a no.
 
@@ -68,11 +70,16 @@ being installed and can rewrite environment state for unrelated code.
 The caller is usually an agent, and an agent cannot act on a stack trace.
 
 ```json
-{"error": {"code": "E_PLAN_PARAM_RANGE",
+{"error": {"code": "bad_param",
            "message": "compress.bands[0].ratio is 0.5; ratio must be >= 1.0",
            "remedy": "Set ratio to 1.0 or greater; 1.0 means no compression in that band."}}
 ```
 
+- **Error codes are lowercase `snake_case`** — `bad_param`, `unknown_stage`,
+  `crossfade_exceeds_gap`. Not `E_PLAN_PARAM_RANGE`, not any other spelling. This is settled:
+  lowercase is what callers actually observe in the envelope and what the tests assert, and the
+  contracts were rewritten to match the code rather than the other way round. Do not reopen it;
+  do not introduce a second convention for a new subsystem.
 - One JSON document on stdout, nothing else. Progress and diagnostics go to stderr.
 - Failure exits non-zero.
 - `message` says what was found, `remedy` says what to do about it.
@@ -106,6 +113,19 @@ param with a behaviour-preserving default stays in format 1 and updates that fil
 field, changing a type, changing a **default**, or changing rejection semantics is a breaking
 change: it needs `plan_format: 2` and a new `contracts/plan.v2.md`. Do not edit `plan.v1.md` to
 describe different behaviour — stored plans and third-party generators still read it.
+
+Two clarifications the 0.2.0 editing stages forced, both now written into the contract itself:
+
+- **Inserting a new stage name** into the canonical order — even at the front — is *additive*.
+  No stored plan can contain a name that did not exist (unknown names are rejected), so no
+  stored plan renders differently. **Reordering names already in the format** is breaking. The
+  test is "can an existing document render differently", not "did the array change".
+- **`contracts/regions.v1.md` is a second contract with the same rules**, versioned by its own
+  `regions_format` integer. A change to what a detector reports does not force `plan_format` to
+  move, or the reverse.
+
+`src/aud/plan.py::STAGE_ORDER` is the executable form of the canonical order. If it and the
+contract disagree, one of them is lying to a caller — change them in the same commit.
 
 ## 8. Code conventions
 

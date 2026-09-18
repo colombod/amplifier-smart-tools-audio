@@ -46,6 +46,8 @@ def test_ordered_keeps_insertion_order_within_the_same_stage_name() -> None:
 
 def test_stage_order_is_the_canonical_mastering_chain() -> None:
     assert STAGE_ORDER == [
+        "cut",
+        "strip_silence",
         "stretch",
         "pitch",
         "dereverb",
@@ -58,6 +60,25 @@ def test_stage_order_is_the_canonical_mastering_chain() -> None:
         "loudness",
         "limit",
     ]
+
+
+def test_editing_stages_render_before_any_timeline_or_measurement_stage() -> None:
+    """The reason behind the order, not just the order.
+
+    `cut` carries absolute positions measured on the source timeline, so
+    `stretch` -- which re-times the programme -- must run after it. And
+    `loudness` averages over duration, so it must measure material that
+    survives the edit. See contracts/plan.v1.md, "Why editing is first".
+    """
+    plan = new_plan()
+    plan = append(plan, "limit", {"ceiling_dbtp": -1.0})
+    plan = append(plan, "stretch", {"ratio": 0.98})
+    plan = append(plan, "loudness", {"target_lufs": -14.0})
+    plan = append(plan, "strip_silence", {})
+    plan = append(plan, "cut", {"regions": []})  # appended last, renders first
+    names = [stage.stage for stage in ordered(plan)]
+    assert names[:2] == ["cut", "strip_silence"]
+    assert names.index("cut") < names.index("stretch") < names.index("loudness")
 
 
 def test_round_trip_write_then_read_is_lossless() -> None:

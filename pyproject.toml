@@ -1,7 +1,7 @@
 [project]
 name = "aud"
-version = "0.1.0"
-description = "Master and clean up audio: analyse a file, then run it through a mastering chain -- de-ess, de-verb, EQ, EQ-match to a reference, multiband compression, saturation, controlled reverb, loudness and true-peak limiting. Chainable: every verb appends to a mastering plan and one render applies the whole chain"
+version = "0.3.0"
+description = "Master and clean up audio: analyse a file, find what is in it (onsets, silences, filler words), then run it through a mastering chain -- cut, strip silence, de-ess, de-verb, EQ, EQ-match to a reference, multiband compression, saturation, controlled reverb, loudness and true-peak limiting. Chainable: every verb appends to a mastering plan and one render applies the whole chain"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -22,6 +22,20 @@ dependencies = [
 #   uv tool install 'aud[stretch] @ git+https://github.com/colombod/amplifier-smart-tools-audio'
 stretch = [
     "python-stretch>=0.3,<1.0",
+]
+
+# Word-level speech timings, needed only by `aud detect fillers` to locate
+# "umm"/"uh"/"ehm". faster-whisper is MIT, ships as a pure-Python package over
+# CTranslate2 wheels (so `pip install` needs no compiler), runs on CPU without
+# CUDA, and its model download is idempotent and cached -- which together mean
+# an agent can install and first-run it unattended and expect it to succeed.
+# whisper.cpp bindings need a build toolchain; the OpenAI `whisper` package
+# pulls in torch. Neither is a dependency an unattended install should take.
+# Nothing GPL-family, here or anywhere: see docs/VISION.md.
+#
+#   uv tool install 'aud[speech] @ git+https://github.com/colombod/amplifier-smart-tools-audio'
+speech = [
+    "faster-whisper>=1.0,<2.0",
 ]
 
 [project.urls]

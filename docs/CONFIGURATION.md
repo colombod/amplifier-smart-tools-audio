@@ -180,6 +180,34 @@ Everything else keeps working. That is the promise the tool is built around, and
 rather than assumed: CI asserts that none of the five variables is present in the environment
 before running the deterministic suite.
 
+## Optional extra: speech recognition (`aud[speech]`)
+
+Not configuration either, and **not a credential**. One verb — `aud detect fillers` — needs
+word-level speech timings to locate "umm", "uh" and "ehm". Those come from `faster-whisper`, a
+**local** model, installed as an extra of this package:
+
+```bash
+uv tool install 'aud[speech] @ git+https://github.com/colombod/amplifier-smart-tools-audio'
+```
+
+It is worth being precise about what this is and is not:
+
+- **No AI provider, no credential, no network call at run time.** The model is downloaded once
+  and cached; after that `detect fillers` runs offline. It has nothing to do with the provider
+  variables above, and `advise`/`master` have nothing to do with this extra.
+- **`faster-whisper` is MIT**, and CPU-capable without CUDA. The alternatives were rejected on
+  install cost, not on quality: `whisper.cpp` bindings need a build toolchain, and OpenAI's
+  `whisper` package pulls in torch. An agent should be able to install this unattended and have
+  it work.
+- **With the extra absent, exactly one verb is lost.** `detect fillers` exits non-zero with
+  `speech_extra_missing`, naming the extra and pointing here. `detect silence`, `detect
+  transients`, `cut`, `strip-silence` and the whole mastering chain are unaffected — none of
+  them needs to know what was said.
+
+It does **not** degrade to an energy-only guess when the extra is missing. A hesitation detector
+presented as a filler-word detector would report regions a caller would reasonably take for
+words, and `cut` would then remove them.
+
 ## Optional host dependency: ffmpeg
 
 Not configuration, but the other thing `check` reports. WAV, FLAC and AIFF need nothing beyond

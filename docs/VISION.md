@@ -22,6 +22,27 @@ Two kinds of tool already solve it, and neither fits the caller we care about:
 So there is a gap: a scriptable, inspectable, permissively licensed mastering tool whose output
 is a document rather than an opinion.
 
+## Finishing a spoken-word recording includes cleaning it up
+
+The same person with the same nearly-right file has a second problem, and it is not a different
+problem. The interview has four seconds of dead air before every answer. There are nine "umm"s
+in the first minute. The recording is twenty-eight minutes long and eight of those are pauses.
+Nobody describes that as a separate job from "make this publishable" — they say "tighten this
+up", and they mean both.
+
+So cutting belongs in the same chain as mastering, not in a tool beside it. Splitting them would
+mean two passes over the audio, two renders, two quantisations — and, worse, a loudness number
+measured against material that the other tool then removes. Loudness is an average over
+duration; a cut invalidates it. The only way that stays correct is if the cut and the loudness
+target are stages of one ordered chain, with the cut first. That is not a convenience of
+combining them; it is the reason they cannot sensibly be apart.
+
+It does mean `aud` reaches for speech recognition to find filler words, which is the one place
+it touches language. It stays a means and never becomes an output: `aud` will tell you there is
+an "umm" at 4:12.380 and remove it. It will not hand you a transcript. Transcription is a
+different product with different quality bars, and claiming it here would be claiming something
+this tool is not built to be good at.
+
 ## Who it is for
 
 - **Someone with a finished file.** Podcast episode, voice-over, a mix that came back from
@@ -89,7 +110,9 @@ a proposal to relicense the tool, and should be made in those words.
 - **"Make it sound good" with no measurement behind it.** There is no magic button. Even
   `master --auto` runs on measurements, produces a plan you can read, and verifies the result
   against the targets it was given.
-- **Video, transcription, or generating audio.** Wrong tool in all three cases; the manifest
-  says so, so a dispatcher does not have to guess.
+- **Video, transcription as an output, or generating audio.** Wrong tool in all three cases; the
+  manifest says so, so a dispatcher does not have to guess. `detect fillers` runs a recogniser
+  to find out *where* the filler words are — the transcript is a means and is not returned. "What
+  does this say" is a question for a transcription tool.
 - **Hold credentials.** It reads the provider variable you already have. There is no login, no
   keychain entry, and nothing of yours persisted anywhere by this tool.

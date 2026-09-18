@@ -41,11 +41,17 @@ STAGE_VERB_NAMES = (
     "limit",
 )
 # Verbs whose stdout is the plan document itself, unwrapped.
+# `cut` and `strip-silence` belong here too once they are implemented -- they
+# are stage verbs -- but they are listed in _NOT_YET_BUILT below and never
+# reach the output path, so adding them now would be a claim, not a wiring.
 PLAN_OUTPUT_VERBS = frozenset({"plan", *STAGE_VERB_NAMES})
 # Verbs that consume an incoming plan (read from stdin when stdin is not a TTY).
 PLAN_CONSUMING_VERBS = frozenset({*STAGE_VERB_NAMES, "render"})
-# Verbs whose capability does not exist yet in this release.
-_NOT_YET_BUILT = frozenset({"preset", "advise", "master"})
+# Verbs whose capability does not exist yet in this release. Their argument
+# surface is still registered (explicitly, where they take arguments) so that a
+# caller writing the eventual command gets `not_implemented` -- an answer about
+# the capability -- rather than a usage error about a flag that will exist.
+_NOT_YET_BUILT = frozenset({"preset", "advise", "master", "detect", "cut", "strip-silence"})
 
 
 class _UsageError(Exception):
@@ -77,6 +83,32 @@ def _float_list(text: str) -> list[float]:
         return [float(part) for part in text.split(",") if part]
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"expected comma-separated numbers, got {text!r}") from exc
+
+
+SNAP_MODES = ("zero_crossing", "silence", "transient", "none")
+CROSSFADE_SHAPES = ("equal_power", "linear")
+
+
+def _add_edit_point_arguments(parser: argparse.ArgumentParser, *, pad_default: float) -> None:
+    """Register the edit-point resolution surface shared by `cut` and `strip-silence`.
+
+    A region boundary is a NOMINAL position; where the blade falls is resolved
+    from it -- padded, then snapped within a bounded window, then joined with a
+    fade or a crossfade. Both editing stages take the identical set, and only
+    the padding default differs (see the call sites).
+
+    The value spellings are the document's spellings (`zero_crossing`, not
+    `zero-crossing`), so there is no translation layer between what
+    contracts/plan.v1.md promises and what the shell accepts.
+    """
+    parser.add_argument("--pad-out", dest="pad_out", type=float, default=pad_default)
+    parser.add_argument("--pad-in", dest="pad_in", type=float, default=pad_default)
+    parser.add_argument("--snap", choices=SNAP_MODES, default="zero_crossing")
+    parser.add_argument("--snap-window", dest="snap_window", type=float, default=20.0)
+    parser.add_argument("--fade-out", dest="fade_out", type=float, default=0.0)
+    parser.add_argument("--fade-in", dest="fade_in", type=float, default=0.0)
+    parser.add_argument("--crossfade", type=float, default=10.0)
+    parser.add_argument("--crossfade-shape", dest="crossfade_shape", choices=CROSSFADE_SHAPES, default="equal_power")
 
 
 def _build_parser() -> _Parser:
@@ -158,8 +190,43 @@ def _build_parser() -> _Parser:
     verify_parser.add_argument("--target", type=float, default=None)
     verify_parser.add_argument("--ceiling", type=float, default=None)
 
-    for name in _NOT_YET_BUILT:
-        sub.add_parser(name)
+    # Read-only detection. Emits a regions document (contracts/regions.v1.md),
+    # never a plan: these verbs find things, they do not schedule work.
+    detect_parser = sub.add_parser("detect")
+    detect_sub = detect_parser.add_subparsers(dest="detect_kind", required=True)
+    detect_transients_parser = detect_sub.add_parser("transients")
+    detect_transients_parser.add_argument("path")
+    detect_transients_parser.add_argument("--sensitivity", type=float, default=1.0)
+    detect_transients_parser.add_argument("--min-gap", dest="min_gap", type=float, default=50.0)
+    detect_silence_parser = detect_sub.add_parser("silence")
+    detect_silence_parser.add_argument("path")
+    # dB ABOVE the file's measured noise floor, not an absolute dBFS value.
+    detect_silence_parser.add_argument("--threshold", type=float, default=6.0)
+    detect_silence_parser.add_argument("--min-len", dest="min_len", type=float, default=400.0)
+    detect_fillers_parser = detect_sub.add_parser("fillers")
+    detect_fillers_parser.add_argument("path")
+    detect_fillers_parser.add_argument("--words", type=str, default="umm,uhm,uh,ehm,er,ah")
+    detect_fillers_parser.add_argument("--min-pause", dest="min_pause", type=float, default=700.0)
+
+    # Editing stages. These DO append to the plan, at the front of canonical order.
+    cut_parser = sub.add_parser("cut")
+    cut_parser.add_argument("--regions", default=None)
+    # `cut` is handed positions a caller measured and means literally, so its
+    # padding defaults to none -- widening someone's stated edit unasked is a
+    # surprise. `strip_silence` finds its own boundaries from an energy
+    # threshold, whose bias is systematically INSIDE the speech, so padding is
+    # on by default there. See contracts/plan.v1.md#edit-point-resolution.
+    _add_edit_point_arguments(cut_parser, pad_default=0.0)
+
+    strip_silence_parser = sub.add_parser("strip-silence")
+    strip_silence_parser.add_argument("--threshold", type=float, default=6.0)
+    strip_silence_parser.add_argument("--min-len", dest="min_len", type=float, default=400.0)
+    strip_silence_parser.add_argument("--keep", type=float, default=150.0)
+    _add_edit_point_arguments(strip_silence_parser, pad_default=80.0)
+
+    for name in sorted(_NOT_YET_BUILT):
+        if name not in sub.choices:  # the ones above registered their real arguments
+            sub.add_parser(name)
 
     return parser
 

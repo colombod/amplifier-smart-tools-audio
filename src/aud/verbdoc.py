@@ -46,6 +46,266 @@ Parameters:
 Example:
   aud plan | aud deess --amount 6 | aud render in.wav out.wav
 """,
+    "detect": """\
+detect -- find things in the audio, without changing anything
+
+What it does:
+  Three read-only detectors. Each one measures the file and prints a
+  REGIONS document (contracts/regions.v1.md) -- not a plan. A regions
+  document says where things are: {start_s, end_s} plus fields specific to
+  what was found.
+
+    detect transients PATH   Onset positions, with a strength per onset.
+    detect silence PATH      Quiet spans, with peak and RMS level.
+    detect fillers PATH      "umm", "uh", "ehm" and long hesitations.
+
+  Nothing here appends to a mastering plan and nothing here writes a file.
+
+When to reach for it:
+  "Where are the pauses", "get rid of the umms and ehms", "tighten up this
+  recording". Pipe the result into 'aud cut' to remove what was found, in
+  the same command:
+
+    aud detect silence in.wav | aud cut | aud render in.wav out.wav
+
+The silence threshold is relative, on purpose:
+  --threshold is dB ABOVE this file's MEASURED noise floor, not an absolute
+  dBFS level. A fixed dBFS threshold is correct for exactly one recording
+  -- the one it was tuned on. A treated room may floor at -70 dBFS and a
+  phone in a kitchen at -38 dBFS; one fixed number finds nothing in the
+  first file and eats words in the second. The measured floor is reported
+  in the document, so the judgement can be checked.
+
+Why transients matter even when you only asked about silence:
+  A silence boundary that sits right next to an onset must not be trimmed
+  INTO the onset -- that truncates an attack, which is the one editing
+  mistake that always sounds like a fault rather than a choice. So onset
+  information acts as an advisory constraint on where a silence boundary
+  may be reported; it is never a source of silence regions itself. The
+  same knowledge is what 'cut --snap transient' uses at render time.
+
+'detect fillers' needs the speech extra:
+  Word-level timings need speech recognition. That is the optional
+  'speech' extra (faster-whisper, MIT). It is a LOCAL model -- no AI
+  provider, no credential, no network call at run time. With the extra
+  absent, 'detect fillers' REFUSES and names it; it never falls back to an
+  energy-only guess, because those regions would look like words and 'cut'
+  would remove them.
+
+Parameters:
+  transients PATH  --sensitivity FLOAT  Peak-picking sensitivity. Default 1.0.
+                   --min-gap FLOAT      Merge onsets closer than this, ms. Default 50.
+  silence PATH     --threshold FLOAT    dB above the measured noise floor. Default 6.0.
+                   --min-len FLOAT      Ignore silences shorter than this, ms. Default 400.
+  fillers PATH     --words STR          Comma-separated filler vocabulary.
+                   --min-pause FLOAT    Report pauses at least this long, ms. Default 700.
+
+Status:
+  Not yet built in this release. The regions document it will emit is
+  specified now in contracts/regions.v1.md, so a caller can be written
+  against it.
+
+Example:
+  aud detect silence in.wav --threshold 6 --min-len 400   # (planned)
+""",
+    "cut": """\
+cut -- editing stage: remove an explicit list of regions
+
+What it does:
+  Appends a cut stage to the plan. At render time the listed regions are
+  removed, each boundary is RESOLVED into an actual cut point (see below),
+  and each resulting join is crossfaded. The regions come from a regions
+  document -- piped in from 'aud detect' on stdin, or read from a file
+  with --regions.
+
+When to reach for it:
+  You already know what to remove: a detect run, or a list you produced
+  some other way.
+
+    aud detect silence in.wav | aud cut | aud render in.wav out.wav
+
+An edit point is NOT the position in the document:
+  The regions document says where a boundary IS. Where the blade should
+  FALL is a separate decision, and getting it wrong is audible twice: a
+  cut through the attack of a word truncates it, and a cut at a non-zero
+  sample value clicks. So every position is treated as NOMINAL and
+  resolved before anything is removed -- padded, then snapped inside a
+  bounded window, then joined.
+
+  --snap picks what the point is moved towards:
+
+    zero_crossing  Nearest zero crossing. THE DEFAULT, and the floor: it
+                   costs nothing, moves the point by under a millisecond,
+                   and removes the sample discontinuity that clicks.
+    silence        The quietest place in the window -- the local minimum
+                   of the energy envelope. The blade lands where there is
+                   least to damage.
+    transient      Just BEFORE the nearest onset, so an attack is never
+                   cut through. Always moves the point EARLIER: a sound
+                   that has begun and is then chopped reads as a glitch,
+                   where removing it whole does not.
+    none           Take the position literally. No search, no alignment.
+                   For a caller that has already chosen exact samples.
+
+  'silence' and 'transient' finish with a zero-crossing alignment, because
+  they answer a different question (WHERE the edit belongs, coarsely) from
+  the one zero crossing answers (how it is finally aligned, to a sample).
+
+  A snap is BOUNDED and REFUSABLE. It never moves past the region's other
+  boundary, into a neighbouring region, or outside the file. If nothing
+  acceptable exists inside --snap-window it KEEPS the original position and
+  records that it did, in the render report. It never widens the window and
+  never quietly substitutes another rule -- a snap that silently fails is
+  worse than one that refuses, because the file still plays and you find
+  out after delivery.
+
+Padding only ever shrinks a cut:
+  --pad-out keeps programme at the end of the outgoing side, --pad-in at
+  the start of the incoming side. Both make the removal SMALLER; neither
+  can extend one. That is why they are safe to reach for when a join
+  sounds clipped. 'cut' defaults both to 0: the regions are a list you
+  measured and mean literally, so widening them unasked would surprise.
+
+Why equal power is the default crossfade shape:
+  Two uncorrelated signals sum in POWER, not amplitude. Under a linear
+  crossfade both sides sit at gain 0.5 in the middle, so the sum is half
+  the power of either -- an audible ~3 dB dip through every join. Equal
+  power holds the summed power constant instead. 'linear' is offered
+  because the argument inverts for CORRELATED material (a join across a
+  sustained tone), where equal power bumps +3 dB and linear is flat.
+
+  A crossfade consumes material on BOTH sides of the join: the two kept
+  slices must overlap by its length, and that overlap comes out of what is
+  being removed. A crossfade longer than the gap is an ERROR
+  (crossfade_exceeds_gap), not something silently clamped.
+
+Why it renders FIRST, ahead of everything else:
+  Cutting changes the timeline that every later stage measures. If
+  'loudness' targets -14 LUFS across material that 'cut' then removes, the
+  number it hit describes a file that no longer exists. Region positions
+  are also offsets into the SOURCE timeline, so any stage that re-times
+  the programme ('stretch') has to run after the cut, not before it.
+
+  Consequence worth knowing: a plan containing a cut stage is bound to the
+  file its regions were measured on. It is not reusable across episodes
+  the way a tonal plan is. Use 'strip-silence' for the reusable version.
+
+Parameters:
+  --regions PATH          Regions document to cut. Default: read from stdin.
+  --pad-out FLOAT         Programme kept at the end of the outgoing side, ms.
+                          Default 0.
+  --pad-in FLOAT          Programme kept at the start of the incoming side,
+                          ms. Default 0.
+  --snap MODE             zero_crossing | silence | transient | none.
+                          Default zero_crossing.
+  --snap-window FLOAT     How far a point may move, ms. Default 20. Must be
+                          > 0 and <= 1000, else snap_window_invalid.
+                          20 is ample for zero_crossing; 'silence' and
+                          'transient' usually want 50-150.
+  --fade-out FLOAT        Fade at a kept boundary with NO crossfade partner
+                          (programme head/tail, or --crossfade 0), ms.
+                          Default 0.
+  --fade-in FLOAT         As above, incoming side, ms. Default 0.
+  --crossfade FLOAT       Crossfade at each join, ms. Default 10.
+  --crossfade-shape SHAPE equal_power | linear. Default equal_power.
+
+What the render report tells you:
+  Per edit point: the nominal position, where it resolved to, how far it
+  moved, which rule placed it, and whether a requested snap failed. Without
+  that, smart placement is unfalsifiable -- a snap that worked and a snap
+  that quietly did nothing both produce a file.
+
+Status:
+  Not yet built in this release: the flags above parse, and the verb
+  returns {"error": {"code": "not_implemented", ...}}. No padding, snap,
+  fade or crossfade code exists yet. See contracts/plan.v1.md for the
+  stage's parameters and contracts/regions.v1.md for what it consumes.
+
+Worked example -- trim the pauses without chopping the start of a word:
+  aud detect silence in.wav \\
+    | aud cut --pad-in 80 --pad-out 80 --snap transient --snap-window 60 \\
+    | aud render in.wav out.wav                                    # (planned)
+
+  Read it as: find the quiet spans; keep 80 ms of programme either side of
+  each one so nothing sounds clipped; then, if an onset lies within 60 ms
+  of where the blade would land, move the blade to just before it rather
+  than through it; join with the default 10 ms equal-power crossfade.
+""",
+    "strip-silence": """\
+strip-silence -- editing stage: remove or shorten the silences
+
+What it does:
+  Appends a strip_silence stage to the plan. Unlike 'cut', it carries NO
+  positions: it detects the silences at render time using the parameters
+  below, then removes or shortens each one. The boundaries it finds are
+  NOMINAL and are resolved into real cut points by exactly the same rules
+  'cut' uses -- see 'aud cut --help' for the full explanation of --snap,
+  the padding direction, and why equal power is the default shape.
+
+When to reach for it:
+  "Trim the silences", "tighten up this recording" -- and especially when
+  the same treatment should apply to every episode. Because it stores a
+  rule rather than positions, the plan means the same thing on any file:
+
+    aud plan | aud strip-silence --min-len 400 --keep 150 | aud render in.wav out.wav
+
+  That is the difference from 'cut', which stores positions and is
+  therefore bound to one file.
+
+The threshold is relative, on purpose:
+  --threshold is dB ABOVE the file's MEASURED noise floor, not an absolute
+  dBFS level -- see 'aud detect --help' for why a fixed number is wrong
+  for every recording but the one it was tuned on.
+
+Why padding is ON by default here and off on 'cut':
+  An energy threshold's boundary sits systematically INSIDE the speech --
+  the tail of a word drops below the threshold while the word is still
+  going, and the next word's attack crosses back over it a few
+  milliseconds after it has started. Padding corrects a known bias, so it
+  defaults to 80 ms each side. 'cut' is handed a list you measured and
+  mean literally, so it defaults to none.
+
+  Padding only ever SHRINKS the removal. If --pad-out plus --pad-in is at
+  least as long as a silence, that silence is not removed at all, and the
+  render report says which ones and why -- failing the whole render over
+  one marginal pause would be worse, and dropping it silently worse still.
+
+Parameters:
+  --threshold FLOAT       dB above the measured noise floor. Default 6.0.
+  --min-len FLOAT         Leave silences shorter than this alone, ms.
+                          Default 400.
+  --keep FLOAT            Silence left behind in place of each one, ms.
+                          Default 150. 0 removes it entirely.
+  --pad-out FLOAT         Programme kept at the end of the outgoing side, ms.
+                          Default 80.
+  --pad-in FLOAT          Programme kept at the start of the incoming side,
+                          ms. Default 80.
+  --snap MODE             zero_crossing | silence | transient | none.
+                          Default zero_crossing.
+  --snap-window FLOAT     How far a point may move, ms. Default 20. Must be
+                          > 0 and <= 1000, else snap_window_invalid.
+  --fade-out FLOAT        Fade at a kept boundary with NO crossfade partner,
+                          ms. Default 0.
+  --fade-in FLOAT         As above, incoming side, ms. Default 0.
+  --crossfade FLOAT       Crossfade at each join, ms. Default 10.
+  --crossfade-shape SHAPE equal_power | linear. Default equal_power.
+
+Status:
+  Not yet built in this release: the flags above parse, and the verb
+  returns {"error": {"code": "not_implemented", ...}}. No detection,
+  padding, snap, fade or crossfade code exists yet. See
+  contracts/plan.v1.md for the stage's parameters.
+
+Worked example -- trim the pauses without chopping the start of a word:
+  aud plan \\
+    | aud strip-silence --min-len 400 --keep 150 --snap transient --snap-window 60 \\
+    | aud render in.wav out.wav                                    # (planned)
+
+  Read it as: find pauses of at least 400 ms; leave 150 ms of silence in
+  place of each; keep the default 80 ms of programme either side; and if an
+  onset lies within 60 ms of where the blade would land, move it to just
+  before that onset rather than through it.
+""",
     "deess": """\
 deess -- repair stage: tame harsh sibilance
 
@@ -274,8 +534,8 @@ Example:
 render -- apply a whole plan to a file in one pass
 
 What it does:
-  Reads the plan on stdin, reorders its stages into canonical mastering
-  order (repair -> tone -> dynamics -> character -> loudness -> limit)
+  Reads the plan on stdin, reorders its stages into canonical order
+  (editing -> repair -> tone -> dynamics -> character -> loudness -> limit)
   regardless of append order, and applies all of them in a single
   decode/filter/encode pass. Prints a {"result": ...} envelope, not a plan
   -- it is the end of the pipeline.
