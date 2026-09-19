@@ -13,6 +13,11 @@ chain, and they are the only two that do.
 **This is mastering and cleanup, not mixing.** It works on a finished stereo or mono file. It
 has no stems, no multitrack, no panning, no bus routing.
 
+![The aud mastering chain, animated: a waveform measured, cut, repaired, shaped and limited](docs/images/chain-animation.gif)
+
+*One waveform through the whole chain: measured, cut, repaired, split into bands and compressed,
+brought to −14 LUFS, then flattened against a −1.0 dBTP ceiling it never crosses.*
+
 ![The aud mastering chain: measure, find and cut, repair, shape, finish](docs/images/chain-01.png)
 
 ## Who it is for
