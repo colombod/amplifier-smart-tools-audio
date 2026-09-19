@@ -217,12 +217,35 @@ aligned, at sub-millisecond scale. They answer different questions, so composing
 fallback — and `none` is the only value that turns the alignment off, because it is the only
 value that says the caller has already decided.
 
+Because zero crossing is the floor, it runs even when `silence` or `transient` cannot find a
+coarse candidate. **A failed coarse search does not fall all the way to the raw, unaligned
+position — it falls one level, to the floor.** When that happens, `rule_applied` is
+`"zero_crossing_fallback"`: the rule that actually ran, distinct from both the rule requested and
+from `"none"`. `"none"` is reserved for the caller's literal `snap: "none"` and is never used to
+report an outcome — conflating an instruction with a failure is what let an unaligned splice ship
+silently. Only if the fallback *also* finds nothing — the window itself never changes sign — does
+a point take the raw padded position, and that state is reported as `"unaligned"`, with
+`snap_failed` always `true`: there is no floor under the floor.
+
 `transient` always moves a point **earlier, never later**. The failure it exists to prevent is a
 sound that has already started being cut off part-way through, and the fix for that is always to
 place the blade before the sound began, at either boundary. At `end` that shortens the removal;
 at `start` it lengthens it — removing a whole sound rather than leaving a truncated fragment of
 one. Transient detection earns its place beside silence detection for exactly this: without
 knowing where the attacks are, there is no way to avoid landing on one.
+
+**`transient` is asymmetric across the two boundaries it snaps, and that asymmetry matters for
+`snap_failed`.** At `end` — the resume point — a miss is a genuine failure: a real attack could be
+sitting just past the search window, and truncating it is exactly what this rule exists to
+prevent, so a miss there sets `snap_failed: true`. At `start` — the trailing edge into whatever is
+being removed — the search window never extends past this region's own end (see
+[the snap invariant](#the-snap-invariant)), so there is structurally nothing upstream of the
+boundary left to protect; a miss there is the expected outcome, not a failure, and `snap_failed`
+stays `false`. Both cases still get `rule_applied: "zero_crossing_fallback"` (or `"unaligned"` if
+even the floor finds nothing) — only `snap_failed` differs between them. Without this distinction,
+`snap_failed` fires on essentially every silence-region start (there is rarely a new sound
+beginning at the trailing edge into a gap), training a caller to ignore the flag — and a caller
+that ignores `snap_failed` will not notice the boundary where it actually matters.
 
 #### The snap invariant
 
@@ -236,9 +259,13 @@ A resolved point must satisfy **all** of these. The search window is the interse
 4. It never leaves the file: `0 ≤ resolved ≤ duration`.
 
 **If no acceptable point exists inside that window, the resolver keeps the position it had and
-records that it did.** It does not widen the window, and it does not quietly substitute a
-different rule. The record is `"snap_failed": true` on that edit point, with the rule that
-actually ran and a reason.
+records that it did.** It does not widen the window. It also does not quietly stay unaligned when
+zero crossing itself could still run — zero crossing is the floor under `silence` and `transient`
+(see [Snap](#snap)), so a failed coarse search still falls to the floor rather than to the raw
+position. The record is `"snap_failed": true` on that edit point (except at a `transient`
+`start` boundary, where the rule does not apply by construction — see [Snap](#snap)), with the
+rule that actually ran (`rule_applied`, which may legitimately differ from `snap_requested`) and a
+reason. Only when the floor itself finds nothing does a point take the raw, unaligned position.
 
 A snap that silently fails is worse than one that refuses, because the caller believes the edit
 was placed well and the file says otherwise — and it says so only on playback, after delivery.
@@ -293,7 +320,7 @@ entry per resolved boundary:
   "stage": "strip_silence",
   "regions_removed": 11,
   "regions_dropped_by_padding": 1,
-  "snap_failures": 1,
+  "snap_failures": 0,
   "edit_points": [
     {
       "region_index": 3,
@@ -312,16 +339,23 @@ entry per resolved boundary:
       "boundary": "start",
       "nominal_s": 41.002000,
       "padded_s": 41.082000,
-      "resolved_s": 41.082000,
-      "moved_ms": 80.0,
+      "resolved_s": 41.081750,
+      "moved_ms": 79.750,
       "snap_requested": "transient",
-      "rule_applied": "none",
-      "snap_failed": true,
-      "reason": "no onset within 20.0 ms of the padded position"
+      "rule_applied": "zero_crossing_fallback",
+      "snap_failed": false,
+      "reason": "no onset within 20.0 ms of the padded position; not expected at a region's start boundary, used zero_crossing instead"
     }
   ]
 }
 ```
+
+The second entry shows the common case: a `transient` search at a `start` boundary found no
+onset — expected, since the trailing edge into a removed span rarely has one — so `zero_crossing`
+ran as the floor instead. `rule_applied` differs from `snap_requested` and `reason` explains why,
+but `snap_failed` stays `false` because the rule did not apply here by construction (see
+[Snap](#snap)). Had this been an `end` boundary instead, the same miss would have set
+`snap_failed: true` while still resolving to the same fallback-aligned position.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -332,9 +366,9 @@ entry per resolved boundary:
 | `resolved_s` | float | Where the blade actually fell. |
 | `moved_ms` | float | `(resolved_s − nominal_s) × 1000`. Signed; negative is earlier. |
 | `snap_requested` | string | The `snap` value asked for. |
-| `rule_applied` | string | The rule that actually placed the point. Equal to `snap_requested` on success. |
-| `snap_failed` | boolean | `true` when the requested rule found nothing acceptable in the window. |
-| `reason` | string or null | Non-null exactly when `snap_failed` is `true`, or when an invariant clipped the window. |
+| `rule_applied` | string | The rule that actually placed the point: one of `zero_crossing`, `silence`, `transient`, `zero_crossing_fallback` (the floor ran because the requested coarse rule found nothing), `unaligned` (nothing ran at all — the raw padded position), or `none`. Equal to `snap_requested` on a plain success. `none` appears **only** when `snap_requested` is `"none"` — it is never used to report an outcome. |
+| `snap_failed` | boolean | `true` when the requested rule found nothing acceptable in the window **and the rule applied at this boundary** (see [Snap](#snap) for the one documented exception: `transient` at a `start` boundary). |
+| `reason` | string or null | Non-null when `snap_failed` is `true`, when an invariant clipped the window, or when `rule_applied` differs from `snap_requested` (a fallback ran, whether or not it counted as a failure). |
 
 Without this, smart placement is unfalsifiable: a caller has no way to tell a snap that worked
 from a snap that quietly did nothing, because both produce a file. `snap_failures` is there so

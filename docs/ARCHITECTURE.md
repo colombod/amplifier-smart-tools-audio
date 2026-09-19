@@ -2,6 +2,38 @@
 
 The mechanics. Why this tool exists and what it refuses to do is [VISION.md](VISION.md).
 
+## 0. Install it, then follow the signal
+
+```bash
+uv tool install git+https://github.com/colombod/amplifier-smart-tools-audio
+aud check          # what this host has, and what each gap costs you
+```
+
+Then the whole job, as one shell command:
+
+```bash
+aud detect silence in.wav \
+  | aud cut \
+  | aud deess \
+  | aud eq --hpf 60 \
+  | aud compress --bands 150,1200,6000 \
+  | aud loudness --target -14 \
+  | aud limit --ceiling -1.0 \
+  | aud render in.wav out.wav
+```
+
+![The aud mastering chain: measure, find and cut, repair, shape, finish](images/chain.png)
+
+Five phases, left to right. **Measure** reports what is actually there and changes nothing.
+**Find and cut** locates pauses, onsets and filler words, then removes them with the blade
+placed deliberately rather than wherever the detector's boundary fell. **Repair** reduces a
+room and tames sibilance. **Shape** is tone and dynamics — including multiband compression,
+where the signal is split at Linkwitz-Riley crossovers, each band is treated on its own, and
+the bands are recombined. **Finish** hits a loudness target and holds a true-peak ceiling.
+
+Every verb but `render` only appends to a plan. Nothing touches a sample until `render`,
+which applies the entire chain in a single pass. The rest of this document is how that works.
+
 ## 1. The plan document is the central contract
 
 Nothing in `aud` is a hidden session state. A chain is a JSON document:

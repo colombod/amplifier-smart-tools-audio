@@ -49,8 +49,16 @@ CAPABILITIES: tuple[tuple[str, str, str], ...] = (
     ("check", "deterministic", "Report what this host has installed and can reach."),
     ("config", "deterministic", "Report effective settings and which tier each came from."),
     ("manifest", "deterministic", "Print this tool's validated SMART_TOOL.md manifest."),
-    ("advise", "model-backed", "Read the measurements and say what the chain should be, and why."),
-    ("master", "model-backed", "Choose the chain, apply it, and verify the result."),
+    (
+        "advise",
+        "model-backed",
+        "Read the measurements and say what the chain should be, and why -- needs a provider credential.",
+    ),
+    (
+        "master",
+        "model-backed",
+        "Choose the chain, apply it, and verify the result -- needs a provider credential.",
+    ),
 )
 
 

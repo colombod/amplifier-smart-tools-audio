@@ -666,47 +666,81 @@ Example:
 advise -- read the measurements and say what the chain should be
 
 What it does:
-  Analyzes a file, then asks a model to recommend a mastering chain and
-  explain why, without applying it.
+  Runs the same measurement 'aud analyze' would, then asks a model to
+  choose a mastering chain -- which stages, what parameters, and why --
+  grounded in those numbers. The model never sees or touches the audio
+  itself, only the measurement report; its proposed chain is validated
+  through the exact same stage builders every other verb uses ('aud eq',
+  'aud compress', ...) before it becomes the plan you get back. Prints the
+  plan itself on stdout, unwrapped, so it pipes straight into 'aud render'
+  -- the per-stage reasoning goes to stderr, since stdout has to stay a
+  clean plan document for the pipe to work.
+
+When to reach for it:
+  "What should I do to this file" without wanting to build the chain by
+  hand, or as a starting point to edit before rendering.
 
 Requires:
   One of ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY
-  or AZURE_OPENAI_API_KEY.
+  or AZURE_OPENAI_API_KEY. Without one, this refuses with
+  {"error": {"code": "provider_credential_missing", ...}} naming the
+  accepted variables -- see docs/CONFIGURATION.md. Every deterministic verb
+  keeps working regardless.
 
-Status:
-  Not yet built in this release: the argument below parses, and the verb
-  returns {"error": {"code": "not_implemented", ...}}. Use 'aud analyze'
-  plus the deterministic stage verbs to build a chain by hand until this
-  lands.
+What the model may choose from:
+  Exactly eight stages -- deess, dereverb, eq, compress, saturate, reverb,
+  loudness, limit -- the ones a measurement report alone can justify.
+  Editing (cut/strip-silence) needs detected regions, not measurements, so
+  it is out of scope for advise; run 'aud detect' and build those by hand.
 
 Parameters:
-  path (positional)  Path to the audio file to analyze.
+  path (positional)   Path to the audio file to measure and advise on.
+  --target FLOAT      Target integrated loudness in LUFS, told to the
+                       model. Default -14.0.
+  --reference PATH    Optional reference file. Its measurements (never its
+                       audio) are given to the model too, to inform tonal
+                       choices such as EQ peaks.
+  --model NAME        Override the model name for whichever provider is
+                       configured. Default: a per-provider built-in,
+                       overridable by the AUD_MODEL environment variable
+                       too.
 
 Example:
-  aud advise in.wav   # (planned)
+  aud advise in.wav --target -14 | aud render in.wav out.wav
 """,
     "master": """\
 master -- choose the chain, apply it, and verify the result
 
 What it does:
-  The one-shot model-backed path: analyzes a file, decides on a chain,
-  renders it, and verifies the result against sensible targets.
+  The one-shot model-backed path: runs 'advise' internally, renders the
+  chain it proposes in a single pass, then verifies the render against the
+  loudness target and true-peak ceiling it was asked for. Prints one JSON
+  {"result": ...} document containing the chosen plan, the per-stage reason
+  the model gave, the render report, and the verify block.
+
+When to reach for it:
+  You know only what the file should end up like, not how to get there --
+  "master this to -14 LUFS" with no chain to hand-build.
 
 Requires:
   One of ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY
-  or AZURE_OPENAI_API_KEY.
-
-Status:
-  Not yet built in this release: the arguments below parse, and the verb
-  returns {"error": {"code": "not_implemented", ...}}. Use
-  'aud plan | ... | aud render' plus 'aud verify' to get the same result
-  by hand until this lands.
+  or AZURE_OPENAI_API_KEY. Without one, this refuses with
+  {"error": {"code": "provider_credential_missing", ...}} before touching
+  out_path -- see docs/CONFIGURATION.md.
 
 Parameters:
   in_path (positional)   Source audio file.
-  out_path (positional)  Destination audio file to write.
+  out_path (positional)  Destination audio file to write. Untouched if
+                         --dry-run is given, or if advise refuses.
+  --target FLOAT         Target integrated loudness in LUFS. Default -14.0.
+  --ceiling FLOAT        Target true-peak ceiling in dBTP. Default -1.0.
+  --reference PATH       Optional reference file; measured, not rendered
+                         with -- informs the model's tonal choices.
+  --model NAME           Override the model name. See 'aud advise --help'.
+  --dry-run              Choose and print the plan; render nothing.
 
 Example:
-  aud master in.wav out.wav   # (planned)
+  aud master in.wav out.wav --target -14
+  aud master in.wav out.wav --dry-run
 """,
 }

@@ -142,15 +142,56 @@ def test_snap_with_no_candidate_in_window_keeps_nominal_and_reports_failure():
     start_point = points[0]
     print(f"\n[resolve] no-candidate: {start_point}")
     assert start_point.snap_failed is True
-    assert start_point.rule_applied == "none"
+    # "none" is reserved for the caller's literal snap="none" -- a genuine
+    # failure to align is reported as "unaligned", never conflated with it.
+    assert start_point.rule_applied == "unaligned"
     assert start_point.resolved_s == start_point.padded_s == nominal_s
     assert start_point.reason is not None
 
 
-def test_transient_snap_fails_honestly_when_no_onset_is_in_window():
+def test_transient_snap_at_end_boundary_fails_honestly_when_no_onset_is_in_window():
+    """At `end` -- the resume point -- a miss is a genuine failure: a real
+    attack could be truncated. It must still land on a zero crossing
+    (the floor), and it must still be reported, just never as "none".
+    """
     sr = SR
-    x = _tone(1.0, freq=220.0, sr=sr)
-    region = [{"start_s": 0.5, "end_s": 0.9}]
+    freq = 220.0
+    period = 1.0 / freq
+    x = _tone(1.0, freq=freq, sr=sr)
+    # Offset the end boundary to a peak (not itself a zero crossing) so
+    # alignment is forced to actually move the point.
+    region = [{"start_s": 0.1, "end_s": 0.5 + period / 4.0}]
+
+    points, dropped = resolve_points(
+        x, sr, region, pad_out_ms=0.0, pad_in_ms=0.0, snap="transient", snap_window_ms=20.0, onsets=[]
+    )
+
+    assert dropped == []
+    end_point = points[1]
+    assert end_point.boundary == "end"
+    assert end_point.snap_failed is True
+    assert end_point.rule_applied == "zero_crossing_fallback"
+    assert end_point.rule_applied != "none"
+    assert end_point.reason is not None
+    assert "onset" in end_point.reason
+    # The floor still ran: the resolved position is a real zero crossing,
+    # not the raw (unaligned) padded position.
+    assert end_point.resolved_s != end_point.padded_s
+
+
+def test_transient_snap_at_start_boundary_with_no_onset_is_not_counted_as_a_failure():
+    """At `start` -- the trailing edge into whatever is being removed --
+    there is structurally nothing upstream of the boundary to protect, so
+    a miss there is the expected outcome, not a failure. The point still
+    gets zero-crossing aligned; it just is not flagged as snap_failed.
+    """
+    sr = SR
+    freq = 220.0
+    period = 1.0 / freq
+    x = _tone(1.0, freq=freq, sr=sr)
+    # Offset the start boundary to a peak (not itself a zero crossing) so
+    # alignment is forced to actually move the point.
+    region = [{"start_s": 0.5 + period / 4.0, "end_s": 0.9}]
 
     points, dropped = resolve_points(
         x, sr, region, pad_out_ms=0.0, pad_in_ms=0.0, snap="transient", snap_window_ms=20.0, onsets=[]
@@ -158,10 +199,16 @@ def test_transient_snap_fails_honestly_when_no_onset_is_in_window():
 
     assert dropped == []
     start_point = points[0]
-    assert start_point.snap_failed is True
-    assert start_point.rule_applied == "none"
+    assert start_point.boundary == "start"
+    assert start_point.snap_failed is False
+    assert start_point.rule_applied == "zero_crossing_fallback"
+    assert start_point.rule_applied != "none"
+    # A rule other than the one requested ran -- the report says so even
+    # though this was not counted as a failure.
     assert start_point.reason is not None
-    assert "onset" in start_point.reason
+    # The floor still ran: the resolved position is a real zero crossing,
+    # not the raw (unaligned) padded position.
+    assert start_point.resolved_s != start_point.padded_s
 
 
 def test_snap_never_crosses_into_a_neighbouring_region():

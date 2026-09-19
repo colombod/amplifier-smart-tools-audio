@@ -42,8 +42,12 @@ STAGE_VERB_NAMES = (
     "loudness",
     "limit",
 )
-# Verbs whose stdout is the plan document itself, unwrapped.
-PLAN_OUTPUT_VERBS = frozenset({"plan", *STAGE_VERB_NAMES})
+# Verbs whose stdout is the plan document itself, unwrapped. `advise` joins
+# this set (rather than using `master`'s wrapped {"result": ...} envelope)
+# so 'aud advise in.wav | aud render in.wav out.wav' pipes exactly like a
+# hand-built chain -- its reasoning goes to stderr instead, see
+# `_print_advise_reasoning`.
+PLAN_OUTPUT_VERBS = frozenset({"plan", *STAGE_VERB_NAMES, "advise"})
 # Verbs that consume an incoming plan (read from stdin when stdin is not a TTY).
 # `cut` is also here even though its stdin is sometimes a REGIONS document
 # instead (see `_dispatch`'s special case for it) -- either way, `cut` needs
@@ -58,7 +62,7 @@ REGIONS_OUTPUT_VERBS = frozenset({"detect"})
 # surface is still registered (explicitly, where they take arguments) so that a
 # caller writing the eventual command gets `not_implemented` -- an answer about
 # the capability -- rather than a usage error about a flag that will exist.
-_NOT_YET_BUILT = frozenset({"preset", "advise", "master"})
+_NOT_YET_BUILT = frozenset({"preset"})
 
 
 class _UsageError(Exception):
@@ -235,17 +239,24 @@ def _build_parser() -> _Parser:
     strip_silence_parser.add_argument("--keep", type=float, default=150.0)
     _add_edit_point_arguments(strip_silence_parser, pad_default=80.0)
 
-    # advise / master: model-backed, not yet built (see _NOT_YET_BUILT below), but
-    # documented with the exact positional surface their own --help worked
-    # examples show ('aud advise in.wav', 'aud master in.wav out.wav') -- a bare
-    # registration would make a caller discover the flag doesn't parse instead of
-    # getting `not_implemented`.
+    # advise / master: model-backed. advise reads measurements and proposes a
+    # chain (with reasons); master proposes it, renders it, and verifies it --
+    # one shell command. Both need a configured AI-provider credential (see
+    # docs/CONFIGURATION.md) and refuse by name without one.
     advise_parser = sub.add_parser("advise")
     advise_parser.add_argument("path")
+    advise_parser.add_argument("--target", type=float, default=-14.0)
+    advise_parser.add_argument("--reference", default=None)
+    advise_parser.add_argument("--model", default=None)
 
     master_parser = sub.add_parser("master")
     master_parser.add_argument("in_path")
     master_parser.add_argument("out_path")
+    master_parser.add_argument("--target", type=float, default=-14.0)
+    master_parser.add_argument("--ceiling", type=float, default=-1.0)
+    master_parser.add_argument("--reference", default=None)
+    master_parser.add_argument("--model", default=None)
+    master_parser.add_argument("--dry-run", dest="dry_run", action="store_true")
 
     # preset: documented two ways -- 'aud preset --list' (verbdoc.py) and
     # 'aud preset show <name>' (docs/ARCHITECTURE.md, README.md, SMART_TOOL.md).
@@ -389,6 +400,25 @@ def _dispatch(verb: str, args: argparse.Namespace, stdin_text: str | None) -> An
             words = [w.strip() for w in args.words.split(",") if w.strip()] or None
             return lib.detect_fillers(args.path, words=words, min_pause_ms=args.min_pause)
         raise AssertionError(f"unreachable detect kind: {args.detect_kind}")
+    if verb == "advise":
+        outcome = lib.advise(
+            args.path,
+            target_lufs=args.target,
+            reference_path=args.reference,
+            model=args.model,
+        )
+        _print_advise_reasoning(outcome)
+        return outcome["plan"]
+    if verb == "master":
+        return lib.master(
+            args.in_path,
+            args.out_path,
+            target_lufs=args.target,
+            ceiling_dbtp=args.ceiling,
+            reference_path=args.reference,
+            model=args.model,
+            dry_run=args.dry_run,
+        )
     if verb in _NOT_YET_BUILT:
         raise AudError(
             code="not_implemented",
@@ -406,6 +436,19 @@ def _print_result(result: Any) -> None:
 
 def _print_error(exc: AudError) -> None:
     print(json.dumps({"error": exc.to_dict()}, sort_keys=True))
+
+
+def _print_advise_reasoning(outcome: dict[str, Any]) -> None:
+    """Diagnostic-only: why each stage was chosen, on stderr.
+
+    stdout stays a bare plan document (see PLAN_OUTPUT_VERBS above) so
+    'aud advise in.wav | aud render in.wav out.wav' pipes cleanly, exactly
+    like a hand-built chain -- the reasoning is not lost, it just is not on
+    the channel a pipe reads. See docs/ARCHITECTURE.md #7.
+    """
+    print(f"aud advise: provider={outcome['provider']} model={outcome['model']}", file=sys.stderr)
+    for stage in outcome["stages"]:
+        print(f"  - {stage['stage']}: {stage['reason']}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:

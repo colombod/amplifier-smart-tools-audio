@@ -9,6 +9,72 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-19
+
+The smart tier arrives, and the last audible defect in edit placement is closed. `aud` is now
+what it set out to be: deterministic DSP that needs no credential, with judgement available on
+top for a caller that wants the decision made for it.
+
+### Added
+
+- **`aud advise in.wav`** — runs the deterministic `analyze`, hands the MEASUREMENTS to a model,
+  and returns a mastering plan with a stated reason per stage. It never touches samples, and it
+  emits a plan document, so it pipes straight into `render`. The model sees a JSON measurement
+  report — LUFS, true peak, crest factor, band balance, sibilance, noise floor — never audio.
+- **`aud master in.wav out.wav --target -14`** — advise, render and verify in one shell command,
+  emitting one document containing the chosen plan, the per-stage report, and the measured
+  result against the target. `--dry-run` shows the plan and renders nothing.
+- **One intelligence interface, no SDK.** `IntelligenceBackend.complete(system, user, *, model,
+  max_tokens) -> str` with plain-HTTPS implementations for Anthropic, OpenAI, Gemini and Azure
+  OpenAI. The base install stays numpy/scipy/soundfile/pyloudnorm: a caller with no credentials
+  pays nothing for a capability they cannot use.
+- **The model's output is treated as untrusted input.** A proposed plan is applied through the
+  same `aud.lib` builders and validators every hand-written plan goes through, so an invented
+  stage name, an out-of-range ratio or malformed JSON is rejected with a clear code instead of
+  failing at render.
+- **A visual explainer** of the chain in `docs/images/`, wired into the README and the head of
+  ARCHITECTURE.md, which now opens with install and unfolds the five phases from there.
+
+### Fixed
+
+- **A failed `transient` snap silently dropped the click protection.** When no onset was found,
+  the edit point fell back reporting `rule: "none"` — and `"none"` is the one snap value the
+  contract says disables zero-crossing alignment, because it is the only one asserting the
+  caller already picked the sample. So the raw, unaligned position shipped. Zero crossing is the
+  FLOOR, not a peer: the coarse rules decide WHERE, alignment happens regardless. A failed
+  search now still aligns and reports `zero_crossing_fallback`; `"none"` is reserved for a
+  caller's explicit instruction.
+- **`snap_failed` was firing where no onset could exist.** A silence region's START is where
+  speech stopped, so a transient search there was guaranteed to miss — half of all edit points
+  reported a failure by construction, which trains a caller to ignore the flag that would have
+  shown them the real problem. It is now per-boundary: a miss at the resume point is a genuine
+  failure, a miss at the trailing edge is the expected outcome.
+
+### Verified
+
+- **The click regression, measured both directions**: cutting a region with `snap="transient"`
+  from material containing no onsets gave a join discontinuity of **1.199600** before the fix
+  and **0.018805** after — against the signal's own natural sample step of 0.018806. The
+  unaligned splice was ~64× worse. On the original reproduction, `snap_failures` went 2 → 0.
+- **The no-credential refusal, run for real** with all five provider variables unset:
+  `aud advise` exits 1 with `provider_credential_missing` naming every variable that would
+  satisfy it, while `aud analyze`, `aud detect silence` and a full deterministic chain all
+  still exit 0.
+- **`master` end to end** with an injected advisor: analyzed at −10.1 LUFS / −6.7 dBTP, chose a
+  chain, rendered, and verified at **−14.01 LUFS / −6.64 dBTP** against −14 and −1.0.
+- 233 tests pass (was 197). Conformance 16 PASS / 0 FAIL.
+
+### Known limits
+
+- **No live provider call has ever been made.** Every intelligence test injects a fake backend
+  through the Protocol — no network, no credential, no cost — so the four HTTPS request builders
+  are reviewed but unexercised. The first real call will be the first real test of them.
+- `snap: "silence"` has the same latent shape as the `transient` defect just fixed: if the
+  zero-crossing refinement finds no sign change it falls back to the raw candidate while still
+  reporting `silence` and `snap_failed: false`. No test exercises that path yet.
+- The Signalsmith path in `stretch`/`pitch` and `detect fillers`' live model call remain
+  unexecuted anywhere; both need a throwaway container.
+
 ## [0.5.0] - 2026-09-19
 
 The chain is complete. Every stage the manifest has claimed since 0.1.0 now renders: the six

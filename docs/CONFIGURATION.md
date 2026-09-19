@@ -114,12 +114,13 @@ through to the environment.
 
 ## Credentials
 
-`advise` and `master --auto` are the only verbs that call a model. Every other verb runs with
+`advise` and `master` are the only verbs that call a model. Every other verb runs with
 nothing configured, spends nothing, and needs nothing from this section.
 
 **`aud` reads credentials. It never writes or stores them.** There is no `aud login`, no
 keychain entry, nothing persisted by this tool. It reads the variable your provider already
-documents.
+documents, over plain HTTPS -- no provider SDK is a dependency of `aud`, so a caller with no
+credential configured pays nothing extra for the base install.
 
 ### Accepted variables
 
@@ -135,7 +136,25 @@ Any **one** of these satisfies the requirement:
 
 These are the names each provider publishes; `aud` does not invent an `AUD_`-prefixed
 credential variable, so a machine already set up for one of these providers needs no additional
-setup for `aud`.
+setup for `aud`. Where more than one is present, the first one in the table above wins --
+`ANTHROPIC_API_KEY` beats `OPENAI_API_KEY` beats `GOOGLE_API_KEY`/`GEMINI_API_KEY` (either name
+selects the same provider) beats `AZURE_OPENAI_API_KEY`. A failed or successful `advise`/
+`master` run names which provider actually answered in its output.
+
+**Azure OpenAI needs more than the one key.** `AZURE_OPENAI_API_KEY` satisfies the manifest's
+requirement, but reaching an actual deployment also needs `AZURE_OPENAI_ENDPOINT` (your
+resource's URL, e.g. `https://<resource>.openai.azure.com`); `AZURE_OPENAI_DEPLOYMENT` and
+`AZURE_OPENAI_API_VERSION` are optional -- the deployment falls back to whichever model name was
+resolved (see below), and the API version falls back to a built-in default. With the key set but
+the endpoint absent, `aud` refuses with `{"code": "provider_config_incomplete", ...}` rather than
+guessing a URL.
+
+### Choosing a model
+
+Never hardcoded. Precedence, highest wins: the CLI's `--model NAME` > the `AUD_MODEL`
+environment variable > a built-in default for whichever provider answered, documented in one
+place so it is never a bare string buried in call logic. `advise`/`master`'s output names the
+model actually used.
 
 ### Precedence — inverted
 
@@ -171,10 +190,12 @@ provision credentials.
 
 ### When no credential is present
 
-`advise` and `master --auto` **refuse**. They exit non-zero with
-`{"error": {"code", "message", "remedy"}}`, the remedy naming the accepted variables and
-pointing back at this document. They do not guess a chain, and they do not silently fall back to
-a preset — a chain nobody chose is worse than no chain, because it looks like a decision.
+`advise` and `master` **refuse**. They exit non-zero with
+`{"error": {"code": "provider_credential_missing", "message", "remedy"}}`, the remedy naming the
+accepted variables and pointing back at this document. They do not guess a chain, and they do
+not silently fall back to a preset — a chain nobody chose is worse than no chain, because it
+looks like a decision. `master` refuses before touching its output path at all -- nothing is
+rendered on the strength of a chain nobody approved.
 
 Everything else keeps working. That is the promise the tool is built around, and it is checked
 rather than assumed: CI asserts that none of the five variables is present in the environment

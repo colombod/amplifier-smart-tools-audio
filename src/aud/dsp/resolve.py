@@ -177,16 +177,22 @@ def _resolve_one(
     hi = min(padded_s + window_s, upper_limit, duration)
 
     if lo >= hi:
+        # No floor under the floor: there is no window left to search at
+        # all, so nothing -- not even zero-crossing -- can run. "none" is
+        # reserved for the caller's literal snap="none"; this is a genuine,
+        # always-reportable failure to align (contracts/plan.v1.md#snap).
         reason = (
             f"no position within {snap_window_ms} ms of the padded position stays inside "
             "the region and clear of its neighbours"
         )
-        return make(padded_s, "none", True, reason)
+        return make(padded_s, "unaligned", True, reason)
 
     if snap == "zero_crossing":
         found = _nearest_zero_crossing(mono, sr, padded_s, lo, hi)
         if found is None:
-            return make(padded_s, "none", True, f"no zero crossing within {snap_window_ms} ms of the padded position")
+            return make(
+                padded_s, "unaligned", True, f"no zero crossing within {snap_window_ms} ms of the padded position"
+            )
         return make(found, "zero_crossing", False, None)
 
     if snap == "silence":
@@ -196,18 +202,55 @@ def _resolve_one(
 
     if snap == "transient":
         candidates = [onset for onset in onsets if lo <= onset <= hi]
-        if not candidates:
-            return make(padded_s, "none", True, f"no onset within {snap_window_ms} ms of the padded position")
-        nearest_onset = min(candidates, key=lambda onset: abs(onset - padded_s))
-        lead = min(_TRANSIENT_LEAD_S, hi - lo)
-        candidate = max(nearest_onset - lead, lo)
-        # Refine towards a zero crossing, but never past `candidate` --
-        # "always moves a point earlier, never later" (contracts/plan.v1.md)
-        # is a promise about the FINAL resolved position, not just the
-        # coarse step, so the refinement window stops at the candidate
-        # rather than reusing the full [lo, hi] search window.
-        refined = _nearest_zero_crossing(mono, sr, candidate, lo, candidate)
-        return make(refined if refined is not None else candidate, "transient", False, None)
+        if candidates:
+            nearest_onset = min(candidates, key=lambda onset: abs(onset - padded_s))
+            lead = min(_TRANSIENT_LEAD_S, hi - lo)
+            candidate = max(nearest_onset - lead, lo)
+            # Refine towards a zero crossing, but never past `candidate` --
+            # "always moves a point earlier, never later"
+            # (contracts/plan.v1.md) is a promise about the FINAL resolved
+            # position, not just the coarse step, so the refinement window
+            # stops at the candidate rather than reusing the full [lo, hi]
+            # search window.
+            refined = _nearest_zero_crossing(mono, sr, candidate, lo, candidate)
+            return make(refined if refined is not None else candidate, "transient", False, None)
+
+        # No onset in the window. Zero crossing is the floor under every
+        # rule, not a peer of them (contracts/plan.v1.md#snap): a failed
+        # coarse search must still be zero-crossing aligned, so the click
+        # this rule exists to prevent does not simply move one layer down.
+        #
+        # "transient" itself is asymmetric across the two boundaries it
+        # snaps. At `end` -- the resume point -- a miss is a genuine
+        # failure: a real attack could be sitting just past the window,
+        # and truncating it is exactly what this rule exists to prevent.
+        # At `start` -- the trailing edge into whatever is being removed
+        # -- there is structurally nothing upstream of the boundary left
+        # to protect (the search window never extends past this region's
+        # own end), so a miss there is the expected outcome, not a
+        # failure. Either way the point still gets the same fallback
+        # alignment; only `snap_failed` differs.
+        applies_here = boundary == "end"
+        miss_reason = f"no onset within {snap_window_ms} ms of the padded position"
+        found = _nearest_zero_crossing(mono, sr, padded_s, lo, hi)
+        if found is None:
+            reason = (
+                miss_reason
+                if applies_here
+                else (
+                    f"{miss_reason}; not expected at a region's start boundary, "
+                    "and no zero crossing was available either"
+                )
+            )
+            return make(padded_s, "unaligned", True, reason)
+        if applies_here:
+            return make(found, "zero_crossing_fallback", True, miss_reason)
+        return make(
+            found,
+            "zero_crossing_fallback",
+            False,
+            f"{miss_reason}; not expected at a region's start boundary, used zero_crossing instead",
+        )
 
     raise ValueError(f"snap must be one of {_SNAP_MODES}, got {snap!r}")
 

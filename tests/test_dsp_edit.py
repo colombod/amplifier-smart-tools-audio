@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from aud.dsp.edit import CrossfadeExceedsGapError, crossfade, cut_regions, fade_in, fade_out
-from aud.dsp.resolve import EditPoint
+from aud.dsp.resolve import EditPoint, resolve_points
 
 SR = 44100
 
@@ -193,6 +193,80 @@ def test_cut_with_zero_crossing_and_crossfade_avoids_a_click():
     assert click_raw > click * 5  # dramatically worse without resolution+crossfade
     assert report["joins_crossfaded"] == 1
     assert report["regions_removed"] == 1
+
+
+def test_transient_snap_with_no_onset_still_avoids_a_click_at_the_join():
+    """Regression test for the shipped defect: snap="transient" with no
+    onset in the window used to report rule_applied="none" and take the
+    raw (nominal/padded) position literally -- silently dropping the
+    zero-crossing alignment every other rule gets for free. Zero crossing
+    is the floor under every rule, not a peer of them
+    (contracts/plan.v1.md#snap): a failed coarse search must still land on
+    a zero crossing.
+
+    Modelled on test_cut_with_zero_crossing_and_crossfade_avoids_a_click
+    above: a peak-to-trough splice with no alignment is a real, measurable
+    click; the fix must keep the join close to the signal's own natural
+    sample-to-sample step instead.
+    """
+    freq = 220.0
+    amplitude = 0.6
+    x = _tone(2.0, freq=freq, sr=SR, amplitude=amplitude)
+    period = 1.0 / freq
+
+    # Same peak/trough construction as the click test above -- guarantees a
+    # real, measurable click if the raw (unaligned) position is used.
+    start_s = 0.5 + period / 4.0  # peak: sin(pi/2) == 1
+    end_s = 0.8 + (3.0 * period) / 4.0  # trough: sin(3*pi/2) == -1
+
+    points, dropped = resolve_points(
+        x,
+        SR,
+        [{"start_s": start_s, "end_s": end_s}],
+        pad_out_ms=0.0,
+        pad_in_ms=0.0,
+        snap="transient",
+        snap_window_ms=20.0,
+        onsets=[],  # no onsets anywhere -- the coarse (transient) search always misses
+    )
+    assert dropped == []
+    start_point, end_point = points[0], points[1]
+
+    # Never the caller-only sentinel, and the floor still ran at both
+    # boundaries even though the coarse search missed at both.
+    assert start_point.rule_applied == "zero_crossing_fallback"
+    assert end_point.rule_applied == "zero_crossing_fallback"
+    assert start_point.rule_applied != "none"
+    assert end_point.rule_applied != "none"
+    # Boundary-role asymmetry: only the END boundary counts as a genuine
+    # failure (see test_dsp_resolve.py for the isolated behavioural tests).
+    assert start_point.snap_failed is False
+    assert end_point.snap_failed is True
+
+    y_fixed, _ = cut_regions(
+        x, SR, points, fade_in_ms=0.0, fade_out_ms=0.0, crossfade_ms=0.0, crossfade_shape="equal_power"
+    )
+    join_n = round(start_point.resolved_s * SR)
+    click_fixed = _max_discontinuity(y_fixed[max(0, join_n - 5) : join_n + 5])
+
+    # What the pre-fix code produced: rule_applied="none", the raw padded
+    # position taken literally, no zero-crossing alignment at all.
+    raw_points = [_point(0, "start", start_point.padded_s), _point(0, "end", end_point.padded_s)]
+    y_raw, _ = cut_regions(
+        x, SR, raw_points, fade_in_ms=0.0, fade_out_ms=0.0, crossfade_ms=0.0, crossfade_shape="equal_power"
+    )
+    raw_join_n = round(start_point.padded_s * SR)
+    click_raw = _max_discontinuity(y_raw[max(0, raw_join_n - 5) : raw_join_n + 5])
+
+    smooth_baseline = _max_discontinuity(x[:1000])  # the tone's own ordinary sample-to-sample step
+
+    print(
+        f"\n[edit] transient-fallback click test: fixed={click_fixed:.6f}, "
+        f"raw(pre-fix)={click_raw:.6f}, smooth_baseline={smooth_baseline:.6f}"
+    )
+    assert click_fixed < smooth_baseline * 5  # aligned: close to the signal's own natural step
+    assert click_raw > amplitude  # unaligned peak/trough splice: a real, dramatic click
+    assert click_raw > click_fixed * 5  # dramatically worse without the fix
 
 
 def test_cut_regions_total_duration_accounts_for_every_removed_second():

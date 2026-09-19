@@ -13,6 +13,8 @@ chain, and they are the only two that do.
 **This is mastering and cleanup, not mixing.** It works on a finished stereo or mono file. It
 has no stems, no multitrack, no panning, no bus routing.
 
+![The aud mastering chain: measure, find and cut, repair, shape, finish](docs/images/chain-01.png)
+
 ## Who it is for
 
 - Someone with a finished file that is too quiet for a platform, too harsh, too boxy, or does

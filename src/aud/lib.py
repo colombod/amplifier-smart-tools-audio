@@ -916,6 +916,123 @@ def verify(path: str, target_lufs: float | None = None, ceiling_dbtp: float | No
     return result
 
 
+def advise(
+    path: str,
+    *,
+    target_lufs: float = -14.0,
+    ceiling_dbtp: float = -1.0,
+    reference_path: str | None = None,
+    model: str | None = None,
+    backend: Any | None = None,
+) -> dict:
+    """Read the measurements and ask a model to choose a mastering chain, with reasons.
+
+    Never touches samples beyond the existing deterministic `analyze` --
+    and, if `reference_path` is given, analyzing that file too, in exactly
+    the same read-only way. The model sees only these measurements, never
+    raw audio, and its proposed chain is validated through the same stage
+    builders every other verb uses (`eq`, `compress`, `loudness`, ...)
+    before it becomes part of the returned plan: an invalid proposal is a
+    `bad_model_output`/`bad_model_plan` AudError, never a corrupted plan
+    that would fail later at render.
+
+    `backend` is a dependency-injection seam for tests (see
+    `aud.intelligence.interface.IntelligenceBackend`); real callers leave it
+    `None` and get the provider selected from whichever credential is
+    configured -- see docs/CONFIGURATION.md. With none configured, this
+    raises `AudError(code="provider_credential_missing")` naming the
+    accepted variables, rather than guessing a chain.
+
+    Returns:
+        {
+          "plan": Plan,                    # ready for aud.lib.render
+          "measurements": dict,            # analyze(path)
+          "reference_measurements": dict | None,
+          "provider": str,                 # which provider answered
+          "model": str,                    # the model actually used
+          "stages": [{"stage": str, "reason": str}, ...],
+        }
+    """
+    measurements = analyze(path)
+    reference_measurements = analyze(reference_path) if reference_path else None
+
+    from aud.intelligence import advisor
+    from aud.intelligence.interface import resolve_backend
+
+    if backend is not None:
+        active_backend = backend
+        provider = "injected"
+        chosen_model = model or "test-model"
+    else:
+        active_backend, provider, chosen_model = resolve_backend(model)
+
+    plan, reasoning = advisor.advise(
+        measurements,
+        target_lufs=target_lufs,
+        ceiling_dbtp=ceiling_dbtp,
+        reference_measurements=reference_measurements,
+        backend=active_backend,
+        model=chosen_model,
+    )
+    return {
+        "plan": plan,
+        "measurements": measurements,
+        "reference_measurements": reference_measurements,
+        "provider": provider,
+        "model": chosen_model,
+        "stages": reasoning,
+    }
+
+
+def master(
+    in_path: str,
+    out_path: str,
+    *,
+    target_lufs: float = -14.0,
+    ceiling_dbtp: float = -1.0,
+    reference_path: str | None = None,
+    model: str | None = None,
+    dry_run: bool = False,
+    backend: Any | None = None,
+) -> dict:
+    """The one-shot model-backed path: advise, render, verify -- one document out.
+
+    Calls `advise` internally (same credential requirement, same validation
+    of the model's proposed chain), then renders that plan in a single pass
+    and verifies the result against `target_lufs`/`ceiling_dbtp`. `dry_run`
+    stops after advise: the plan and its reasoning are returned, nothing is
+    rendered, and `out_path` is never touched -- neither is it touched if
+    advise refuses for lack of a credential or a valid model response.
+    """
+    advised = advise(
+        in_path,
+        target_lufs=target_lufs,
+        ceiling_dbtp=ceiling_dbtp,
+        reference_path=reference_path,
+        model=model,
+        backend=backend,
+    )
+    plan = advised["plan"]
+    result: dict[str, Any] = {
+        "plan": plan.model_dump(),
+        "stages": advised["stages"],
+        "provider": advised["provider"],
+        "model": advised["model"],
+        "measurements": advised["measurements"],
+    }
+    if advised["reference_measurements"] is not None:
+        result["reference_measurements"] = advised["reference_measurements"]
+    if dry_run:
+        result["dry_run"] = True
+        return result
+
+    render_result = render(plan, in_path, out_path)
+    result["render"] = render_result["report"]
+    result["out_path"] = render_result["out_path"]
+    result["verify"] = verify(out_path, target_lufs=target_lufs, ceiling_dbtp=ceiling_dbtp)
+    return result
+
+
 def detect_silence(path: str, threshold_above_floor_db: float = 6.0, min_len_ms: float = 400.0) -> Any:
     """Find quiet spans, relative to the file's own measured noise floor.
 
