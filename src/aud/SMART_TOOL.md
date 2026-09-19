@@ -1,7 +1,7 @@
 ---
 smart_tool_format: 1
 name: aud
-version: 0.6.0
+version: 0.6.1
 description: >-
   Anything to do with finishing an audio file the user already has -- .wav, .flac, .aiff, .mp3.
   Reach for it when the ask sounds like "make this sound finished", "this is too quiet for

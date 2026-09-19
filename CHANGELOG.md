@@ -9,6 +9,51 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-19
+
+The first live provider call `aud` has ever made, and the two defects it found immediately.
+
+### Fixed
+
+- **The default Anthropic model did not exist.** `aud advise` against a perfectly valid key
+  returned `HTTP 404 model: claude-3-5-haiku-20241022`. The default had been chosen by reading,
+  never by calling, and no test could have caught it: every intelligence test injects a fake
+  backend through the Protocol, which is exactly what makes the suite free and exactly what
+  makes it blind here. Default is now a model verified to answer.
+- **A wrong model was reported as a credential problem.** A 404, or any provider error naming
+  the model, now returns `provider_model_unavailable` with a remedy pointing at `--model` and
+  `AUD_MODEL` — instead of `provider_request_failed` telling the caller to go and check the one
+  thing that was working. A default model name is perishable; the error it produces should say
+  so rather than sending someone to debug their key.
+
+### Verified
+
+Run for real against Anthropic, not with a fake:
+
+```
+$ aud advise in.wav --target -14
+aud advise: provider=anthropic model=claude-haiku-4-5-20251001
+  - loudness: Integrated loudness is -11.759 LUFS, requiring a gain reduction of
+    approximately 2.24 dB to reach the target of -14.0 LUFS.
+  - limit: True peak is currently -8.763 dBTP; after loudness adjustment (2.24 dB gain),
+    peaks will rise to approximately -6.5 dBTP, exceeding the -1.0 dBTP ceiling, so
+    limiting is required.
+{"plan_format":1,"created_with":"aud/0.6.1","stages":[...]}
+```
+
+- `aud master in.wav out.wav --target -14` ran end to end as ONE shell command on the default
+  model and verified at **-14.00 LUFS, -11.00 dBTP** against -14 and -1.0.
+- The reasoning is grounded in the measurements the deterministic analysis produced, not in
+  anything the model was told about the audio — it never sees audio.
+- The retired-model path was re-run deliberately and now returns `provider_model_unavailable`.
+- 233 tests pass. Conformance 16 PASS / 0 FAIL.
+
+### Known limits
+
+- Only the Anthropic backend has now been exercised live. OpenAI, Gemini and Azure OpenAI are
+  still reviewed-but-uncalled, and their default model names carry the same perishability that
+  just bit the Anthropic one.
+
 ## [0.6.0] - 2026-09-19
 
 The smart tier arrives, and the last audible defect in edit placement is closed. `aud` is now

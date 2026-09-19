@@ -67,6 +67,18 @@ def _post_json(url: str, headers: dict[str, str], body: dict, *, provider: str) 
             raw = response.read()
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
+        # A 404, or any body naming the model, almost always means the MODEL is
+        # wrong rather than the credential -- and the likeliest wrong model is
+        # our own default, which is perishable and cannot be covered by a test
+        # that injects a fake backend. Saying "check your credential" there
+        # sends the caller to debug the one thing that is working.
+        if exc.code == 404 or "model" in detail.lower():
+            raise AudError(
+                code="provider_model_unavailable",
+                message=f"{provider} rejected the model: HTTP {exc.code}: {detail}",
+                remedy=f"Pass --model with a model this account can reach (or set {_MODEL_ENV_VAR}). "
+                f"The built-in default for {provider} may have been retired -- see docs/CONFIGURATION.md.",
+            ) from exc
         raise AudError(
             code="provider_request_failed",
             message=f"{provider} request failed: HTTP {exc.code}: {detail}",
@@ -232,8 +244,17 @@ _PROVIDER_BY_ENV: dict[str, str] = {
 # One named, documented, overridable default per provider -- never a bare
 # string buried in call logic (AGENTS.md #5). Overridable by --model (CLI)
 # or AUD_MODEL (environment); see docs/CONFIGURATION.md.
+#
+# A DEFAULT MODEL NAME IS PERISHABLE and these will go stale. The first live
+# call this tool ever made returned HTTP 404 "model: claude-3-5-haiku-20241022"
+# against a perfectly valid key -- the default had been chosen by reading, not
+# by calling, and nothing in the test suite could see it because every test
+# injects a fake backend through the Protocol. That is why a 404 or an unknown
+# model is reported as `provider_model_unavailable` with the remedy naming
+# `--model`, rather than as a generic request failure: the likeliest cause of
+# this specific error is our default, not the caller's credential.
 DEFAULT_MODELS: dict[str, str] = {
-    "anthropic": "claude-3-5-haiku-20241022",
+    "anthropic": "claude-haiku-4-5-20251001",
     "openai": "gpt-4o-mini",
     "google": "gemini-2.0-flash",
     "azure_openai": "gpt-4o-mini",
