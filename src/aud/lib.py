@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import math
 import os
 import platform
 import shutil
@@ -184,6 +185,194 @@ def skill() -> str:
 # ---------------------------------------------------------------------------
 # Stage builders -- validate parameters and append to a plan. No DSP here.
 # ---------------------------------------------------------------------------
+
+_SNAP_MODES = ("zero_crossing", "silence", "transient", "none")
+_CROSSFADE_SHAPES = ("equal_power", "linear")
+
+
+def _validate_edit_point_params(
+    *,
+    pad_out_ms: float,
+    pad_in_ms: float,
+    snap: str,
+    snap_window_ms: float,
+    fade_out_ms: float,
+    fade_in_ms: float,
+    crossfade_ms: float,
+    crossfade_shape: str,
+) -> None:
+    """Shared validation for `cut` and `strip_silence`'s edit-point resolution params.
+
+    See contracts/plan.v1.md#edit-point-resolution-shared-by-cut-and-strip_silence
+    for every constraint enforced here.
+    """
+    for name, value in (
+        ("pad_out_ms", pad_out_ms),
+        ("pad_in_ms", pad_in_ms),
+        ("fade_out_ms", fade_out_ms),
+        ("fade_in_ms", fade_in_ms),
+        ("crossfade_ms", crossfade_ms),
+    ):
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0.0:
+            raise AudError(
+                code="bad_param",
+                message=f"{name} must be a finite number >= 0, got {value!r}.",
+                remedy=f"Use a non-negative number of milliseconds for {name}.",
+            )
+    if snap not in _SNAP_MODES:
+        raise AudError(
+            code="bad_param",
+            message=f"snap must be one of {_SNAP_MODES}, got {snap!r}.",
+            remedy="Use one of zero_crossing, silence, transient, none.",
+        )
+    if crossfade_shape not in _CROSSFADE_SHAPES:
+        raise AudError(
+            code="bad_param",
+            message=f"crossfade_shape must be one of {_CROSSFADE_SHAPES}, got {crossfade_shape!r}.",
+            remedy="Use equal_power or linear.",
+        )
+    if not isinstance(snap_window_ms, (int, float)) or not (0.0 < snap_window_ms <= 1000.0):
+        raise AudError(
+            code="snap_window_invalid",
+            message=f"snap_window_ms must be > 0 and <= 1000.0, got {snap_window_ms!r}.",
+            remedy="Use a snap_window_ms between 0 (exclusive) and 1000.0 (inclusive).",
+        )
+
+
+def cut(
+    plan: Plan,
+    regions_text: str | None,
+    *,
+    pad_out_ms: float = 0.0,
+    pad_in_ms: float = 0.0,
+    snap: str = "zero_crossing",
+    snap_window_ms: float = 20.0,
+    fade_out_ms: float = 0.0,
+    fade_in_ms: float = 0.0,
+    crossfade_ms: float = 10.0,
+    crossfade_shape: str = "equal_power",
+) -> Plan:
+    """Editing stage: remove an explicit list of regions from the programme.
+
+    `regions_text` is a regions document (contracts/regions.v1.md), normally
+    the output of `aud detect silence` or `aud detect fillers` piped in or
+    read from a file. `cut` stores plain `{"start_s", "end_s"}` positions --
+    the rest of the document (peak/RMS levels, detection provenance) is not
+    part of what `cut`'s stage needs to replay.
+
+    `cut` is handed positions a caller measured and means literally, so its
+    padding defaults to none -- widening someone's stated edit unasked would
+    be a surprise (see contracts/plan.v1.md#padding).
+    """
+    _validate_edit_point_params(
+        pad_out_ms=pad_out_ms,
+        pad_in_ms=pad_in_ms,
+        snap=snap,
+        snap_window_ms=snap_window_ms,
+        fade_out_ms=fade_out_ms,
+        fade_in_ms=fade_in_ms,
+        crossfade_ms=crossfade_ms,
+        crossfade_shape=crossfade_shape,
+    )
+    try:
+        from aud.core.regions import read_regions
+    except ImportError as exc:
+        raise _not_implemented("cut", exc) from exc
+
+    doc = read_regions(regions_text)
+    if doc.kind == "transient":
+        raise AudError(
+            code="regions_not_cuttable",
+            message="'cut' was given a transients regions document; transients are zero-length and describe "
+            "nothing to remove.",
+            remedy="Pipe a 'silence' or 'filler' regions document into 'cut'; use transients to inform "
+            "--snap transient elsewhere.",
+        )
+
+    regions = [{"start_s": float(region.start_s), "end_s": float(region.end_s)} for region in doc.regions]
+    params = {
+        "regions": regions,
+        "pad_out_ms": pad_out_ms,
+        "pad_in_ms": pad_in_ms,
+        "snap": snap,
+        "snap_window_ms": snap_window_ms,
+        "fade_out_ms": fade_out_ms,
+        "fade_in_ms": fade_in_ms,
+        "crossfade_ms": crossfade_ms,
+        "crossfade_shape": crossfade_shape,
+    }
+    return append(plan, "cut", params)
+
+
+def strip_silence(
+    plan: Plan,
+    *,
+    threshold_above_floor_db: float = 6.0,
+    min_len_ms: float = 400.0,
+    keep_ms: float = 150.0,
+    pad_out_ms: float = 80.0,
+    pad_in_ms: float = 80.0,
+    snap: str = "zero_crossing",
+    snap_window_ms: float = 20.0,
+    fade_out_ms: float = 0.0,
+    fade_in_ms: float = 0.0,
+    crossfade_ms: float = 10.0,
+    crossfade_shape: str = "equal_power",
+) -> Plan:
+    """Editing stage: remove or shorten silences, detected at render time.
+
+    Unlike `cut`, this stage carries no positions -- it stores a rule
+    (contracts/plan.v1.md#strip_silence) and detects at render time, so the
+    same plan means the same thing on every file it is applied to.
+
+    `strip_silence` finds its own boundaries from an energy threshold, whose
+    bias is systematically *inside* the speech (the tail of a word crosses
+    the threshold while the word is still going), so padding is on by
+    default here -- unlike `cut`.
+    """
+    _validate_edit_point_params(
+        pad_out_ms=pad_out_ms,
+        pad_in_ms=pad_in_ms,
+        snap=snap,
+        snap_window_ms=snap_window_ms,
+        fade_out_ms=fade_out_ms,
+        fade_in_ms=fade_in_ms,
+        crossfade_ms=crossfade_ms,
+        crossfade_shape=crossfade_shape,
+    )
+    if not math.isfinite(threshold_above_floor_db) or threshold_above_floor_db < 0.0:
+        raise AudError(
+            code="bad_param",
+            message=f"threshold_above_floor_db must be a finite number >= 0, got {threshold_above_floor_db!r}.",
+            remedy="Use a non-negative number of dB above the measured noise floor, e.g. --threshold 6.",
+        )
+    if not math.isfinite(min_len_ms) or min_len_ms <= 0.0:
+        raise AudError(
+            code="bad_param",
+            message=f"min_len_ms must be a finite number > 0, got {min_len_ms!r}.",
+            remedy="Use a positive number of milliseconds, e.g. --min-len 400.",
+        )
+    if not math.isfinite(keep_ms) or keep_ms < 0.0:
+        raise AudError(
+            code="bad_param",
+            message=f"keep_ms must be a finite number >= 0, got {keep_ms!r}.",
+            remedy="Use a non-negative number of milliseconds, e.g. --keep 150.",
+        )
+
+    params = {
+        "threshold_above_floor_db": threshold_above_floor_db,
+        "min_len_ms": min_len_ms,
+        "keep_ms": keep_ms,
+        "pad_out_ms": pad_out_ms,
+        "pad_in_ms": pad_in_ms,
+        "snap": snap,
+        "snap_window_ms": snap_window_ms,
+        "fade_out_ms": fade_out_ms,
+        "fade_in_ms": fade_in_ms,
+        "crossfade_ms": crossfade_ms,
+        "crossfade_shape": crossfade_shape,
+    }
+    return append(plan, "strip_silence", params)
 
 
 def deess(plan: Plan, amount: float = 6.0, freq: float = 6000.0) -> Plan:
@@ -544,6 +733,8 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
         from aud.dsp import engine, io
     except ImportError as exc:
         raise _not_implemented("render", exc) from exc
+    from aud.dsp.edit import CrossfadeExceedsGapError
+    from aud.dsp.engine import MissingDspModuleError
     from aud.plan import ordered
 
     samples, sample_rate = _read_audio(io, in_path)
@@ -557,6 +748,21 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
                 f"Build the chain with implemented stages only ({', '.join(exc.implemented)}); "
                 f"'{exc.stage}' lands in a later release."
             ),
+        ) from exc
+    except MissingDspModuleError as exc:
+        raise AudError(
+            code="not_implemented",
+            message=str(exc),
+            remedy=(
+                f"'{exc.needs}' has not landed in this build yet; render without it "
+                f"(avoid 'strip_silence' or '--snap transient' in '{exc.stage}') until it does."
+            ),
+        ) from exc
+    except CrossfadeExceedsGapError as exc:
+        raise AudError(
+            code="crossfade_exceeds_gap",
+            message=str(exc),
+            remedy="Use a shorter crossfade_ms, or supply regions with more material around that join.",
         ) from exc
     output_subtype = config()["output_subtype"]["value"]
     io.write_audio(out_path, rendered, sample_rate, subtype=output_subtype)
@@ -581,6 +787,68 @@ def verify(path: str, target_lufs: float | None = None, ceiling_dbtp: float | No
         measured_ceiling = measured.get("true_peak_dbtp")
         result["ceiling_ok"] = measured_ceiling is not None and measured_ceiling <= ceiling_dbtp
     return result
+
+
+def detect_silence(path: str, threshold_above_floor_db: float = 6.0, min_len_ms: float = 400.0) -> Any:
+    """Find quiet spans, relative to the file's own measured noise floor.
+
+    Emits a regions document (`kind="silence"`), never a plan -- see
+    contracts/regions.v1.md. Read-only: opens `path` and writes nothing.
+    """
+    try:
+        from aud.dsp import detect, io
+    except ImportError as exc:
+        raise _not_implemented("detect silence", exc) from exc
+    from aud.core.regions import new_regions
+
+    samples, sample_rate = _read_audio(io, path)
+    noise_floor_dbfs = detect.measure_noise_floor(samples, sample_rate)
+    regions = detect.detect_silence(
+        samples, sample_rate, threshold_above_floor_db=threshold_above_floor_db, min_len_ms=min_len_ms
+    )
+    detection = {
+        "threshold_above_floor_db": threshold_above_floor_db,
+        "min_len_ms": min_len_ms,
+        "noise_floor_dbfs": noise_floor_dbfs,
+    }
+    return new_regions(kind="silence", source=path, sample_rate=sample_rate, detection=detection, regions=regions)
+
+
+def detect_transients(path: str, sensitivity: float = 1.0, min_gap_ms: float = 50.0) -> Any:
+    """Find onset positions, with a strength per onset.
+
+    Emits a regions document (`kind="transient"`), never a plan. Read-only.
+    """
+    try:
+        from aud.dsp import detect, io
+    except ImportError as exc:
+        raise _not_implemented("detect transients", exc) from exc
+    from aud.core.regions import new_regions
+
+    samples, sample_rate = _read_audio(io, path)
+    regions = detect.detect_transients(samples, sample_rate, sensitivity=sensitivity, min_separation_ms=min_gap_ms)
+    detection = {"sensitivity": sensitivity, "min_gap_ms": min_gap_ms}
+    return new_regions(kind="transient", source=path, sample_rate=sample_rate, detection=detection, regions=regions)
+
+
+def detect_fillers(path: str, words: list[str] | None = None, min_pause_ms: float = 700.0) -> Any:
+    """Find filler words ('umm', 'uh', 'ehm') and long hesitations.
+
+    Emits a regions document (`kind="filler"`), never a plan. Needs the
+    optional `speech` extra (faster-whisper); with it absent, raises
+    `AudError(code="speech_extra_missing")` -- see `aud.dsp.speech`. Never
+    degrades to an energy-only guess.
+    """
+    try:
+        from aud.dsp import io
+    except ImportError as exc:
+        raise _not_implemented("detect fillers", exc) from exc
+    from aud.core.regions import new_regions
+    from aud.dsp import speech
+
+    samples, sample_rate = _read_audio(io, path)
+    regions, detection = speech.detect_fillers(samples, sample_rate, words=words, min_pause_ms=min_pause_ms)
+    return new_regions(kind="filler", source=path, sample_rate=sample_rate, detection=detection, regions=regions)
 
 
 def curve_extract(path: str, out: str) -> dict:

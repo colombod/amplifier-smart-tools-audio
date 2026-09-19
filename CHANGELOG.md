@@ -9,6 +9,70 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-19
+
+Detection and editing become real. `detect` finds things in a recording and emits a regions
+document; `cut` and `strip_silence` remove them, with the blade placed deliberately rather than
+wherever the detector's boundary happened to land. `aud detect silence in.wav | aud cut | aud
+render in.wav out.wav` is now one shell command that does the whole job.
+
+### Added
+
+- **`aud detect silence | transients | fillers`** — emits a regions document (raw on stdout, the
+  same treatment a stage verb gives a plan) per [contracts/regions.v1.md](contracts/regions.v1.md).
+  The silence threshold is dB above the *measured* noise floor, never a fixed dBFS constant: a
+  fixed number is wrong for every recording it was not tuned on. `detect fillers` needs the
+  `speech` extra and refuses by name when it is absent.
+- **`cut` and `strip_silence` render.** `cut` takes positions piped in from `detect`;
+  `strip_silence` stores a rule, so the same plan still means something on next week's episode.
+  Both run at the front of the chain, because cutting changes the timeline every later stage
+  measures.
+- **Edit-point resolution** — pad, then snap, then validate joins. Snap modes `zero_crossing`
+  (default), `silence`, `transient`, `none`, bounded by `snap_window_ms`, with fades and an
+  equal-power crossfade at every join. A snap that finds no valid candidate keeps the nominal
+  position and records `snap_failed: true`; it never moves a point across the region's other
+  boundary, into a neighbour, or out of the file.
+- **A per-edit-point report.** Every point carries its nominal position, padded position,
+  resolved position, distance moved, the rule that moved it and whether the snap failed — so
+  where the blade actually landed is checkable rather than asserted.
+
+### Verified
+
+Measured on synthesised signals, not asserted:
+
+- **Silence detection**: three gaps planted at 1.0–1.8 s, 3.0–3.6 s, 4.5–5.2 s in a 6.2 s file
+  were returned as exactly those bounds, against a measured noise floor of −66.07 dBFS. The same
+  signal 20 dB quieter yields identical regions — the property a fixed dBFS threshold fails.
+- **Transient detection**: four planted onsets located within 6–15 ms.
+- **The click test, which is the point of snapping.** Cutting 440.5 cycles out of a 440 Hz tone
+  leaves the two sides in antiphase — the worst case for a naive splice. With `--snap none` the
+  join produces a sample-to-sample step of **0.998875**, 31.9× the tone's own smooth baseline of
+  0.031340. With `--snap zero_crossing` the step is **0.031340** — the discontinuity is gone
+  entirely, not merely reduced.
+- **`snap transient` preserves attacks**: cut ends nominally at 1.800/3.600/5.200 s resolved to
+  1.8033/3.6028/5.2057 s, each landing just before the onsets at 1.806/3.607/5.208 s.
+- **End to end**: `detect silence | cut --snap silence --pad-in 80 --pad-out 80 --crossfade 10 |
+  render` took 6.200 s to 4.548 s, removing 1.62 s across three crossfaded joins with zero snap
+  failures, and left the maximum sample-to-sample step unchanged from the source.
+- **Ordering holds**: `detect silence | cut | loudness --target -16 | render` applies `cut` first
+  and `verify` measures −16.0 LUFS on the cut material.
+- **Failures are loud**: a crossfade longer than the material available names the join and both
+  lengths (`crossfade_exceeds_gap`); `detect fillers` without the extra returns
+  `speech_extra_missing` with the exact install command.
+- 165 tests pass (was 96). Conformance 16 PASS / 0 FAIL.
+
+### Known limits
+
+- **`detect fillers`' live path has never been executed.** The faster-whisper call is written
+  against its documented API and the word-to-region parsing is tested against a fake transcript,
+  but the real model has not run — installs on the development host are not permitted, and this
+  needs a throwaway container to verify. Treat it as unproven.
+- Transient detection on a pure sustained tone produced spurious onsets from STFT bin-leakage
+  until the threshold margin was widened; it is adequate for edit placement, not a
+  publication-grade onset detector.
+- Installing the `stretch` extra still buys nothing: `python_stretch` imports and its native
+  extension loads, but the `stretch` render stage is not built.
+
 ## [0.3.1] - 2026-09-18
 
 Two contract-violation defect classes found by installing the published 0.3.0 build on a clean

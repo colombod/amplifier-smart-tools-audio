@@ -22,11 +22,14 @@ import traceback
 from typing import Any, NoReturn
 
 from aud import lib
+from aud.core.regions import write_regions
 from aud.plan import read_plan, write_plan
 from aud.schemas import AudError
 from aud.verbdoc import VERB_DOCS
 
 STAGE_VERB_NAMES = (
+    "cut",
+    "strip-silence",
     "deess",
     "dereverb",
     "eq",
@@ -40,17 +43,22 @@ STAGE_VERB_NAMES = (
     "limit",
 )
 # Verbs whose stdout is the plan document itself, unwrapped.
-# `cut` and `strip-silence` belong here too once they are implemented -- they
-# are stage verbs -- but they are listed in _NOT_YET_BUILT below and never
-# reach the output path, so adding them now would be a claim, not a wiring.
 PLAN_OUTPUT_VERBS = frozenset({"plan", *STAGE_VERB_NAMES})
 # Verbs that consume an incoming plan (read from stdin when stdin is not a TTY).
+# `cut` is also here even though its stdin is sometimes a REGIONS document
+# instead (see `_dispatch`'s special case for it) -- either way, `cut` needs
+# stdin read once, up front, exactly like every other stage verb.
 PLAN_CONSUMING_VERBS = frozenset({*STAGE_VERB_NAMES, "render"})
+# Verbs whose stdout is a regions document (contracts/regions.v1.md) itself,
+# unwrapped -- the read-only counterpart of PLAN_OUTPUT_VERBS, and what lets
+# 'aud detect silence in.wav | aud cut | aud render in.wav out.wav' pipe with
+# no unwrapping in between.
+REGIONS_OUTPUT_VERBS = frozenset({"detect"})
 # Verbs whose capability does not exist yet in this release. Their argument
 # surface is still registered (explicitly, where they take arguments) so that a
 # caller writing the eventual command gets `not_implemented` -- an answer about
 # the capability -- rather than a usage error about a flag that will exist.
-_NOT_YET_BUILT = frozenset({"preset", "advise", "master", "detect", "cut", "strip-silence"})
+_NOT_YET_BUILT = frozenset({"preset", "advise", "master"})
 
 
 class _UsageError(Exception):
@@ -266,6 +274,21 @@ def registered_verbs() -> frozenset[str]:
 
 
 def _dispatch_stage(verb: str, plan: Any, args: argparse.Namespace) -> Any:
+    if verb == "strip-silence":
+        return lib.strip_silence(
+            plan,
+            threshold_above_floor_db=args.threshold,
+            min_len_ms=args.min_len,
+            keep_ms=args.keep,
+            pad_out_ms=args.pad_out,
+            pad_in_ms=args.pad_in,
+            snap=args.snap,
+            snap_window_ms=args.snap_window,
+            fade_out_ms=args.fade_out,
+            fade_in_ms=args.fade_in,
+            crossfade_ms=args.crossfade,
+            crossfade_shape=args.crossfade_shape,
+        )
     if verb == "deess":
         return lib.deess(plan, amount=args.amount, freq=args.freq)
     if verb == "dereverb":
@@ -311,6 +334,30 @@ def _dispatch(verb: str, args: argparse.Namespace, stdin_text: str | None) -> An
         if args.from_file:
             return read_plan(lib.read_text_file(args.from_file))
         return read_plan(None)
+    if verb == "cut":
+        # `cut`'s regions come from --regions (a file path) when given; the
+        # 'aud detect silence in.wav | aud cut | aud render' pipeline instead
+        # hands them on stdin, in which case stdin is not available for an
+        # upstream plan and `cut` starts a fresh one -- it is first in
+        # canonical order in that usage anyway (contracts/plan.v1.md).
+        if args.regions:
+            regions_text = lib.read_text_file(args.regions)
+            plan = read_plan(stdin_text)
+        else:
+            regions_text = stdin_text
+            plan = read_plan(None)
+        return lib.cut(
+            plan,
+            regions_text,
+            pad_out_ms=args.pad_out,
+            pad_in_ms=args.pad_in,
+            snap=args.snap,
+            snap_window_ms=args.snap_window,
+            fade_out_ms=args.fade_out,
+            fade_in_ms=args.fade_in,
+            crossfade_ms=args.crossfade,
+            crossfade_shape=args.crossfade_shape,
+        )
     if verb in STAGE_VERB_NAMES:
         plan = read_plan(stdin_text)
         return _dispatch_stage(verb, plan, args)
@@ -323,6 +370,15 @@ def _dispatch(verb: str, args: argparse.Namespace, stdin_text: str | None) -> An
         return lib.render(plan, args.in_path, args.out_path)
     if verb == "verify":
         return lib.verify(args.path, target_lufs=args.target, ceiling_dbtp=args.ceiling)
+    if verb == "detect":
+        if args.detect_kind == "transients":
+            return lib.detect_transients(args.path, sensitivity=args.sensitivity, min_gap_ms=args.min_gap)
+        if args.detect_kind == "silence":
+            return lib.detect_silence(args.path, threshold_above_floor_db=args.threshold, min_len_ms=args.min_len)
+        if args.detect_kind == "fillers":
+            words = [w.strip() for w in args.words.split(",") if w.strip()] or None
+            return lib.detect_fillers(args.path, words=words, min_pause_ms=args.min_pause)
+        raise AssertionError(f"unreachable detect kind: {args.detect_kind}")
     if verb in _NOT_YET_BUILT:
         raise AudError(
             code="not_implemented",
@@ -407,6 +463,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if verb in PLAN_OUTPUT_VERBS:
         print(write_plan(outcome))
+    elif verb in REGIONS_OUTPUT_VERBS:
+        print(write_regions(outcome))
     else:
         _print_result(outcome)
     return 0

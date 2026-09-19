@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from aud.cli import PLAN_OUTPUT_VERBS, registered_verbs
+from aud.cli import PLAN_OUTPUT_VERBS, REGIONS_OUTPUT_VERBS, registered_verbs
 from aud.verbdoc import VERB_DOCS
 
 # Placeholder filenames verbdoc.py's prose uses, e.g. "in.wav", "out.wav",
@@ -188,6 +188,11 @@ def test_documented_example_parses_and_returns_a_clean_envelope(
         # and unwrapped, on success -- see cli.py's module docstring.
         assert isinstance(payload, dict)
         assert "stages" in payload
+    elif verb in REGIONS_OUTPUT_VERBS:
+        # 'detect' prints a regions document itself, raw and unwrapped, on
+        # success -- see contracts/regions.v1.md and cli.py's module docstring.
+        assert isinstance(payload, dict)
+        assert "regions" in payload
     else:
         assert isinstance(payload, dict)
         assert "result" in payload

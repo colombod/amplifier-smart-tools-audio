@@ -100,13 +100,8 @@ Parameters:
   fillers PATH     --words STR          Comma-separated filler vocabulary.
                    --min-pause FLOAT    Report pauses at least this long, ms. Default 700.
 
-Status:
-  Not yet built in this release. The regions document it will emit is
-  specified now in contracts/regions.v1.md, so a caller can be written
-  against it.
-
 Example:
-  aud detect silence in.wav --threshold 6 --min-len 400   # (planned)
+  aud detect silence in.wav --threshold 6 --min-len 400
 """,
     "cut": """\
 cut -- editing stage: remove an explicit list of regions
