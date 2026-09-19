@@ -22,6 +22,16 @@ aud detect silence in.wav \
   | aud render in.wav out.wav
 ```
 
+![The aud mastering chain, animated: one waveform measured, cut, repaired, split into bands, levelled and limited](images/chain-animation.gif)
+
+*One waveform, one frame, mutating in place: measured, cut shorter, repaired, split into four
+bands each compressed by a different amount, recombined, brought to −14 LUFS, then flattened
+against a −1.0 dBTP ceiling it never crosses. Rendered with
+[unfold](https://github.com/robotdad/amplifier-smart-tool-unfold);
+[how it was made and how to regenerate it](images/RECORDING.md).*
+
+The same chain as a still, for reading rather than watching:
+
 ![The aud mastering chain: measure, find and cut, repair, shape, finish](images/chain.png)
 
 Five phases, left to right. **Measure** reports what is actually there and changes nothing.
