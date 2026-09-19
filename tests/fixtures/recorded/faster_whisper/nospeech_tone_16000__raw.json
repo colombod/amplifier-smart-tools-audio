@@ -1,0 +1,637 @@
+{
+  "provenance": {
+    "recorded_at_utc": "2026-09-19T12:18:23.423613+00:00",
+    "faster_whisper_version": "1.2.1",
+    "ctranslate2_version": "4.8.2",
+    "numpy_version": "2.5.3",
+    "scipy_version": "1.18.1",
+    "soundfile_version": "0.13.1",
+    "python_version": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "model": "base",
+    "model_constructor": "WhisperModel(\"base\")  # all other args left at library defaults",
+    "transcribe_call": "model.transcribe(audio, word_timestamps=True)",
+    "source_wav": "nospeech_tone_16000.wav",
+    "source_wav_sha256": "540a6e57921a7e468b8d8a0a6b87ee3217f344161045ed7c9aacb214cec55bec",
+    "source_sample_rate": 16000,
+    "input_path": "raw",
+    "snippet": "import numpy as np, soundfile as sf\nfrom faster_whisper import WhisperModel\nx, sr = sf.read(WAV, dtype=\"float64\", always_2d=False)\nif x.ndim == 2:\n    x = x.mean(axis=1)\n# path == \"resampled_16k\" only:\n#   from fractions import Fraction; from scipy import signal\n#   frac = Fraction(16000, sr).limit_denominator(2000)\n#   x = signal.resample_poly(x, up=frac.numerator, down=frac.denominator)\naudio = x.astype(\"float32\")\nmodel = WhisperModel(\"base\")\nsegments, info = model.transcribe(audio, word_timestamps=True)\nsegments = list(segments)   # generator: nothing runs until it is drained\n",
+    "wall_seconds": 0.976
+  },
+  "input": {
+    "path_mode": "raw",
+    "source_sample_rate": 16000,
+    "source_channels": 1,
+    "source_samples": 80000,
+    "source_duration_s": 5.0,
+    "fed_sample_rate_assumed_by_library": 16000,
+    "fed_samples": 80000,
+    "fed_dtype": "float32",
+    "fed_duration_s_if_16k": 5.0,
+    "true_duration_s": 5.0,
+    "resampled_before_transcribe": false,
+    "declared_sample_rate_of_fed_array": 16000
+  },
+  "type_inventory": {
+    "info": {
+      "type": "TranscriptionInfo",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "all_language_probs",
+        "duration",
+        "duration_after_vad",
+        "language",
+        "language_probability",
+        "transcription_options",
+        "vad_options"
+      ],
+      "public_non_callable": [
+        "all_language_probs",
+        "duration",
+        "duration_after_vad",
+        "language",
+        "language_probability",
+        "transcription_options",
+        "vad_options"
+      ],
+      "has_dict": true,
+      "has_asdict": false,
+      "fields": []
+    },
+    "segment": null,
+    "word": null
+  },
+  "summary": {
+    "n_segments": 0,
+    "n_words": 0,
+    "text": "",
+    "last_word_end": null,
+    "degenerate_word_count": 0,
+    "degenerate_words": []
+  },
+  "info": {
+    "__type__": "TranscriptionInfo",
+    "language": "en",
+    "language_probability": 0.6657848358154297,
+    "duration": 5.0,
+    "duration_after_vad": 5.0,
+    "all_language_probs": [
+      [
+        "en",
+        0.6657848358154297
+      ],
+      [
+        "nn",
+        0.03499288484454155
+      ],
+      [
+        "ja",
+        0.03435869887471199
+      ],
+      [
+        "ko",
+        0.024065423756837845
+      ],
+      [
+        "es",
+        0.024011870846152306
+      ],
+      [
+        "ru",
+        0.020482968538999557
+      ],
+      [
+        "cy",
+        0.018831700086593628
+      ],
+      [
+        "hi",
+        0.01593708246946335
+      ],
+      [
+        "pt",
+        0.014508415944874287
+      ],
+      [
+        "zh",
+        0.014388826675713062
+      ],
+      [
+        "la",
+        0.013357356190681458
+      ],
+      [
+        "fr",
+        0.012983126565814018
+      ],
+      [
+        "it",
+        0.008756518363952637
+      ],
+      [
+        "de",
+        0.007829696871340275
+      ],
+      [
+        "jw",
+        0.006381228566169739
+      ],
+      [
+        "haw",
+        0.005413726903498173
+      ],
+      [
+        "tr",
+        0.005234723445028067
+      ],
+      [
+        "ms",
+        0.005156097933650017
+      ],
+      [
+        "nl",
+        0.005103103816509247
+      ],
+      [
+        "pl",
+        0.005026326049119234
+      ],
+      [
+        "ar",
+        0.004631484393030405
+      ],
+      [
+        "ta",
+        0.003397640073671937
+      ],
+      [
+        "el",
+        0.0031086786184459925
+      ],
+      [
+        "ur",
+        0.002994109410792589
+      ],
+      [
+        "te",
+        0.0025361794978380203
+      ],
+      [
+        "tl",
+        0.0024377990048378706
+      ],
+      [
+        "km",
+        0.0022651043254882097
+      ],
+      [
+        "vi",
+        0.002246122807264328
+      ],
+      [
+        "ml",
+        0.002238093875348568
+      ],
+      [
+        "th",
+        0.0021977939177304506
+      ],
+      [
+        "ro",
+        0.0018652292201295495
+      ],
+      [
+        "sa",
+        0.0018622752977535129
+      ],
+      [
+        "cs",
+        0.0016946637770161033
+      ],
+      [
+        "br",
+        0.0014025334967300296
+      ],
+      [
+        "id",
+        0.0013988092541694641
+      ],
+      [
+        "sv",
+        0.001339130336418748
+      ],
+      [
+        "sn",
+        0.0012519918382167816
+      ],
+      [
+        "si",
+        0.0012440745485946536
+      ],
+      [
+        "mi",
+        0.0012307515135034919
+      ],
+      [
+        "fa",
+        0.0009763130219653249
+      ],
+      [
+        "sl",
+        0.0009635215392336249
+      ],
+      [
+        "fi",
+        0.0009073771652765572
+      ],
+      [
+        "uk",
+        0.00081014254828915
+      ],
+      [
+        "bn",
+        0.0008043532725423574
+      ],
+      [
+        "he",
+        0.0007966025732457638
+      ],
+      [
+        "bg",
+        0.0007751718512736261
+      ],
+      [
+        "gl",
+        0.0007340173469856381
+      ],
+      [
+        "sk",
+        0.0006550675025209785
+      ],
+      [
+        "hr",
+        0.0006470844382420182
+      ],
+      [
+        "hu",
+        0.0006220624782145023
+      ],
+      [
+        "da",
+        0.0006009563221596181
+      ],
+      [
+        "no",
+        0.0005946651799604297
+      ],
+      [
+        "ca",
+        0.0005936429370194674
+      ],
+      [
+        "yo",
+        0.0004651019407901913
+      ],
+      [
+        "my",
+        0.0004168387677054852
+      ],
+      [
+        "bo",
+        0.00037555888411588967
+      ],
+      [
+        "mn",
+        0.0003703362890519202
+      ],
+      [
+        "sw",
+        0.00033401334076188505
+      ],
+      [
+        "bs",
+        0.00028286720043979585
+      ],
+      [
+        "yi",
+        0.00027012775535695255
+      ],
+      [
+        "oc",
+        0.0002380746154813096
+      ],
+      [
+        "af",
+        0.00022939439804758877
+      ],
+      [
+        "eu",
+        0.00020869335276074708
+      ],
+      [
+        "ne",
+        0.00020788767142221332
+      ],
+      [
+        "ht",
+        0.0001691498328000307
+      ],
+      [
+        "sr",
+        0.00016097715706564486
+      ],
+      [
+        "lv",
+        0.0001571776665514335
+      ],
+      [
+        "hy",
+        0.00013860671606380492
+      ],
+      [
+        "be",
+        0.0001358923764200881
+      ],
+      [
+        "is",
+        0.00012893680832348764
+      ],
+      [
+        "az",
+        0.0001237180840689689
+      ],
+      [
+        "fo",
+        0.00010591265163384378
+      ],
+      [
+        "kn",
+        9.949402010533959e-05
+      ],
+      [
+        "sd",
+        9.067451901501045e-05
+      ],
+      [
+        "ps",
+        8.578278357163072e-05
+      ],
+      [
+        "pa",
+        8.452431211480871e-05
+      ],
+      [
+        "lo",
+        8.448401786154136e-05
+      ],
+      [
+        "mr",
+        8.311514829983935e-05
+      ],
+      [
+        "ka",
+        8.02319627837278e-05
+      ],
+      [
+        "sq",
+        7.341393938986585e-05
+      ],
+      [
+        "mt",
+        6.437204137910157e-05
+      ],
+      [
+        "kk",
+        6.231196312000975e-05
+      ],
+      [
+        "et",
+        5.312327266437933e-05
+      ],
+      [
+        "lt",
+        5.2950341341784224e-05
+      ],
+      [
+        "mk",
+        3.3891126804519445e-05
+      ],
+      [
+        "as",
+        3.095861757174134e-05
+      ],
+      [
+        "gu",
+        3.0477545806206763e-05
+      ],
+      [
+        "am",
+        1.742031963658519e-05
+      ],
+      [
+        "ln",
+        1.6191812392207794e-05
+      ],
+      [
+        "so",
+        4.724032351077767e-06
+      ],
+      [
+        "tg",
+        1.4564670891559217e-06
+      ],
+      [
+        "tt",
+        1.1385894822524278e-06
+      ],
+      [
+        "su",
+        8.658983574605372e-07
+      ],
+      [
+        "lb",
+        5.130894464855373e-07
+      ],
+      [
+        "ha",
+        3.4148825989177567e-07
+      ],
+      [
+        "uz",
+        1.0292014707147246e-07
+      ],
+      [
+        "tk",
+        6.856521395093296e-08
+      ],
+      [
+        "ba",
+        6.465982949066529e-08
+      ],
+      [
+        "mg",
+        4.497697503325071e-08
+      ]
+    ],
+    "transcription_options": {
+      "__type__": "TranscriptionOptions",
+      "beam_size": 5,
+      "best_of": 5,
+      "patience": 1,
+      "length_penalty": 1,
+      "repetition_penalty": 1,
+      "no_repeat_ngram_size": 0,
+      "log_prob_threshold": -1.0,
+      "no_speech_threshold": 0.6,
+      "compression_ratio_threshold": 2.4,
+      "condition_on_previous_text": true,
+      "prompt_reset_on_temperature": 0.5,
+      "temperatures": [
+        0.0,
+        0.2,
+        0.4,
+        0.6,
+        0.8,
+        1.0
+      ],
+      "initial_prompt": null,
+      "prefix": null,
+      "suppress_blank": true,
+      "suppress_tokens": [
+        1,
+        2,
+        7,
+        8,
+        9,
+        10,
+        14,
+        25,
+        26,
+        27,
+        28,
+        29,
+        31,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        90,
+        91,
+        92,
+        93,
+        359,
+        503,
+        522,
+        542,
+        873,
+        893,
+        902,
+        918,
+        922,
+        931,
+        1350,
+        1853,
+        1982,
+        2460,
+        2627,
+        3246,
+        3253,
+        3268,
+        3536,
+        3846,
+        3961,
+        4183,
+        4667,
+        6585,
+        6647,
+        7273,
+        9061,
+        9383,
+        10428,
+        10929,
+        11938,
+        12033,
+        12331,
+        12562,
+        13793,
+        14157,
+        14635,
+        15265,
+        15618,
+        16553,
+        16604,
+        18362,
+        18956,
+        20075,
+        21675,
+        22520,
+        26130,
+        26161,
+        26435,
+        28279,
+        29464,
+        31650,
+        32302,
+        32470,
+        36865,
+        42863,
+        47425,
+        49870,
+        50254,
+        50258,
+        50358,
+        50359,
+        50360,
+        50361,
+        50362
+      ],
+      "without_timestamps": false,
+      "max_initial_timestamp": 1.0,
+      "word_timestamps": true,
+      "prepend_punctuations": "\"'\u201c\u00bf([{-",
+      "append_punctuations": "\"'.\u3002,\uff0c!\uff01?\uff1f:\uff1a\u201d)]}\u3001",
+      "multilingual": false,
+      "max_new_tokens": null,
+      "clip_timestamps": [
+        0.0
+      ],
+      "hallucination_silence_threshold": null,
+      "hotwords": null
+    },
+    "vad_options": null
+  },
+  "segments": [],
+  "words_flat": []
+}

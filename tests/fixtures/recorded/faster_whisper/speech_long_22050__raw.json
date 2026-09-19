@@ -1,0 +1,3625 @@
+{
+  "provenance": {
+    "recorded_at_utc": "2026-09-19T12:14:26.242847+00:00",
+    "faster_whisper_version": "1.2.1",
+    "ctranslate2_version": "4.8.2",
+    "numpy_version": "2.5.3",
+    "scipy_version": "1.18.1",
+    "soundfile_version": "0.13.1",
+    "python_version": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "model": "base",
+    "model_constructor": "WhisperModel(\"base\")  # all other args left at library defaults",
+    "transcribe_call": "model.transcribe(audio, word_timestamps=True)",
+    "source_wav": "speech_long_22050.wav",
+    "source_wav_sha256": "d728aa51760cd42c68c267d2e2fac8754753c58e4242cc02a032a02a6b6fd47d",
+    "source_sample_rate": 22050,
+    "input_path": "raw",
+    "snippet": "import numpy as np, soundfile as sf\nfrom faster_whisper import WhisperModel\nx, sr = sf.read(WAV, dtype=\"float64\", always_2d=False)\nif x.ndim == 2:\n    x = x.mean(axis=1)\n# path == \"resampled_16k\" only:\n#   from fractions import Fraction; from scipy import signal\n#   frac = Fraction(16000, sr).limit_denominator(2000)\n#   x = signal.resample_poly(x, up=frac.numerator, down=frac.denominator)\naudio = x.astype(\"float32\")\nmodel = WhisperModel(\"base\")\nsegments, info = model.transcribe(audio, word_timestamps=True)\nsegments = list(segments)   # generator: nothing runs until it is drained\n",
+    "wall_seconds": 8.63
+  },
+  "input": {
+    "path_mode": "raw",
+    "source_sample_rate": 22050,
+    "source_channels": 1,
+    "source_samples": 1423632,
+    "source_duration_s": 64.56381,
+    "fed_sample_rate_assumed_by_library": 16000,
+    "fed_samples": 1423632,
+    "fed_dtype": "float32",
+    "fed_duration_s_if_16k": 88.977,
+    "true_duration_s": 64.56381,
+    "resampled_before_transcribe": false,
+    "declared_sample_rate_of_fed_array": 22050
+  },
+  "type_inventory": {
+    "info": {
+      "type": "TranscriptionInfo",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "all_language_probs",
+        "duration",
+        "duration_after_vad",
+        "language",
+        "language_probability",
+        "transcription_options",
+        "vad_options"
+      ],
+      "public_non_callable": [
+        "all_language_probs",
+        "duration",
+        "duration_after_vad",
+        "language",
+        "language_probability",
+        "transcription_options",
+        "vad_options"
+      ],
+      "has_dict": true,
+      "has_asdict": false,
+      "fields": []
+    },
+    "segment": {
+      "type": "Segment",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "_asdict",
+        "avg_logprob",
+        "compression_ratio",
+        "end",
+        "id",
+        "no_speech_prob",
+        "seek",
+        "start",
+        "temperature",
+        "text",
+        "tokens",
+        "words"
+      ],
+      "public_non_callable": [
+        "avg_logprob",
+        "compression_ratio",
+        "end",
+        "id",
+        "no_speech_prob",
+        "seek",
+        "start",
+        "temperature",
+        "text",
+        "tokens",
+        "words"
+      ],
+      "has_dict": true,
+      "has_asdict": true,
+      "fields": []
+    },
+    "word": {
+      "type": "Word",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "_asdict",
+        "end",
+        "probability",
+        "start",
+        "word"
+      ],
+      "public_non_callable": [
+        "end",
+        "probability",
+        "start",
+        "word"
+      ],
+      "has_dict": true,
+      "has_asdict": true,
+      "fields": []
+    }
+  },
+  "summary": {
+    "n_segments": 16,
+    "n_words": 168,
+    "text": " So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording.",
+    "last_word_end": 88.56,
+    "degenerate_word_count": 0,
+    "degenerate_words": []
+  },
+  "info": {
+    "__type__": "TranscriptionInfo",
+    "language": "en",
+    "language_probability": 0.9950554370880127,
+    "duration": 88.977,
+    "duration_after_vad": 88.977,
+    "all_language_probs": [
+      [
+        "en",
+        0.9950554370880127
+      ],
+      [
+        "pt",
+        0.0008713132701814175
+      ],
+      [
+        "tr",
+        0.0006709610461257398
+      ],
+      [
+        "ar",
+        0.0004781442985404283
+      ],
+      [
+        "la",
+        0.00036155025009065866
+      ],
+      [
+        "mi",
+        0.00028288993053138256
+      ],
+      [
+        "fr",
+        0.000251179066253826
+      ],
+      [
+        "ja",
+        0.00023044981935527176
+      ],
+      [
+        "cy",
+        0.0002035066718235612
+      ],
+      [
+        "ko",
+        0.00015594501746818423
+      ],
+      [
+        "de",
+        0.0001332011161139235
+      ],
+      [
+        "nl",
+        0.00011447512952145189
+      ],
+      [
+        "th",
+        9.312674956163391e-05
+      ],
+      [
+        "vi",
+        9.130226681008935e-05
+      ],
+      [
+        "pl",
+        8.724128565518185e-05
+      ],
+      [
+        "sv",
+        8.630995580460876e-05
+      ],
+      [
+        "hu",
+        8.149755012709647e-05
+      ],
+      [
+        "haw",
+        6.749126623617485e-05
+      ],
+      [
+        "ur",
+        6.663083331659436e-05
+      ],
+      [
+        "it",
+        6.247965939110145e-05
+      ],
+      [
+        "hi",
+        6.20199934928678e-05
+      ],
+      [
+        "km",
+        5.810209404444322e-05
+      ],
+      [
+        "zh",
+        5.233870615484193e-05
+      ],
+      [
+        "nn",
+        4.9641457735560834e-05
+      ],
+      [
+        "es",
+        2.8338958145468496e-05
+      ],
+      [
+        "el",
+        2.5239323804271407e-05
+      ],
+      [
+        "cs",
+        2.430195308988914e-05
+      ],
+      [
+        "fa",
+        2.1337518774089403e-05
+      ],
+      [
+        "ml",
+        1.4680957974633202e-05
+      ],
+      [
+        "sn",
+        1.4457307770499028e-05
+      ],
+      [
+        "tl",
+        1.3340152690943796e-05
+      ],
+      [
+        "sa",
+        1.2750342648359947e-05
+      ],
+      [
+        "ru",
+        1.2632106518140063e-05
+      ],
+      [
+        "ro",
+        1.262103978660889e-05
+      ],
+      [
+        "fi",
+        1.194188735098578e-05
+      ],
+      [
+        "hy",
+        1.1055083632527385e-05
+      ],
+      [
+        "jw",
+        9.379482435178943e-06
+      ],
+      [
+        "no",
+        9.075876732822508e-06
+      ],
+      [
+        "sl",
+        7.851655936974566e-06
+      ],
+      [
+        "br",
+        7.68862992117647e-06
+      ],
+      [
+        "bn",
+        7.516621280956315e-06
+      ],
+      [
+        "yi",
+        7.417305369017413e-06
+      ],
+      [
+        "lv",
+        7.116790584404953e-06
+      ],
+      [
+        "ms",
+        7.041777735139476e-06
+      ],
+      [
+        "uk",
+        6.984532774367835e-06
+      ],
+      [
+        "sk",
+        6.846468295407249e-06
+      ],
+      [
+        "si",
+        6.639901130256476e-06
+      ],
+      [
+        "he",
+        4.57641590401181e-06
+      ],
+      [
+        "da",
+        4.542755505099194e-06
+      ],
+      [
+        "ht",
+        4.530010301095899e-06
+      ],
+      [
+        "ca",
+        3.968551027355716e-06
+      ],
+      [
+        "id",
+        3.938369445677381e-06
+      ],
+      [
+        "ta",
+        2.9532998269132804e-06
+      ],
+      [
+        "mt",
+        2.770732635326567e-06
+      ],
+      [
+        "bg",
+        2.1533671770157525e-06
+      ],
+      [
+        "yo",
+        1.555238100081624e-06
+      ],
+      [
+        "bo",
+        1.4546336615239852e-06
+      ],
+      [
+        "af",
+        1.3667664688910008e-06
+      ],
+      [
+        "pa",
+        1.2407458598318044e-06
+      ],
+      [
+        "sw",
+        1.151755213868455e-06
+      ],
+      [
+        "hr",
+        9.826432005866081e-07
+      ],
+      [
+        "is",
+        9.292367622038e-07
+      ],
+      [
+        "fo",
+        7.658483127670479e-07
+      ],
+      [
+        "lt",
+        7.222920430649538e-07
+      ],
+      [
+        "lo",
+        6.929257096999208e-07
+      ],
+      [
+        "my",
+        6.860111625428544e-07
+      ],
+      [
+        "bs",
+        5.657690280713723e-07
+      ],
+      [
+        "az",
+        5.116242505209811e-07
+      ],
+      [
+        "mn",
+        4.957209966960363e-07
+      ],
+      [
+        "oc",
+        4.290872936962842e-07
+      ],
+      [
+        "sq",
+        4.096031602784933e-07
+      ],
+      [
+        "sd",
+        3.800092827077606e-07
+      ],
+      [
+        "eu",
+        3.608600707138976e-07
+      ],
+      [
+        "ne",
+        3.506382881823811e-07
+      ],
+      [
+        "te",
+        2.6859692070502206e-07
+      ],
+      [
+        "ps",
+        2.57520014201873e-07
+      ],
+      [
+        "et",
+        2.2375306230060232e-07
+      ],
+      [
+        "sr",
+        1.992845284348732e-07
+      ],
+      [
+        "kk",
+        1.6576237271692662e-07
+      ],
+      [
+        "mr",
+        1.4213566146281664e-07
+      ],
+      [
+        "gl",
+        1.3538603127472015e-07
+      ],
+      [
+        "kn",
+        1.1559713897213442e-07
+      ],
+      [
+        "mk",
+        1.1481388639822399e-07
+      ],
+      [
+        "be",
+        1.1002462230180754e-07
+      ],
+      [
+        "am",
+        1.0766527935857084e-07
+      ],
+      [
+        "gu",
+        6.687805864658003e-08
+      ],
+      [
+        "ln",
+        5.995184437779244e-08
+      ],
+      [
+        "lb",
+        5.8932499769071e-08
+      ],
+      [
+        "so",
+        4.438330591938211e-08
+      ],
+      [
+        "ka",
+        4.191089075789023e-08
+      ],
+      [
+        "tg",
+        2.4888898053632147e-08
+      ],
+      [
+        "as",
+        2.456859427013569e-08
+      ],
+      [
+        "tt",
+        1.978997943297145e-08
+      ],
+      [
+        "ha",
+        4.523640129150408e-09
+      ],
+      [
+        "su",
+        4.305847234320481e-09
+      ],
+      [
+        "uz",
+        2.670472731836071e-09
+      ],
+      [
+        "ba",
+        1.5781641549139636e-09
+      ],
+      [
+        "tk",
+        1.3740885096424904e-09
+      ],
+      [
+        "mg",
+        7.576534954978342e-10
+      ]
+    ],
+    "transcription_options": {
+      "__type__": "TranscriptionOptions",
+      "beam_size": 5,
+      "best_of": 5,
+      "patience": 1,
+      "length_penalty": 1,
+      "repetition_penalty": 1,
+      "no_repeat_ngram_size": 0,
+      "log_prob_threshold": -1.0,
+      "no_speech_threshold": 0.6,
+      "compression_ratio_threshold": 2.4,
+      "condition_on_previous_text": true,
+      "prompt_reset_on_temperature": 0.5,
+      "temperatures": [
+        0.0,
+        0.2,
+        0.4,
+        0.6,
+        0.8,
+        1.0
+      ],
+      "initial_prompt": null,
+      "prefix": null,
+      "suppress_blank": true,
+      "suppress_tokens": [
+        1,
+        2,
+        7,
+        8,
+        9,
+        10,
+        14,
+        25,
+        26,
+        27,
+        28,
+        29,
+        31,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        90,
+        91,
+        92,
+        93,
+        359,
+        503,
+        522,
+        542,
+        873,
+        893,
+        902,
+        918,
+        922,
+        931,
+        1350,
+        1853,
+        1982,
+        2460,
+        2627,
+        3246,
+        3253,
+        3268,
+        3536,
+        3846,
+        3961,
+        4183,
+        4667,
+        6585,
+        6647,
+        7273,
+        9061,
+        9383,
+        10428,
+        10929,
+        11938,
+        12033,
+        12331,
+        12562,
+        13793,
+        14157,
+        14635,
+        15265,
+        15618,
+        16553,
+        16604,
+        18362,
+        18956,
+        20075,
+        21675,
+        22520,
+        26130,
+        26161,
+        26435,
+        28279,
+        29464,
+        31650,
+        32302,
+        32470,
+        36865,
+        42863,
+        47425,
+        49870,
+        50254,
+        50258,
+        50358,
+        50359,
+        50360,
+        50361,
+        50362
+      ],
+      "without_timestamps": false,
+      "max_initial_timestamp": 1.0,
+      "word_timestamps": true,
+      "prepend_punctuations": "\"'\u201c\u00bf([{-",
+      "append_punctuations": "\"'.\u3002,\uff0c!\uff01?\uff1f:\uff1a\u201d)]}\u3001",
+      "multilingual": false,
+      "max_new_tokens": null,
+      "clip_timestamps": [
+        0.0
+      ],
+      "hallucination_silence_threshold": null,
+      "hotwords": null
+    },
+    "vad_options": null
+  },
+  "segments": [
+    {
+      "__type__": "Segment",
+      "id": 1,
+      "seek": 0,
+      "start": 0.0,
+      "end": 5.8,
+      "text": " So, um, the first thing we need to do is, uh, check the levels.",
+      "tokens": [
+        50364,
+        407,
+        11,
+        1105,
+        11,
+        264,
+        700,
+        551,
+        321,
+        643,
+        281,
+        360,
+        307,
+        11,
+        2232,
+        11,
+        1520,
+        264,
+        4358,
+        13,
+        50714
+      ],
+      "avg_logprob": -0.20313984287135742,
+      "compression_ratio": 2.1595744680851063,
+      "no_speech_prob": 0.09838950634002686,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 0.0,
+          "end": 0.26,
+          "word": " So,",
+          "probability": 0.8354124426841736
+        },
+        {
+          "__type__": "Word",
+          "start": 0.82,
+          "end": 0.92,
+          "word": " um,",
+          "probability": 0.3221387267112732
+        },
+        {
+          "__type__": "Word",
+          "start": 1.36,
+          "end": 1.6,
+          "word": " the",
+          "probability": 0.9832550287246704
+        },
+        {
+          "__type__": "Word",
+          "start": 1.6,
+          "end": 1.86,
+          "word": " first",
+          "probability": 0.994418740272522
+        },
+        {
+          "__type__": "Word",
+          "start": 1.86,
+          "end": 2.26,
+          "word": " thing",
+          "probability": 0.9960162043571472
+        },
+        {
+          "__type__": "Word",
+          "start": 2.26,
+          "end": 2.52,
+          "word": " we",
+          "probability": 0.9950467348098755
+        },
+        {
+          "__type__": "Word",
+          "start": 2.52,
+          "end": 2.76,
+          "word": " need",
+          "probability": 0.9974557757377625
+        },
+        {
+          "__type__": "Word",
+          "start": 2.76,
+          "end": 3.02,
+          "word": " to",
+          "probability": 0.9993438124656677
+        },
+        {
+          "__type__": "Word",
+          "start": 3.02,
+          "end": 3.2,
+          "word": " do",
+          "probability": 0.9986795783042908
+        },
+        {
+          "__type__": "Word",
+          "start": 3.2,
+          "end": 3.66,
+          "word": " is,",
+          "probability": 0.9942560791969299
+        },
+        {
+          "__type__": "Word",
+          "start": 4.34,
+          "end": 4.44,
+          "word": " uh,",
+          "probability": 0.41578784584999084
+        },
+        {
+          "__type__": "Word",
+          "start": 5.0,
+          "end": 5.14,
+          "word": " check",
+          "probability": 0.9817273616790771
+        },
+        {
+          "__type__": "Word",
+          "start": 5.14,
+          "end": 5.44,
+          "word": " the",
+          "probability": 0.9987500905990601
+        },
+        {
+          "__type__": "Word",
+          "start": 5.44,
+          "end": 5.8,
+          "word": " levels.",
+          "probability": 0.9817084074020386
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 2,
+      "seek": 0,
+      "start": 7.28,
+      "end": 10.64,
+      "text": " And then, um, we can start recording.",
+      "tokens": [
+        50714,
+        400,
+        550,
+        11,
+        1105,
+        11,
+        321,
+        393,
+        722,
+        6613,
+        13,
+        50914
+      ],
+      "avg_logprob": -0.20313984287135742,
+      "compression_ratio": 2.1595744680851063,
+      "no_speech_prob": 0.09838950634002686,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 7.28,
+          "end": 7.88,
+          "word": " And",
+          "probability": 0.967666506767273
+        },
+        {
+          "__type__": "Word",
+          "start": 7.88,
+          "end": 8.18,
+          "word": " then,",
+          "probability": 0.9839699864387512
+        },
+        {
+          "__type__": "Word",
+          "start": 9.0,
+          "end": 9.2,
+          "word": " um,",
+          "probability": 0.4873756170272827
+        },
+        {
+          "__type__": "Word",
+          "start": 9.52,
+          "end": 9.64,
+          "word": " we",
+          "probability": 0.9963805079460144
+        },
+        {
+          "__type__": "Word",
+          "start": 9.64,
+          "end": 9.8,
+          "word": " can",
+          "probability": 0.9984874725341797
+        },
+        {
+          "__type__": "Word",
+          "start": 9.8,
+          "end": 10.14,
+          "word": " start",
+          "probability": 0.9966537952423096
+        },
+        {
+          "__type__": "Word",
+          "start": 10.14,
+          "end": 10.64,
+          "word": " recording.",
+          "probability": 0.9964666366577148
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 3,
+      "seek": 0,
+      "start": 11.18,
+      "end": 16.96,
+      "text": " So, um, the first thing we need to do is, uh, check the levels.",
+      "tokens": [
+        50914,
+        407,
+        11,
+        1105,
+        11,
+        264,
+        700,
+        551,
+        321,
+        643,
+        281,
+        360,
+        307,
+        11,
+        2232,
+        11,
+        1520,
+        264,
+        4358,
+        13,
+        51264
+      ],
+      "avg_logprob": -0.20313984287135742,
+      "compression_ratio": 2.1595744680851063,
+      "no_speech_prob": 0.09838950634002686,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 11.18,
+          "end": 11.36,
+          "word": " So,",
+          "probability": 0.9951104521751404
+        },
+        {
+          "__type__": "Word",
+          "start": 11.94,
+          "end": 12.08,
+          "word": " um,",
+          "probability": 0.9716508984565735
+        },
+        {
+          "__type__": "Word",
+          "start": 12.46,
+          "end": 12.7,
+          "word": " the",
+          "probability": 0.9968306422233582
+        },
+        {
+          "__type__": "Word",
+          "start": 12.7,
+          "end": 13.0,
+          "word": " first",
+          "probability": 0.9986312985420227
+        },
+        {
+          "__type__": "Word",
+          "start": 13.0,
+          "end": 13.38,
+          "word": " thing",
+          "probability": 0.9964487552642822
+        },
+        {
+          "__type__": "Word",
+          "start": 13.38,
+          "end": 13.64,
+          "word": " we",
+          "probability": 0.9973353743553162
+        },
+        {
+          "__type__": "Word",
+          "start": 13.64,
+          "end": 13.88,
+          "word": " need",
+          "probability": 0.998184859752655
+        },
+        {
+          "__type__": "Word",
+          "start": 13.88,
+          "end": 14.14,
+          "word": " to",
+          "probability": 0.9994155168533325
+        },
+        {
+          "__type__": "Word",
+          "start": 14.14,
+          "end": 14.32,
+          "word": " do",
+          "probability": 0.9990511536598206
+        },
+        {
+          "__type__": "Word",
+          "start": 14.32,
+          "end": 14.78,
+          "word": " is,",
+          "probability": 0.9939445853233337
+        },
+        {
+          "__type__": "Word",
+          "start": 15.46,
+          "end": 15.58,
+          "word": " uh,",
+          "probability": 0.9723256230354309
+        },
+        {
+          "__type__": "Word",
+          "start": 16.04,
+          "end": 16.26,
+          "word": " check",
+          "probability": 0.9966451525688171
+        },
+        {
+          "__type__": "Word",
+          "start": 16.26,
+          "end": 16.56,
+          "word": " the",
+          "probability": 0.9990204572677612
+        },
+        {
+          "__type__": "Word",
+          "start": 16.56,
+          "end": 16.96,
+          "word": " levels.",
+          "probability": 0.9980036616325378
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 4,
+      "seek": 0,
+      "start": 18.4,
+      "end": 21.88,
+      "text": " And then, um, we can start recording.",
+      "tokens": [
+        51264,
+        400,
+        550,
+        11,
+        1105,
+        11,
+        321,
+        393,
+        722,
+        6613,
+        13,
+        51464
+      ],
+      "avg_logprob": -0.20313984287135742,
+      "compression_ratio": 2.1595744680851063,
+      "no_speech_prob": 0.09838950634002686,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 18.4,
+          "end": 19.0,
+          "word": " And",
+          "probability": 0.9952772855758667
+        },
+        {
+          "__type__": "Word",
+          "start": 19.0,
+          "end": 19.32,
+          "word": " then,",
+          "probability": 0.9979288578033447
+        },
+        {
+          "__type__": "Word",
+          "start": 20.12,
+          "end": 20.34,
+          "word": " um,",
+          "probability": 0.8968481421470642
+        },
+        {
+          "__type__": "Word",
+          "start": 20.64,
+          "end": 20.76,
+          "word": " we",
+          "probability": 0.997983455657959
+        },
+        {
+          "__type__": "Word",
+          "start": 20.76,
+          "end": 20.92,
+          "word": " can",
+          "probability": 0.998766303062439
+        },
+        {
+          "__type__": "Word",
+          "start": 20.92,
+          "end": 21.24,
+          "word": " start",
+          "probability": 0.9982278943061829
+        },
+        {
+          "__type__": "Word",
+          "start": 21.24,
+          "end": 21.88,
+          "word": " recording.",
+          "probability": 0.9971675276756287
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 5,
+      "seek": 2188,
+      "start": 21.88,
+      "end": 28.04,
+      "text": " So, um, the first thing we need to do is, uh, check the levels.",
+      "tokens": [
+        50364,
+        407,
+        11,
+        1105,
+        11,
+        264,
+        700,
+        551,
+        321,
+        643,
+        281,
+        360,
+        307,
+        11,
+        2232,
+        11,
+        1520,
+        264,
+        4358,
+        13,
+        50714
+      ],
+      "avg_logprob": -0.03280154478681438,
+      "compression_ratio": 2.1595744680851063,
+      "no_speech_prob": 0.04469487443566322,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 21.88,
+          "end": 22.48,
+          "word": " So,",
+          "probability": 0.5836248993873596
+        },
+        {
+          "__type__": "Word",
+          "start": 23.08,
+          "end": 23.18,
+          "word": " um,",
+          "probability": 0.2966419756412506
+        },
+        {
+          "__type__": "Word",
+          "start": 23.7,
+          "end": 23.82,
+          "word": " the",
+          "probability": 0.9810512065887451
+        },
+        {
+          "__type__": "Word",
+          "start": 23.82,
+          "end": 24.1,
+          "word": " first",
+          "probability": 0.9946547746658325
+        },
+        {
+          "__type__": "Word",
+          "start": 24.1,
+          "end": 24.5,
+          "word": " thing",
+          "probability": 0.9952957034111023
+        },
+        {
+          "__type__": "Word",
+          "start": 24.5,
+          "end": 24.76,
+          "word": " we",
+          "probability": 0.9918580651283264
+        },
+        {
+          "__type__": "Word",
+          "start": 24.76,
+          "end": 25.0,
+          "word": " need",
+          "probability": 0.9966806769371033
+        },
+        {
+          "__type__": "Word",
+          "start": 25.0,
+          "end": 25.26,
+          "word": " to",
+          "probability": 0.999038815498352
+        },
+        {
+          "__type__": "Word",
+          "start": 25.26,
+          "end": 25.44,
+          "word": " do",
+          "probability": 0.998672366142273
+        },
+        {
+          "__type__": "Word",
+          "start": 25.44,
+          "end": 25.92,
+          "word": " is,",
+          "probability": 0.9937463998794556
+        },
+        {
+          "__type__": "Word",
+          "start": 26.58,
+          "end": 26.7,
+          "word": " uh,",
+          "probability": 0.3778744637966156
+        },
+        {
+          "__type__": "Word",
+          "start": 27.24,
+          "end": 27.38,
+          "word": " check",
+          "probability": 0.9765516519546509
+        },
+        {
+          "__type__": "Word",
+          "start": 27.38,
+          "end": 27.68,
+          "word": " the",
+          "probability": 0.9978229999542236
+        },
+        {
+          "__type__": "Word",
+          "start": 27.68,
+          "end": 28.04,
+          "word": " levels.",
+          "probability": 0.9828779697418213
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 6,
+      "seek": 2188,
+      "start": 29.52,
+      "end": 32.88,
+      "text": " And then, um, we can start recording.",
+      "tokens": [
+        50714,
+        400,
+        550,
+        11,
+        1105,
+        11,
+        321,
+        393,
+        722,
+        6613,
+        13,
+        50914
+      ],
+      "avg_logprob": -0.03280154478681438,
+      "compression_ratio": 2.1595744680851063,
+      "no_speech_prob": 0.04469487443566322,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 29.52,
+          "end": 30.14,
+          "word": " And",
+          "probability": 0.9558767676353455
+        },
+        {
+          "__type__": "Word",
+          "start": 30.14,
+          "end": 30.44,
+          "word": " then,",
+          "probability": 0.9798526763916016
+        },
+        {
+          "__type__": "Word",
+          "start": 31.24,
+          "end": 31.46,
+          "word": " um,",
+          "probability": 0.6643019318580627
+        },
+        {
+          "__type__": "Word",
+          "start": 31.78,
+          "end": 31.9,
+          "word": " we",
+          "probability": 0.9954428672790527
+        },
+        {
+          "__type__": "Word",
+          "start": 31.9,
+          "end": 32.06,
+          "word": " can",
+          "probability": 0.9983287453651428
+        },
+        {
+          "__type__": "Word",
+          "start": 32.06,
+          "end": 32.38,
+          "word": " start",
+          "probability": 0.9957373142242432
+        },
+        {
+          "__type__": "Word",
+          "start": 32.38,
+          "end": 32.88,
+          "word": " recording.",
+          "probability": 0.996245801448822
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 7,
+      "seek": 2188,
+      "start": 33.4,
+      "end": 39.2,
+      "text": " So, um, the first thing we need to do is, uh, check the levels.",
+      "tokens": [
+        50914,
+        407,
+        11,
+        1105,
+        11,
+        264,
+        700,
+        551,
+        321,
+        643,
+        281,
+        360,
+        307,
+        11,
+        2232,
+        11,
+        1520,
+        264,
+        4358,
+        13,
+        51264
+      ],
+      "avg_logprob": -0.03280154478681438,
+      "compression_ratio": 2.1595744680851063,
+      "no_speech_prob": 0.04469487443566322,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 33.4,
+          "end": 33.6,
+          "word": " So,",
+          "probability": 0.9934450387954712
+        },
+        {
+          "__type__": "Word",
+          "start": 34.18,
+          "end": 34.32,
+          "word": " um,",
+          "probability": 0.9754142165184021
+        },
+        {
+          "__type__": "Word",
+          "start": 34.68,
+          "end": 34.94,
+          "word": " the",
+          "probability": 0.9971045851707458
+        },
+        {
+          "__type__": "Word",
+          "start": 34.94,
+          "end": 35.24,
+          "word": " first",
+          "probability": 0.9983735084533691
+        },
+        {
+          "__type__": "Word",
+          "start": 35.24,
+          "end": 35.62,
+          "word": " thing",
+          "probability": 0.9961732029914856
+        },
+        {
+          "__type__": "Word",
+          "start": 35.62,
+          "end": 35.88,
+          "word": " we",
+          "probability": 0.9972915053367615
+        },
+        {
+          "__type__": "Word",
+          "start": 35.88,
+          "end": 36.12,
+          "word": " need",
+          "probability": 0.9979828596115112
+        },
+        {
+          "__type__": "Word",
+          "start": 36.12,
+          "end": 36.38,
+          "word": " to",
+          "probability": 0.9992807507514954
+        },
+        {
+          "__type__": "Word",
+          "start": 36.38,
+          "end": 36.58,
+          "word": " do",
+          "probability": 0.9989838004112244
+        },
+        {
+          "__type__": "Word",
+          "start": 36.58,
+          "end": 37.04,
+          "word": " is,",
+          "probability": 0.9942864775657654
+        },
+        {
+          "__type__": "Word",
+          "start": 37.7,
+          "end": 37.82,
+          "word": " uh,",
+          "probability": 0.9753816723823547
+        },
+        {
+          "__type__": "Word",
+          "start": 38.22,
+          "end": 38.5,
+          "word": " check",
+          "probability": 0.9963393211364746
+        },
+        {
+          "__type__": "Word",
+          "start": 38.5,
+          "end": 38.8,
+          "word": " the",
+          "probability": 0.9989225268363953
+        },
+        {
+          "__type__": "Word",
+          "start": 38.8,
+          "end": 39.2,
+          "word": " levels.",
+          "probability": 0.9979140162467957
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 8,
+      "seek": 2188,
+      "start": 40.620000000000005,
+      "end": 44.1,
+      "text": " And then, um, we can start recording.",
+      "tokens": [
+        51264,
+        400,
+        550,
+        11,
+        1105,
+        11,
+        321,
+        393,
+        722,
+        6613,
+        13,
+        51464
+      ],
+      "avg_logprob": -0.03280154478681438,
+      "compression_ratio": 2.1595744680851063,
+      "no_speech_prob": 0.04469487443566322,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 40.620000000000005,
+          "end": 41.24,
+          "word": " And",
+          "probability": 0.9950467348098755
+        },
+        {
+          "__type__": "Word",
+          "start": 41.24,
+          "end": 41.56,
+          "word": " then,",
+          "probability": 0.9977746605873108
+        },
+        {
+          "__type__": "Word",
+          "start": 42.36,
+          "end": 42.62,
+          "word": " um,",
+          "probability": 0.923951268196106
+        },
+        {
+          "__type__": "Word",
+          "start": 42.9,
+          "end": 43.0,
+          "word": " we",
+          "probability": 0.998143196105957
+        },
+        {
+          "__type__": "Word",
+          "start": 43.0,
+          "end": 43.16,
+          "word": " can",
+          "probability": 0.9987993240356445
+        },
+        {
+          "__type__": "Word",
+          "start": 43.16,
+          "end": 43.48,
+          "word": " start",
+          "probability": 0.9980992674827576
+        },
+        {
+          "__type__": "Word",
+          "start": 43.48,
+          "end": 44.1,
+          "word": " recording.",
+          "probability": 0.9972378015518188
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 9,
+      "seek": 4410,
+      "start": 44.1,
+      "end": 50.28,
+      "text": " So, um, the first thing we need to do is, uh, check the levels.",
+      "tokens": [
+        50364,
+        407,
+        11,
+        1105,
+        11,
+        264,
+        700,
+        551,
+        321,
+        643,
+        281,
+        360,
+        307,
+        11,
+        2232,
+        11,
+        1520,
+        264,
+        4358,
+        13,
+        50714
+      ],
+      "avg_logprob": -0.02984226489549174,
+      "compression_ratio": 2.1595744680851063,
+      "no_speech_prob": 0.023065166547894478,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 44.1,
+          "end": 44.72,
+          "word": " So,",
+          "probability": 0.5757704377174377
+        },
+        {
+          "__type__": "Word",
+          "start": 45.32,
+          "end": 45.44,
+          "word": " um,",
+          "probability": 0.2743070125579834
+        },
+        {
+          "__type__": "Word",
+          "start": 45.94,
+          "end": 46.08,
+          "word": " the",
+          "probability": 0.9810913801193237
+        },
+        {
+          "__type__": "Word",
+          "start": 46.08,
+          "end": 46.32,
+          "word": " first",
+          "probability": 0.9947198629379272
+        },
+        {
+          "__type__": "Word",
+          "start": 46.32,
+          "end": 46.74,
+          "word": " thing",
+          "probability": 0.9954615235328674
+        },
+        {
+          "__type__": "Word",
+          "start": 46.74,
+          "end": 47.0,
+          "word": " we",
+          "probability": 0.9920225143432617
+        },
+        {
+          "__type__": "Word",
+          "start": 47.0,
+          "end": 47.26,
+          "word": " need",
+          "probability": 0.996699869632721
+        },
+        {
+          "__type__": "Word",
+          "start": 47.26,
+          "end": 47.5,
+          "word": " to",
+          "probability": 0.9991494417190552
+        },
+        {
+          "__type__": "Word",
+          "start": 47.5,
+          "end": 47.7,
+          "word": " do",
+          "probability": 0.9985081553459167
+        },
+        {
+          "__type__": "Word",
+          "start": 47.7,
+          "end": 48.16,
+          "word": " is,",
+          "probability": 0.9941346049308777
+        },
+        {
+          "__type__": "Word",
+          "start": 48.82,
+          "end": 48.94,
+          "word": " uh,",
+          "probability": 0.3737427294254303
+        },
+        {
+          "__type__": "Word",
+          "start": 49.48,
+          "end": 49.62,
+          "word": " check",
+          "probability": 0.9708124399185181
+        },
+        {
+          "__type__": "Word",
+          "start": 49.62,
+          "end": 49.92,
+          "word": " the",
+          "probability": 0.9979910850524902
+        },
+        {
+          "__type__": "Word",
+          "start": 49.92,
+          "end": 50.28,
+          "word": " levels.",
+          "probability": 0.9831447601318359
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 10,
+      "seek": 4410,
+      "start": 51.760000000000005,
+      "end": 55.12,
+      "text": " And then, um, we can start recording.",
+      "tokens": [
+        50714,
+        400,
+        550,
+        11,
+        1105,
+        11,
+        321,
+        393,
+        722,
+        6613,
+        13,
+        50914
+      ],
+      "avg_logprob": -0.02984226489549174,
+      "compression_ratio": 2.1595744680851063,
+      "no_speech_prob": 0.023065166547894478,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 51.760000000000005,
+          "end": 52.38,
+          "word": " And",
+          "probability": 0.9524229764938354
+        },
+        {
+          "__type__": "Word",
+          "start": 52.38,
+          "end": 52.68,
+          "word": " then,",
+          "probability": 0.9821946024894714
+        },
+        {
+          "__type__": "Word",
+          "start": 53.48,
+          "end": 53.68,
+          "word": " um,",
+          "probability": 0.6460967063903809
+        },
+        {
+          "__type__": "Word",
+          "start": 54.02,
+          "end": 54.14,
+          "word": " we",
+          "probability": 0.9951079487800598
+        },
+        {
+          "__type__": "Word",
+          "start": 54.14,
+          "end": 54.3,
+          "word": " can",
+          "probability": 0.9984135627746582
+        },
+        {
+          "__type__": "Word",
+          "start": 54.3,
+          "end": 54.62,
+          "word": " start",
+          "probability": 0.9950634837150574
+        },
+        {
+          "__type__": "Word",
+          "start": 54.62,
+          "end": 55.12,
+          "word": " recording.",
+          "probability": 0.9957336783409119
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 11,
+      "seek": 4410,
+      "start": 55.62,
+      "end": 61.44,
+      "text": " So, um, the first thing we need to do is, uh, check the levels.",
+      "tokens": [
+        50914,
+        407,
+        11,
+        1105,
+        11,
+        264,
+        700,
+        551,
+        321,
+        643,
+        281,
+        360,
+        307,
+        11,
+        2232,
+        11,
+        1520,
+        264,
+        4358,
+        13,
+        51264
+      ],
+      "avg_logprob": -0.02984226489549174,
+      "compression_ratio": 2.1595744680851063,
+      "no_speech_prob": 0.023065166547894478,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 55.62,
+          "end": 55.84,
+          "word": " So,",
+          "probability": 0.9922643899917603
+        },
+        {
+          "__type__": "Word",
+          "start": 56.42,
+          "end": 56.6,
+          "word": " um,",
+          "probability": 0.9770598411560059
+        },
+        {
+          "__type__": "Word",
+          "start": 56.92,
+          "end": 57.18,
+          "word": " the",
+          "probability": 0.9971315860748291
+        },
+        {
+          "__type__": "Word",
+          "start": 57.18,
+          "end": 57.46,
+          "word": " first",
+          "probability": 0.998427152633667
+        },
+        {
+          "__type__": "Word",
+          "start": 57.46,
+          "end": 57.88,
+          "word": " thing",
+          "probability": 0.9961093068122864
+        },
+        {
+          "__type__": "Word",
+          "start": 57.88,
+          "end": 58.12,
+          "word": " we",
+          "probability": 0.9971840977668762
+        },
+        {
+          "__type__": "Word",
+          "start": 58.12,
+          "end": 58.36,
+          "word": " need",
+          "probability": 0.9979785084724426
+        },
+        {
+          "__type__": "Word",
+          "start": 58.36,
+          "end": 58.62,
+          "word": " to",
+          "probability": 0.9992559552192688
+        },
+        {
+          "__type__": "Word",
+          "start": 58.62,
+          "end": 58.82,
+          "word": " do",
+          "probability": 0.998969316482544
+        },
+        {
+          "__type__": "Word",
+          "start": 58.82,
+          "end": 59.3,
+          "word": " is,",
+          "probability": 0.995000422000885
+        },
+        {
+          "__type__": "Word",
+          "start": 59.94,
+          "end": 60.06,
+          "word": " uh,",
+          "probability": 0.9772993326187134
+        },
+        {
+          "__type__": "Word",
+          "start": 60.58,
+          "end": 60.74,
+          "word": " check",
+          "probability": 0.9961020946502686
+        },
+        {
+          "__type__": "Word",
+          "start": 60.74,
+          "end": 61.04,
+          "word": " the",
+          "probability": 0.9989853501319885
+        },
+        {
+          "__type__": "Word",
+          "start": 61.04,
+          "end": 61.44,
+          "word": " levels.",
+          "probability": 0.9978140592575073
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 12,
+      "seek": 4410,
+      "start": 62.86,
+      "end": 66.36,
+      "text": " And then, um, we can start recording.",
+      "tokens": [
+        51264,
+        400,
+        550,
+        11,
+        1105,
+        11,
+        321,
+        393,
+        722,
+        6613,
+        13,
+        51464
+      ],
+      "avg_logprob": -0.02984226489549174,
+      "compression_ratio": 2.1595744680851063,
+      "no_speech_prob": 0.023065166547894478,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 62.86,
+          "end": 63.48,
+          "word": " And",
+          "probability": 0.9946821331977844
+        },
+        {
+          "__type__": "Word",
+          "start": 63.48,
+          "end": 63.8,
+          "word": " then,",
+          "probability": 0.9978570342063904
+        },
+        {
+          "__type__": "Word",
+          "start": 64.62,
+          "end": 64.86,
+          "word": " um,",
+          "probability": 0.9232979416847229
+        },
+        {
+          "__type__": "Word",
+          "start": 65.14,
+          "end": 65.26,
+          "word": " we",
+          "probability": 0.9981244206428528
+        },
+        {
+          "__type__": "Word",
+          "start": 65.26,
+          "end": 65.4,
+          "word": " can",
+          "probability": 0.998751163482666
+        },
+        {
+          "__type__": "Word",
+          "start": 65.4,
+          "end": 65.74,
+          "word": " start",
+          "probability": 0.9978559613227844
+        },
+        {
+          "__type__": "Word",
+          "start": 65.74,
+          "end": 66.36,
+          "word": " recording.",
+          "probability": 0.9972948431968689
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 13,
+      "seek": 6636,
+      "start": 66.36,
+      "end": 72.56,
+      "text": " So, um, the first thing we need to do is, uh, check the levels.",
+      "tokens": [
+        50364,
+        407,
+        11,
+        1105,
+        11,
+        264,
+        700,
+        551,
+        321,
+        643,
+        281,
+        360,
+        307,
+        11,
+        2232,
+        11,
+        1520,
+        264,
+        4358,
+        13,
+        50714
+      ],
+      "avg_logprob": -0.03501071095732706,
+      "compression_ratio": 1.7741935483870968,
+      "no_speech_prob": 0.05758006498217583,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 66.36,
+          "end": 66.96,
+          "word": " So,",
+          "probability": 0.48919299244880676
+        },
+        {
+          "__type__": "Word",
+          "start": 67.56,
+          "end": 67.72,
+          "word": " um,",
+          "probability": 0.5110770463943481
+        },
+        {
+          "__type__": "Word",
+          "start": 68.18,
+          "end": 68.32,
+          "word": " the",
+          "probability": 0.9797057509422302
+        },
+        {
+          "__type__": "Word",
+          "start": 68.32,
+          "end": 68.58,
+          "word": " first",
+          "probability": 0.9941828846931458
+        },
+        {
+          "__type__": "Word",
+          "start": 68.58,
+          "end": 69.0,
+          "word": " thing",
+          "probability": 0.9946898221969604
+        },
+        {
+          "__type__": "Word",
+          "start": 69.0,
+          "end": 69.26,
+          "word": " we",
+          "probability": 0.9915094375610352
+        },
+        {
+          "__type__": "Word",
+          "start": 69.26,
+          "end": 69.5,
+          "word": " need",
+          "probability": 0.9966787099838257
+        },
+        {
+          "__type__": "Word",
+          "start": 69.5,
+          "end": 69.76,
+          "word": " to",
+          "probability": 0.998943030834198
+        },
+        {
+          "__type__": "Word",
+          "start": 69.76,
+          "end": 69.94,
+          "word": " do",
+          "probability": 0.9985222220420837
+        },
+        {
+          "__type__": "Word",
+          "start": 69.94,
+          "end": 70.4,
+          "word": " is,",
+          "probability": 0.993230938911438
+        },
+        {
+          "__type__": "Word",
+          "start": 71.04,
+          "end": 71.16,
+          "word": " uh,",
+          "probability": 0.33210277557373047
+        },
+        {
+          "__type__": "Word",
+          "start": 71.7,
+          "end": 71.86,
+          "word": " check",
+          "probability": 0.9633728861808777
+        },
+        {
+          "__type__": "Word",
+          "start": 71.86,
+          "end": 72.16,
+          "word": " the",
+          "probability": 0.9983421564102173
+        },
+        {
+          "__type__": "Word",
+          "start": 72.16,
+          "end": 72.56,
+          "word": " levels.",
+          "probability": 0.9834416508674622
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 14,
+      "seek": 6636,
+      "start": 74.0,
+      "end": 77.36,
+      "text": " And then, um, we can start recording.",
+      "tokens": [
+        50714,
+        400,
+        550,
+        11,
+        1105,
+        11,
+        321,
+        393,
+        722,
+        6613,
+        13,
+        50914
+      ],
+      "avg_logprob": -0.03501071095732706,
+      "compression_ratio": 1.7741935483870968,
+      "no_speech_prob": 0.05758006498217583,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 74.0,
+          "end": 74.62,
+          "word": " And",
+          "probability": 0.9419118165969849
+        },
+        {
+          "__type__": "Word",
+          "start": 74.62,
+          "end": 74.92,
+          "word": " then,",
+          "probability": 0.9812144041061401
+        },
+        {
+          "__type__": "Word",
+          "start": 75.72,
+          "end": 75.92,
+          "word": " um,",
+          "probability": 0.5505724549293518
+        },
+        {
+          "__type__": "Word",
+          "start": 76.26,
+          "end": 76.38,
+          "word": " we",
+          "probability": 0.9926822781562805
+        },
+        {
+          "__type__": "Word",
+          "start": 76.38,
+          "end": 76.54,
+          "word": " can",
+          "probability": 0.9979495406150818
+        },
+        {
+          "__type__": "Word",
+          "start": 76.54,
+          "end": 76.88,
+          "word": " start",
+          "probability": 0.9949070811271667
+        },
+        {
+          "__type__": "Word",
+          "start": 76.88,
+          "end": 77.36,
+          "word": " recording.",
+          "probability": 0.9963194131851196
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 15,
+      "seek": 6636,
+      "start": 77.86,
+      "end": 83.72,
+      "text": " So, um, the first thing we need to do is, uh, check the levels.",
+      "tokens": [
+        50914,
+        407,
+        11,
+        1105,
+        11,
+        264,
+        700,
+        551,
+        321,
+        643,
+        281,
+        360,
+        307,
+        11,
+        2232,
+        11,
+        1520,
+        264,
+        4358,
+        13,
+        51314
+      ],
+      "avg_logprob": -0.03501071095732706,
+      "compression_ratio": 1.7741935483870968,
+      "no_speech_prob": 0.05758006498217583,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 77.86,
+          "end": 78.08,
+          "word": " So,",
+          "probability": 0.9850391149520874
+        },
+        {
+          "__type__": "Word",
+          "start": 78.66,
+          "end": 78.86,
+          "word": " um,",
+          "probability": 0.9819526076316833
+        },
+        {
+          "__type__": "Word",
+          "start": 79.2,
+          "end": 79.44,
+          "word": " the",
+          "probability": 0.9967101812362671
+        },
+        {
+          "__type__": "Word",
+          "start": 79.44,
+          "end": 79.74,
+          "word": " first",
+          "probability": 0.9983314871788025
+        },
+        {
+          "__type__": "Word",
+          "start": 79.74,
+          "end": 80.12,
+          "word": " thing",
+          "probability": 0.995559573173523
+        },
+        {
+          "__type__": "Word",
+          "start": 80.12,
+          "end": 80.38,
+          "word": " we",
+          "probability": 0.9962595701217651
+        },
+        {
+          "__type__": "Word",
+          "start": 80.38,
+          "end": 80.62,
+          "word": " need",
+          "probability": 0.9972862005233765
+        },
+        {
+          "__type__": "Word",
+          "start": 80.62,
+          "end": 80.86,
+          "word": " to",
+          "probability": 0.9990620017051697
+        },
+        {
+          "__type__": "Word",
+          "start": 80.86,
+          "end": 81.06,
+          "word": " do",
+          "probability": 0.9989725351333618
+        },
+        {
+          "__type__": "Word",
+          "start": 81.06,
+          "end": 81.54,
+          "word": " is,",
+          "probability": 0.994652509689331
+        },
+        {
+          "__type__": "Word",
+          "start": 82.18,
+          "end": 82.28,
+          "word": " uh,",
+          "probability": 0.9754664897918701
+        },
+        {
+          "__type__": "Word",
+          "start": 82.68,
+          "end": 83.0,
+          "word": " check",
+          "probability": 0.9951618313789368
+        },
+        {
+          "__type__": "Word",
+          "start": 83.0,
+          "end": 83.28,
+          "word": " the",
+          "probability": 0.9987404942512512
+        },
+        {
+          "__type__": "Word",
+          "start": 83.28,
+          "end": 83.72,
+          "word": " levels.",
+          "probability": 0.9977340698242188
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 16,
+      "seek": 8372,
+      "start": 85.0,
+      "end": 88.56,
+      "text": " And then, um, we can start recording.",
+      "tokens": [
+        50414,
+        400,
+        550,
+        11,
+        1105,
+        11,
+        321,
+        393,
+        722,
+        6613,
+        13,
+        50714
+      ],
+      "avg_logprob": -0.10585491244609539,
+      "compression_ratio": 0.8222222222222222,
+      "no_speech_prob": 0.5959219932556152,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 85.0,
+          "end": 85.74,
+          "word": " And",
+          "probability": 0.4220333397388458
+        },
+        {
+          "__type__": "Word",
+          "start": 85.74,
+          "end": 86.22,
+          "word": " then,",
+          "probability": 0.9718713164329529
+        },
+        {
+          "__type__": "Word",
+          "start": 86.7,
+          "end": 87.06,
+          "word": " um,",
+          "probability": 0.004752094391733408
+        },
+        {
+          "__type__": "Word",
+          "start": 87.38,
+          "end": 87.5,
+          "word": " we",
+          "probability": 0.9750462770462036
+        },
+        {
+          "__type__": "Word",
+          "start": 87.5,
+          "end": 87.64,
+          "word": " can",
+          "probability": 0.9934628009796143
+        },
+        {
+          "__type__": "Word",
+          "start": 87.64,
+          "end": 88.0,
+          "word": " start",
+          "probability": 0.9894770383834839
+        },
+        {
+          "__type__": "Word",
+          "start": 88.0,
+          "end": 88.56,
+          "word": " recording.",
+          "probability": 0.9913323521614075
+        }
+      ],
+      "temperature": 0.0
+    }
+  ],
+  "words_flat": [
+    {
+      "__type__": "Word",
+      "start": 0.0,
+      "end": 0.26,
+      "word": " So,",
+      "probability": 0.8354124426841736
+    },
+    {
+      "__type__": "Word",
+      "start": 0.82,
+      "end": 0.92,
+      "word": " um,",
+      "probability": 0.3221387267112732
+    },
+    {
+      "__type__": "Word",
+      "start": 1.36,
+      "end": 1.6,
+      "word": " the",
+      "probability": 0.9832550287246704
+    },
+    {
+      "__type__": "Word",
+      "start": 1.6,
+      "end": 1.86,
+      "word": " first",
+      "probability": 0.994418740272522
+    },
+    {
+      "__type__": "Word",
+      "start": 1.86,
+      "end": 2.26,
+      "word": " thing",
+      "probability": 0.9960162043571472
+    },
+    {
+      "__type__": "Word",
+      "start": 2.26,
+      "end": 2.52,
+      "word": " we",
+      "probability": 0.9950467348098755
+    },
+    {
+      "__type__": "Word",
+      "start": 2.52,
+      "end": 2.76,
+      "word": " need",
+      "probability": 0.9974557757377625
+    },
+    {
+      "__type__": "Word",
+      "start": 2.76,
+      "end": 3.02,
+      "word": " to",
+      "probability": 0.9993438124656677
+    },
+    {
+      "__type__": "Word",
+      "start": 3.02,
+      "end": 3.2,
+      "word": " do",
+      "probability": 0.9986795783042908
+    },
+    {
+      "__type__": "Word",
+      "start": 3.2,
+      "end": 3.66,
+      "word": " is,",
+      "probability": 0.9942560791969299
+    },
+    {
+      "__type__": "Word",
+      "start": 4.34,
+      "end": 4.44,
+      "word": " uh,",
+      "probability": 0.41578784584999084
+    },
+    {
+      "__type__": "Word",
+      "start": 5.0,
+      "end": 5.14,
+      "word": " check",
+      "probability": 0.9817273616790771
+    },
+    {
+      "__type__": "Word",
+      "start": 5.14,
+      "end": 5.44,
+      "word": " the",
+      "probability": 0.9987500905990601
+    },
+    {
+      "__type__": "Word",
+      "start": 5.44,
+      "end": 5.8,
+      "word": " levels.",
+      "probability": 0.9817084074020386
+    },
+    {
+      "__type__": "Word",
+      "start": 7.28,
+      "end": 7.88,
+      "word": " And",
+      "probability": 0.967666506767273
+    },
+    {
+      "__type__": "Word",
+      "start": 7.88,
+      "end": 8.18,
+      "word": " then,",
+      "probability": 0.9839699864387512
+    },
+    {
+      "__type__": "Word",
+      "start": 9.0,
+      "end": 9.2,
+      "word": " um,",
+      "probability": 0.4873756170272827
+    },
+    {
+      "__type__": "Word",
+      "start": 9.52,
+      "end": 9.64,
+      "word": " we",
+      "probability": 0.9963805079460144
+    },
+    {
+      "__type__": "Word",
+      "start": 9.64,
+      "end": 9.8,
+      "word": " can",
+      "probability": 0.9984874725341797
+    },
+    {
+      "__type__": "Word",
+      "start": 9.8,
+      "end": 10.14,
+      "word": " start",
+      "probability": 0.9966537952423096
+    },
+    {
+      "__type__": "Word",
+      "start": 10.14,
+      "end": 10.64,
+      "word": " recording.",
+      "probability": 0.9964666366577148
+    },
+    {
+      "__type__": "Word",
+      "start": 11.18,
+      "end": 11.36,
+      "word": " So,",
+      "probability": 0.9951104521751404
+    },
+    {
+      "__type__": "Word",
+      "start": 11.94,
+      "end": 12.08,
+      "word": " um,",
+      "probability": 0.9716508984565735
+    },
+    {
+      "__type__": "Word",
+      "start": 12.46,
+      "end": 12.7,
+      "word": " the",
+      "probability": 0.9968306422233582
+    },
+    {
+      "__type__": "Word",
+      "start": 12.7,
+      "end": 13.0,
+      "word": " first",
+      "probability": 0.9986312985420227
+    },
+    {
+      "__type__": "Word",
+      "start": 13.0,
+      "end": 13.38,
+      "word": " thing",
+      "probability": 0.9964487552642822
+    },
+    {
+      "__type__": "Word",
+      "start": 13.38,
+      "end": 13.64,
+      "word": " we",
+      "probability": 0.9973353743553162
+    },
+    {
+      "__type__": "Word",
+      "start": 13.64,
+      "end": 13.88,
+      "word": " need",
+      "probability": 0.998184859752655
+    },
+    {
+      "__type__": "Word",
+      "start": 13.88,
+      "end": 14.14,
+      "word": " to",
+      "probability": 0.9994155168533325
+    },
+    {
+      "__type__": "Word",
+      "start": 14.14,
+      "end": 14.32,
+      "word": " do",
+      "probability": 0.9990511536598206
+    },
+    {
+      "__type__": "Word",
+      "start": 14.32,
+      "end": 14.78,
+      "word": " is,",
+      "probability": 0.9939445853233337
+    },
+    {
+      "__type__": "Word",
+      "start": 15.46,
+      "end": 15.58,
+      "word": " uh,",
+      "probability": 0.9723256230354309
+    },
+    {
+      "__type__": "Word",
+      "start": 16.04,
+      "end": 16.26,
+      "word": " check",
+      "probability": 0.9966451525688171
+    },
+    {
+      "__type__": "Word",
+      "start": 16.26,
+      "end": 16.56,
+      "word": " the",
+      "probability": 0.9990204572677612
+    },
+    {
+      "__type__": "Word",
+      "start": 16.56,
+      "end": 16.96,
+      "word": " levels.",
+      "probability": 0.9980036616325378
+    },
+    {
+      "__type__": "Word",
+      "start": 18.4,
+      "end": 19.0,
+      "word": " And",
+      "probability": 0.9952772855758667
+    },
+    {
+      "__type__": "Word",
+      "start": 19.0,
+      "end": 19.32,
+      "word": " then,",
+      "probability": 0.9979288578033447
+    },
+    {
+      "__type__": "Word",
+      "start": 20.12,
+      "end": 20.34,
+      "word": " um,",
+      "probability": 0.8968481421470642
+    },
+    {
+      "__type__": "Word",
+      "start": 20.64,
+      "end": 20.76,
+      "word": " we",
+      "probability": 0.997983455657959
+    },
+    {
+      "__type__": "Word",
+      "start": 20.76,
+      "end": 20.92,
+      "word": " can",
+      "probability": 0.998766303062439
+    },
+    {
+      "__type__": "Word",
+      "start": 20.92,
+      "end": 21.24,
+      "word": " start",
+      "probability": 0.9982278943061829
+    },
+    {
+      "__type__": "Word",
+      "start": 21.24,
+      "end": 21.88,
+      "word": " recording.",
+      "probability": 0.9971675276756287
+    },
+    {
+      "__type__": "Word",
+      "start": 21.88,
+      "end": 22.48,
+      "word": " So,",
+      "probability": 0.5836248993873596
+    },
+    {
+      "__type__": "Word",
+      "start": 23.08,
+      "end": 23.18,
+      "word": " um,",
+      "probability": 0.2966419756412506
+    },
+    {
+      "__type__": "Word",
+      "start": 23.7,
+      "end": 23.82,
+      "word": " the",
+      "probability": 0.9810512065887451
+    },
+    {
+      "__type__": "Word",
+      "start": 23.82,
+      "end": 24.1,
+      "word": " first",
+      "probability": 0.9946547746658325
+    },
+    {
+      "__type__": "Word",
+      "start": 24.1,
+      "end": 24.5,
+      "word": " thing",
+      "probability": 0.9952957034111023
+    },
+    {
+      "__type__": "Word",
+      "start": 24.5,
+      "end": 24.76,
+      "word": " we",
+      "probability": 0.9918580651283264
+    },
+    {
+      "__type__": "Word",
+      "start": 24.76,
+      "end": 25.0,
+      "word": " need",
+      "probability": 0.9966806769371033
+    },
+    {
+      "__type__": "Word",
+      "start": 25.0,
+      "end": 25.26,
+      "word": " to",
+      "probability": 0.999038815498352
+    },
+    {
+      "__type__": "Word",
+      "start": 25.26,
+      "end": 25.44,
+      "word": " do",
+      "probability": 0.998672366142273
+    },
+    {
+      "__type__": "Word",
+      "start": 25.44,
+      "end": 25.92,
+      "word": " is,",
+      "probability": 0.9937463998794556
+    },
+    {
+      "__type__": "Word",
+      "start": 26.58,
+      "end": 26.7,
+      "word": " uh,",
+      "probability": 0.3778744637966156
+    },
+    {
+      "__type__": "Word",
+      "start": 27.24,
+      "end": 27.38,
+      "word": " check",
+      "probability": 0.9765516519546509
+    },
+    {
+      "__type__": "Word",
+      "start": 27.38,
+      "end": 27.68,
+      "word": " the",
+      "probability": 0.9978229999542236
+    },
+    {
+      "__type__": "Word",
+      "start": 27.68,
+      "end": 28.04,
+      "word": " levels.",
+      "probability": 0.9828779697418213
+    },
+    {
+      "__type__": "Word",
+      "start": 29.52,
+      "end": 30.14,
+      "word": " And",
+      "probability": 0.9558767676353455
+    },
+    {
+      "__type__": "Word",
+      "start": 30.14,
+      "end": 30.44,
+      "word": " then,",
+      "probability": 0.9798526763916016
+    },
+    {
+      "__type__": "Word",
+      "start": 31.24,
+      "end": 31.46,
+      "word": " um,",
+      "probability": 0.6643019318580627
+    },
+    {
+      "__type__": "Word",
+      "start": 31.78,
+      "end": 31.9,
+      "word": " we",
+      "probability": 0.9954428672790527
+    },
+    {
+      "__type__": "Word",
+      "start": 31.9,
+      "end": 32.06,
+      "word": " can",
+      "probability": 0.9983287453651428
+    },
+    {
+      "__type__": "Word",
+      "start": 32.06,
+      "end": 32.38,
+      "word": " start",
+      "probability": 0.9957373142242432
+    },
+    {
+      "__type__": "Word",
+      "start": 32.38,
+      "end": 32.88,
+      "word": " recording.",
+      "probability": 0.996245801448822
+    },
+    {
+      "__type__": "Word",
+      "start": 33.4,
+      "end": 33.6,
+      "word": " So,",
+      "probability": 0.9934450387954712
+    },
+    {
+      "__type__": "Word",
+      "start": 34.18,
+      "end": 34.32,
+      "word": " um,",
+      "probability": 0.9754142165184021
+    },
+    {
+      "__type__": "Word",
+      "start": 34.68,
+      "end": 34.94,
+      "word": " the",
+      "probability": 0.9971045851707458
+    },
+    {
+      "__type__": "Word",
+      "start": 34.94,
+      "end": 35.24,
+      "word": " first",
+      "probability": 0.9983735084533691
+    },
+    {
+      "__type__": "Word",
+      "start": 35.24,
+      "end": 35.62,
+      "word": " thing",
+      "probability": 0.9961732029914856
+    },
+    {
+      "__type__": "Word",
+      "start": 35.62,
+      "end": 35.88,
+      "word": " we",
+      "probability": 0.9972915053367615
+    },
+    {
+      "__type__": "Word",
+      "start": 35.88,
+      "end": 36.12,
+      "word": " need",
+      "probability": 0.9979828596115112
+    },
+    {
+      "__type__": "Word",
+      "start": 36.12,
+      "end": 36.38,
+      "word": " to",
+      "probability": 0.9992807507514954
+    },
+    {
+      "__type__": "Word",
+      "start": 36.38,
+      "end": 36.58,
+      "word": " do",
+      "probability": 0.9989838004112244
+    },
+    {
+      "__type__": "Word",
+      "start": 36.58,
+      "end": 37.04,
+      "word": " is,",
+      "probability": 0.9942864775657654
+    },
+    {
+      "__type__": "Word",
+      "start": 37.7,
+      "end": 37.82,
+      "word": " uh,",
+      "probability": 0.9753816723823547
+    },
+    {
+      "__type__": "Word",
+      "start": 38.22,
+      "end": 38.5,
+      "word": " check",
+      "probability": 0.9963393211364746
+    },
+    {
+      "__type__": "Word",
+      "start": 38.5,
+      "end": 38.8,
+      "word": " the",
+      "probability": 0.9989225268363953
+    },
+    {
+      "__type__": "Word",
+      "start": 38.8,
+      "end": 39.2,
+      "word": " levels.",
+      "probability": 0.9979140162467957
+    },
+    {
+      "__type__": "Word",
+      "start": 40.620000000000005,
+      "end": 41.24,
+      "word": " And",
+      "probability": 0.9950467348098755
+    },
+    {
+      "__type__": "Word",
+      "start": 41.24,
+      "end": 41.56,
+      "word": " then,",
+      "probability": 0.9977746605873108
+    },
+    {
+      "__type__": "Word",
+      "start": 42.36,
+      "end": 42.62,
+      "word": " um,",
+      "probability": 0.923951268196106
+    },
+    {
+      "__type__": "Word",
+      "start": 42.9,
+      "end": 43.0,
+      "word": " we",
+      "probability": 0.998143196105957
+    },
+    {
+      "__type__": "Word",
+      "start": 43.0,
+      "end": 43.16,
+      "word": " can",
+      "probability": 0.9987993240356445
+    },
+    {
+      "__type__": "Word",
+      "start": 43.16,
+      "end": 43.48,
+      "word": " start",
+      "probability": 0.9980992674827576
+    },
+    {
+      "__type__": "Word",
+      "start": 43.48,
+      "end": 44.1,
+      "word": " recording.",
+      "probability": 0.9972378015518188
+    },
+    {
+      "__type__": "Word",
+      "start": 44.1,
+      "end": 44.72,
+      "word": " So,",
+      "probability": 0.5757704377174377
+    },
+    {
+      "__type__": "Word",
+      "start": 45.32,
+      "end": 45.44,
+      "word": " um,",
+      "probability": 0.2743070125579834
+    },
+    {
+      "__type__": "Word",
+      "start": 45.94,
+      "end": 46.08,
+      "word": " the",
+      "probability": 0.9810913801193237
+    },
+    {
+      "__type__": "Word",
+      "start": 46.08,
+      "end": 46.32,
+      "word": " first",
+      "probability": 0.9947198629379272
+    },
+    {
+      "__type__": "Word",
+      "start": 46.32,
+      "end": 46.74,
+      "word": " thing",
+      "probability": 0.9954615235328674
+    },
+    {
+      "__type__": "Word",
+      "start": 46.74,
+      "end": 47.0,
+      "word": " we",
+      "probability": 0.9920225143432617
+    },
+    {
+      "__type__": "Word",
+      "start": 47.0,
+      "end": 47.26,
+      "word": " need",
+      "probability": 0.996699869632721
+    },
+    {
+      "__type__": "Word",
+      "start": 47.26,
+      "end": 47.5,
+      "word": " to",
+      "probability": 0.9991494417190552
+    },
+    {
+      "__type__": "Word",
+      "start": 47.5,
+      "end": 47.7,
+      "word": " do",
+      "probability": 0.9985081553459167
+    },
+    {
+      "__type__": "Word",
+      "start": 47.7,
+      "end": 48.16,
+      "word": " is,",
+      "probability": 0.9941346049308777
+    },
+    {
+      "__type__": "Word",
+      "start": 48.82,
+      "end": 48.94,
+      "word": " uh,",
+      "probability": 0.3737427294254303
+    },
+    {
+      "__type__": "Word",
+      "start": 49.48,
+      "end": 49.62,
+      "word": " check",
+      "probability": 0.9708124399185181
+    },
+    {
+      "__type__": "Word",
+      "start": 49.62,
+      "end": 49.92,
+      "word": " the",
+      "probability": 0.9979910850524902
+    },
+    {
+      "__type__": "Word",
+      "start": 49.92,
+      "end": 50.28,
+      "word": " levels.",
+      "probability": 0.9831447601318359
+    },
+    {
+      "__type__": "Word",
+      "start": 51.760000000000005,
+      "end": 52.38,
+      "word": " And",
+      "probability": 0.9524229764938354
+    },
+    {
+      "__type__": "Word",
+      "start": 52.38,
+      "end": 52.68,
+      "word": " then,",
+      "probability": 0.9821946024894714
+    },
+    {
+      "__type__": "Word",
+      "start": 53.48,
+      "end": 53.68,
+      "word": " um,",
+      "probability": 0.6460967063903809
+    },
+    {
+      "__type__": "Word",
+      "start": 54.02,
+      "end": 54.14,
+      "word": " we",
+      "probability": 0.9951079487800598
+    },
+    {
+      "__type__": "Word",
+      "start": 54.14,
+      "end": 54.3,
+      "word": " can",
+      "probability": 0.9984135627746582
+    },
+    {
+      "__type__": "Word",
+      "start": 54.3,
+      "end": 54.62,
+      "word": " start",
+      "probability": 0.9950634837150574
+    },
+    {
+      "__type__": "Word",
+      "start": 54.62,
+      "end": 55.12,
+      "word": " recording.",
+      "probability": 0.9957336783409119
+    },
+    {
+      "__type__": "Word",
+      "start": 55.62,
+      "end": 55.84,
+      "word": " So,",
+      "probability": 0.9922643899917603
+    },
+    {
+      "__type__": "Word",
+      "start": 56.42,
+      "end": 56.6,
+      "word": " um,",
+      "probability": 0.9770598411560059
+    },
+    {
+      "__type__": "Word",
+      "start": 56.92,
+      "end": 57.18,
+      "word": " the",
+      "probability": 0.9971315860748291
+    },
+    {
+      "__type__": "Word",
+      "start": 57.18,
+      "end": 57.46,
+      "word": " first",
+      "probability": 0.998427152633667
+    },
+    {
+      "__type__": "Word",
+      "start": 57.46,
+      "end": 57.88,
+      "word": " thing",
+      "probability": 0.9961093068122864
+    },
+    {
+      "__type__": "Word",
+      "start": 57.88,
+      "end": 58.12,
+      "word": " we",
+      "probability": 0.9971840977668762
+    },
+    {
+      "__type__": "Word",
+      "start": 58.12,
+      "end": 58.36,
+      "word": " need",
+      "probability": 0.9979785084724426
+    },
+    {
+      "__type__": "Word",
+      "start": 58.36,
+      "end": 58.62,
+      "word": " to",
+      "probability": 0.9992559552192688
+    },
+    {
+      "__type__": "Word",
+      "start": 58.62,
+      "end": 58.82,
+      "word": " do",
+      "probability": 0.998969316482544
+    },
+    {
+      "__type__": "Word",
+      "start": 58.82,
+      "end": 59.3,
+      "word": " is,",
+      "probability": 0.995000422000885
+    },
+    {
+      "__type__": "Word",
+      "start": 59.94,
+      "end": 60.06,
+      "word": " uh,",
+      "probability": 0.9772993326187134
+    },
+    {
+      "__type__": "Word",
+      "start": 60.58,
+      "end": 60.74,
+      "word": " check",
+      "probability": 0.9961020946502686
+    },
+    {
+      "__type__": "Word",
+      "start": 60.74,
+      "end": 61.04,
+      "word": " the",
+      "probability": 0.9989853501319885
+    },
+    {
+      "__type__": "Word",
+      "start": 61.04,
+      "end": 61.44,
+      "word": " levels.",
+      "probability": 0.9978140592575073
+    },
+    {
+      "__type__": "Word",
+      "start": 62.86,
+      "end": 63.48,
+      "word": " And",
+      "probability": 0.9946821331977844
+    },
+    {
+      "__type__": "Word",
+      "start": 63.48,
+      "end": 63.8,
+      "word": " then,",
+      "probability": 0.9978570342063904
+    },
+    {
+      "__type__": "Word",
+      "start": 64.62,
+      "end": 64.86,
+      "word": " um,",
+      "probability": 0.9232979416847229
+    },
+    {
+      "__type__": "Word",
+      "start": 65.14,
+      "end": 65.26,
+      "word": " we",
+      "probability": 0.9981244206428528
+    },
+    {
+      "__type__": "Word",
+      "start": 65.26,
+      "end": 65.4,
+      "word": " can",
+      "probability": 0.998751163482666
+    },
+    {
+      "__type__": "Word",
+      "start": 65.4,
+      "end": 65.74,
+      "word": " start",
+      "probability": 0.9978559613227844
+    },
+    {
+      "__type__": "Word",
+      "start": 65.74,
+      "end": 66.36,
+      "word": " recording.",
+      "probability": 0.9972948431968689
+    },
+    {
+      "__type__": "Word",
+      "start": 66.36,
+      "end": 66.96,
+      "word": " So,",
+      "probability": 0.48919299244880676
+    },
+    {
+      "__type__": "Word",
+      "start": 67.56,
+      "end": 67.72,
+      "word": " um,",
+      "probability": 0.5110770463943481
+    },
+    {
+      "__type__": "Word",
+      "start": 68.18,
+      "end": 68.32,
+      "word": " the",
+      "probability": 0.9797057509422302
+    },
+    {
+      "__type__": "Word",
+      "start": 68.32,
+      "end": 68.58,
+      "word": " first",
+      "probability": 0.9941828846931458
+    },
+    {
+      "__type__": "Word",
+      "start": 68.58,
+      "end": 69.0,
+      "word": " thing",
+      "probability": 0.9946898221969604
+    },
+    {
+      "__type__": "Word",
+      "start": 69.0,
+      "end": 69.26,
+      "word": " we",
+      "probability": 0.9915094375610352
+    },
+    {
+      "__type__": "Word",
+      "start": 69.26,
+      "end": 69.5,
+      "word": " need",
+      "probability": 0.9966787099838257
+    },
+    {
+      "__type__": "Word",
+      "start": 69.5,
+      "end": 69.76,
+      "word": " to",
+      "probability": 0.998943030834198
+    },
+    {
+      "__type__": "Word",
+      "start": 69.76,
+      "end": 69.94,
+      "word": " do",
+      "probability": 0.9985222220420837
+    },
+    {
+      "__type__": "Word",
+      "start": 69.94,
+      "end": 70.4,
+      "word": " is,",
+      "probability": 0.993230938911438
+    },
+    {
+      "__type__": "Word",
+      "start": 71.04,
+      "end": 71.16,
+      "word": " uh,",
+      "probability": 0.33210277557373047
+    },
+    {
+      "__type__": "Word",
+      "start": 71.7,
+      "end": 71.86,
+      "word": " check",
+      "probability": 0.9633728861808777
+    },
+    {
+      "__type__": "Word",
+      "start": 71.86,
+      "end": 72.16,
+      "word": " the",
+      "probability": 0.9983421564102173
+    },
+    {
+      "__type__": "Word",
+      "start": 72.16,
+      "end": 72.56,
+      "word": " levels.",
+      "probability": 0.9834416508674622
+    },
+    {
+      "__type__": "Word",
+      "start": 74.0,
+      "end": 74.62,
+      "word": " And",
+      "probability": 0.9419118165969849
+    },
+    {
+      "__type__": "Word",
+      "start": 74.62,
+      "end": 74.92,
+      "word": " then,",
+      "probability": 0.9812144041061401
+    },
+    {
+      "__type__": "Word",
+      "start": 75.72,
+      "end": 75.92,
+      "word": " um,",
+      "probability": 0.5505724549293518
+    },
+    {
+      "__type__": "Word",
+      "start": 76.26,
+      "end": 76.38,
+      "word": " we",
+      "probability": 0.9926822781562805
+    },
+    {
+      "__type__": "Word",
+      "start": 76.38,
+      "end": 76.54,
+      "word": " can",
+      "probability": 0.9979495406150818
+    },
+    {
+      "__type__": "Word",
+      "start": 76.54,
+      "end": 76.88,
+      "word": " start",
+      "probability": 0.9949070811271667
+    },
+    {
+      "__type__": "Word",
+      "start": 76.88,
+      "end": 77.36,
+      "word": " recording.",
+      "probability": 0.9963194131851196
+    },
+    {
+      "__type__": "Word",
+      "start": 77.86,
+      "end": 78.08,
+      "word": " So,",
+      "probability": 0.9850391149520874
+    },
+    {
+      "__type__": "Word",
+      "start": 78.66,
+      "end": 78.86,
+      "word": " um,",
+      "probability": 0.9819526076316833
+    },
+    {
+      "__type__": "Word",
+      "start": 79.2,
+      "end": 79.44,
+      "word": " the",
+      "probability": 0.9967101812362671
+    },
+    {
+      "__type__": "Word",
+      "start": 79.44,
+      "end": 79.74,
+      "word": " first",
+      "probability": 0.9983314871788025
+    },
+    {
+      "__type__": "Word",
+      "start": 79.74,
+      "end": 80.12,
+      "word": " thing",
+      "probability": 0.995559573173523
+    },
+    {
+      "__type__": "Word",
+      "start": 80.12,
+      "end": 80.38,
+      "word": " we",
+      "probability": 0.9962595701217651
+    },
+    {
+      "__type__": "Word",
+      "start": 80.38,
+      "end": 80.62,
+      "word": " need",
+      "probability": 0.9972862005233765
+    },
+    {
+      "__type__": "Word",
+      "start": 80.62,
+      "end": 80.86,
+      "word": " to",
+      "probability": 0.9990620017051697
+    },
+    {
+      "__type__": "Word",
+      "start": 80.86,
+      "end": 81.06,
+      "word": " do",
+      "probability": 0.9989725351333618
+    },
+    {
+      "__type__": "Word",
+      "start": 81.06,
+      "end": 81.54,
+      "word": " is,",
+      "probability": 0.994652509689331
+    },
+    {
+      "__type__": "Word",
+      "start": 82.18,
+      "end": 82.28,
+      "word": " uh,",
+      "probability": 0.9754664897918701
+    },
+    {
+      "__type__": "Word",
+      "start": 82.68,
+      "end": 83.0,
+      "word": " check",
+      "probability": 0.9951618313789368
+    },
+    {
+      "__type__": "Word",
+      "start": 83.0,
+      "end": 83.28,
+      "word": " the",
+      "probability": 0.9987404942512512
+    },
+    {
+      "__type__": "Word",
+      "start": 83.28,
+      "end": 83.72,
+      "word": " levels.",
+      "probability": 0.9977340698242188
+    },
+    {
+      "__type__": "Word",
+      "start": 85.0,
+      "end": 85.74,
+      "word": " And",
+      "probability": 0.4220333397388458
+    },
+    {
+      "__type__": "Word",
+      "start": 85.74,
+      "end": 86.22,
+      "word": " then,",
+      "probability": 0.9718713164329529
+    },
+    {
+      "__type__": "Word",
+      "start": 86.7,
+      "end": 87.06,
+      "word": " um,",
+      "probability": 0.004752094391733408
+    },
+    {
+      "__type__": "Word",
+      "start": 87.38,
+      "end": 87.5,
+      "word": " we",
+      "probability": 0.9750462770462036
+    },
+    {
+      "__type__": "Word",
+      "start": 87.5,
+      "end": 87.64,
+      "word": " can",
+      "probability": 0.9934628009796143
+    },
+    {
+      "__type__": "Word",
+      "start": 87.64,
+      "end": 88.0,
+      "word": " start",
+      "probability": 0.9894770383834839
+    },
+    {
+      "__type__": "Word",
+      "start": 88.0,
+      "end": 88.56,
+      "word": " recording.",
+      "probability": 0.9913323521614075
+    }
+  ]
+}

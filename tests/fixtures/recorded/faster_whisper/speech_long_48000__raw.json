@@ -1,0 +1,897 @@
+{
+  "provenance": {
+    "recorded_at_utc": "2026-09-19T12:17:55.176766+00:00",
+    "faster_whisper_version": "1.2.1",
+    "ctranslate2_version": "4.8.2",
+    "numpy_version": "2.5.3",
+    "scipy_version": "1.18.1",
+    "soundfile_version": "0.13.1",
+    "python_version": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "model": "base",
+    "model_constructor": "WhisperModel(\"base\")  # all other args left at library defaults",
+    "transcribe_call": "model.transcribe(audio, word_timestamps=True)",
+    "source_wav": "speech_long_48000.wav",
+    "source_wav_sha256": "541dd13eda144d3f7f4b95d3860c0994750be7feec7fc23fcfcf9c543783c0a8",
+    "source_sample_rate": 48000,
+    "input_path": "raw",
+    "snippet": "import numpy as np, soundfile as sf\nfrom faster_whisper import WhisperModel\nx, sr = sf.read(WAV, dtype=\"float64\", always_2d=False)\nif x.ndim == 2:\n    x = x.mean(axis=1)\n# path == \"resampled_16k\" only:\n#   from fractions import Fraction; from scipy import signal\n#   frac = Fraction(16000, sr).limit_denominator(2000)\n#   x = signal.resample_poly(x, up=frac.numerator, down=frac.denominator)\naudio = x.astype(\"float32\")\nmodel = WhisperModel(\"base\")\nsegments, info = model.transcribe(audio, word_timestamps=True)\nsegments = list(segments)   # generator: nothing runs until it is drained\n",
+    "wall_seconds": 99.551
+  },
+  "input": {
+    "path_mode": "raw",
+    "source_sample_rate": 48000,
+    "source_channels": 1,
+    "source_samples": 3099063,
+    "source_duration_s": 64.563812,
+    "fed_sample_rate_assumed_by_library": 16000,
+    "fed_samples": 3099063,
+    "fed_dtype": "float32",
+    "fed_duration_s_if_16k": 193.691438,
+    "true_duration_s": 64.563812,
+    "resampled_before_transcribe": false,
+    "declared_sample_rate_of_fed_array": 48000
+  },
+  "type_inventory": {
+    "info": {
+      "type": "TranscriptionInfo",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "all_language_probs",
+        "duration",
+        "duration_after_vad",
+        "language",
+        "language_probability",
+        "transcription_options",
+        "vad_options"
+      ],
+      "public_non_callable": [
+        "all_language_probs",
+        "duration",
+        "duration_after_vad",
+        "language",
+        "language_probability",
+        "transcription_options",
+        "vad_options"
+      ],
+      "has_dict": true,
+      "has_asdict": false,
+      "fields": []
+    },
+    "segment": {
+      "type": "Segment",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "_asdict",
+        "avg_logprob",
+        "compression_ratio",
+        "end",
+        "id",
+        "no_speech_prob",
+        "seek",
+        "start",
+        "temperature",
+        "text",
+        "tokens",
+        "words"
+      ],
+      "public_non_callable": [
+        "avg_logprob",
+        "compression_ratio",
+        "end",
+        "id",
+        "no_speech_prob",
+        "seek",
+        "start",
+        "temperature",
+        "text",
+        "tokens",
+        "words"
+      ],
+      "has_dict": true,
+      "has_asdict": true,
+      "fields": []
+    },
+    "word": {
+      "type": "Word",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "_asdict",
+        "end",
+        "probability",
+        "start",
+        "word"
+      ],
+      "public_non_callable": [
+        "end",
+        "probability",
+        "start",
+        "word"
+      ],
+      "has_dict": true,
+      "has_asdict": true,
+      "fields": []
+    }
+  },
+  "summary": {
+    "n_segments": 4,
+    "n_words": 4,
+    "text": " Hatsunoviz Anta Errakanski Hatsunoviz",
+    "last_word_end": 193.4,
+    "degenerate_word_count": 0,
+    "degenerate_words": []
+  },
+  "info": {
+    "__type__": "TranscriptionInfo",
+    "language": "la",
+    "language_probability": 0.23685887455940247,
+    "duration": 193.6914375,
+    "duration_after_vad": 193.6914375,
+    "all_language_probs": [
+      [
+        "la",
+        0.23685887455940247
+      ],
+      [
+        "ja",
+        0.1583041250705719
+      ],
+      [
+        "en",
+        0.11340988427400589
+      ],
+      [
+        "jw",
+        0.08474467694759369
+      ],
+      [
+        "nn",
+        0.05681637302041054
+      ],
+      [
+        "haw",
+        0.037238601595163345
+      ],
+      [
+        "br",
+        0.030440978705883026
+      ],
+      [
+        "de",
+        0.026431316509842873
+      ],
+      [
+        "fr",
+        0.026342209428548813
+      ],
+      [
+        "th",
+        0.024913061410188675
+      ],
+      [
+        "ko",
+        0.024455441161990166
+      ],
+      [
+        "zh",
+        0.0230600256472826
+      ],
+      [
+        "es",
+        0.012110027484595776
+      ],
+      [
+        "km",
+        0.010264002718031406
+      ],
+      [
+        "cy",
+        0.010018265806138515
+      ],
+      [
+        "tr",
+        0.00891353189945221
+      ],
+      [
+        "ms",
+        0.008685214444994926
+      ],
+      [
+        "mn",
+        0.006885867100208998
+      ],
+      [
+        "ar",
+        0.006277131848037243
+      ],
+      [
+        "it",
+        0.006154095288366079
+      ],
+      [
+        "ru",
+        0.005299174692481756
+      ],
+      [
+        "sa",
+        0.004961970262229443
+      ],
+      [
+        "my",
+        0.004403471946716309
+      ],
+      [
+        "sv",
+        0.004262479487806559
+      ],
+      [
+        "eu",
+        0.004090341739356518
+      ],
+      [
+        "pl",
+        0.003792205359786749
+      ],
+      [
+        "fi",
+        0.0033340712543576956
+      ],
+      [
+        "hi",
+        0.0032566231675446033
+      ],
+      [
+        "vi",
+        0.003125106217339635
+      ],
+      [
+        "hu",
+        0.0029833284206688404
+      ],
+      [
+        "sn",
+        0.0027836307417601347
+      ],
+      [
+        "pt",
+        0.0025592115707695484
+      ],
+      [
+        "id",
+        0.0024087398778647184
+      ],
+      [
+        "fa",
+        0.0023030126467347145
+      ],
+      [
+        "bo",
+        0.0022803598549216986
+      ],
+      [
+        "te",
+        0.0019524007802829146
+      ],
+      [
+        "fo",
+        0.0019417331786826253
+      ],
+      [
+        "ro",
+        0.001924073905684054
+      ],
+      [
+        "si",
+        0.001909204525873065
+      ],
+      [
+        "cs",
+        0.0018808564636856318
+      ],
+      [
+        "bn",
+        0.001726932474412024
+      ],
+      [
+        "tl",
+        0.001600834191776812
+      ],
+      [
+        "mi",
+        0.0014600246213376522
+      ],
+      [
+        "oc",
+        0.0013958956114947796
+      ],
+      [
+        "yo",
+        0.0013385118218138814
+      ],
+      [
+        "ht",
+        0.0011743077775463462
+      ],
+      [
+        "hy",
+        0.0011688921367749572
+      ],
+      [
+        "ur",
+        0.001045753713697195
+      ],
+      [
+        "uk",
+        0.001042041345499456
+      ],
+      [
+        "ta",
+        0.0009526083013042808
+      ],
+      [
+        "he",
+        0.0009130860562436283
+      ],
+      [
+        "ne",
+        0.0008224379853345454
+      ],
+      [
+        "el",
+        0.0008076728554442525
+      ],
+      [
+        "gl",
+        0.0007575483177788556
+      ],
+      [
+        "lo",
+        0.0007290344219654799
+      ],
+      [
+        "sl",
+        0.0007225709268823266
+      ],
+      [
+        "ka",
+        0.0006657423218712211
+      ],
+      [
+        "nl",
+        0.0006596561870537698
+      ],
+      [
+        "da",
+        0.0006592778372578323
+      ],
+      [
+        "sw",
+        0.000624111678916961
+      ],
+      [
+        "no",
+        0.0005667656078003347
+      ],
+      [
+        "yi",
+        0.0005591791705228388
+      ],
+      [
+        "lv",
+        0.0005387261626310647
+      ],
+      [
+        "ca",
+        0.000420297437813133
+      ],
+      [
+        "ml",
+        0.0003945859498344362
+      ],
+      [
+        "hr",
+        0.0003526474756654352
+      ],
+      [
+        "is",
+        0.0003461930900812149
+      ],
+      [
+        "lt",
+        0.0002750663843471557
+      ],
+      [
+        "sd",
+        0.00025009052478708327
+      ],
+      [
+        "kk",
+        0.0002293661964358762
+      ],
+      [
+        "be",
+        0.00021898427803535014
+      ],
+      [
+        "sk",
+        0.00021655844466295093
+      ],
+      [
+        "az",
+        0.00021262375230435282
+      ],
+      [
+        "ps",
+        0.00019010266987606883
+      ],
+      [
+        "bs",
+        0.00012242142111063004
+      ],
+      [
+        "bg",
+        0.00011688553058775142
+      ],
+      [
+        "as",
+        0.00011652953980956227
+      ],
+      [
+        "am",
+        0.00010388324153609574
+      ],
+      [
+        "et",
+        9.632670844439417e-05
+      ],
+      [
+        "af",
+        9.324221173301339e-05
+      ],
+      [
+        "mr",
+        9.206130926031619e-05
+      ],
+      [
+        "sr",
+        8.18631742731668e-05
+      ],
+      [
+        "ln",
+        6.3402192608919e-05
+      ],
+      [
+        "mt",
+        5.976522879791446e-05
+      ],
+      [
+        "pa",
+        5.892670378671028e-05
+      ],
+      [
+        "sq",
+        5.342290023691021e-05
+      ],
+      [
+        "kn",
+        4.013905709143728e-05
+      ],
+      [
+        "so",
+        2.1472947992151603e-05
+      ],
+      [
+        "gu",
+        1.766340028552804e-05
+      ],
+      [
+        "su",
+        1.3308286725077778e-05
+      ],
+      [
+        "tg",
+        1.1126087883894797e-05
+      ],
+      [
+        "mk",
+        9.297737051383592e-06
+      ],
+      [
+        "lb",
+        6.6632655943976715e-06
+      ],
+      [
+        "tt",
+        3.962526989198523e-06
+      ],
+      [
+        "ha",
+        2.4349690193048446e-06
+      ],
+      [
+        "uz",
+        4.357460170467675e-07
+      ],
+      [
+        "mg",
+        4.2644552422643756e-07
+      ],
+      [
+        "tk",
+        3.1526275279247784e-07
+      ],
+      [
+        "ba",
+        2.3728161124836333e-07
+      ]
+    ],
+    "transcription_options": {
+      "__type__": "TranscriptionOptions",
+      "beam_size": 5,
+      "best_of": 5,
+      "patience": 1,
+      "length_penalty": 1,
+      "repetition_penalty": 1,
+      "no_repeat_ngram_size": 0,
+      "log_prob_threshold": -1.0,
+      "no_speech_threshold": 0.6,
+      "compression_ratio_threshold": 2.4,
+      "condition_on_previous_text": true,
+      "prompt_reset_on_temperature": 0.5,
+      "temperatures": [
+        0.0,
+        0.2,
+        0.4,
+        0.6,
+        0.8,
+        1.0
+      ],
+      "initial_prompt": null,
+      "prefix": null,
+      "suppress_blank": true,
+      "suppress_tokens": [
+        1,
+        2,
+        7,
+        8,
+        9,
+        10,
+        14,
+        25,
+        26,
+        27,
+        28,
+        29,
+        31,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        90,
+        91,
+        92,
+        93,
+        359,
+        503,
+        522,
+        542,
+        873,
+        893,
+        902,
+        918,
+        922,
+        931,
+        1350,
+        1853,
+        1982,
+        2460,
+        2627,
+        3246,
+        3253,
+        3268,
+        3536,
+        3846,
+        3961,
+        4183,
+        4667,
+        6585,
+        6647,
+        7273,
+        9061,
+        9383,
+        10428,
+        10929,
+        11938,
+        12033,
+        12331,
+        12562,
+        13793,
+        14157,
+        14635,
+        15265,
+        15618,
+        16553,
+        16604,
+        18362,
+        18956,
+        20075,
+        21675,
+        22520,
+        26130,
+        26161,
+        26435,
+        28279,
+        29464,
+        31650,
+        32302,
+        32470,
+        36865,
+        42863,
+        47425,
+        49870,
+        50254,
+        50258,
+        50358,
+        50359,
+        50360,
+        50361,
+        50362
+      ],
+      "without_timestamps": false,
+      "max_initial_timestamp": 1.0,
+      "word_timestamps": true,
+      "prepend_punctuations": "\"'\u201c\u00bf([{-",
+      "append_punctuations": "\"'.\u3002,\uff0c!\uff01?\uff1f:\uff1a\u201d)]}\u3001",
+      "multilingual": false,
+      "max_new_tokens": null,
+      "clip_timestamps": [
+        0.0
+      ],
+      "hallucination_silence_threshold": null,
+      "hotwords": null
+    },
+    "vad_options": null
+  },
+  "segments": [
+    {
+      "__type__": "Segment",
+      "id": 1,
+      "seek": 18000,
+      "start": 181.2,
+      "end": 182.6,
+      "text": " Hatsunoviz",
+      "tokens": [
+        50364,
+        389,
+        1720,
+        409,
+        5179,
+        590,
+        50614
+      ],
+      "avg_logprob": -1.158793830871582,
+      "compression_ratio": 0.9736842105263158,
+      "no_speech_prob": 0.2214047759771347,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 181.2,
+          "end": 182.6,
+          "word": " Hatsunoviz",
+          "probability": 0.19931650422513486
+        }
+      ],
+      "temperature": 1.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 2,
+      "seek": 18000,
+      "start": 186.6,
+      "end": 188.0,
+      "text": " Anta",
+      "tokens": [
+        50664,
+        5130,
+        64,
+        50814
+      ],
+      "avg_logprob": -1.158793830871582,
+      "compression_ratio": 0.9736842105263158,
+      "no_speech_prob": 0.2214047759771347,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 186.6,
+          "end": 188.0,
+          "word": " Anta",
+          "probability": 0.1867615506052971
+        }
+      ],
+      "temperature": 1.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 3,
+      "seek": 18000,
+      "start": 189.9,
+      "end": 191.3,
+      "text": " Errakanski",
+      "tokens": [
+        50814,
+        3300,
+        11272,
+        599,
+        2984,
+        50914
+      ],
+      "avg_logprob": -1.158793830871582,
+      "compression_ratio": 0.9736842105263158,
+      "no_speech_prob": 0.2214047759771347,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 189.9,
+          "end": 191.3,
+          "word": " Errakanski",
+          "probability": 0.2838720064610243
+        }
+      ],
+      "temperature": 1.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 4,
+      "seek": 18000,
+      "start": 191.3,
+      "end": 193.4,
+      "text": " Hatsunoviz",
+      "tokens": [
+        50914,
+        389,
+        1720,
+        409,
+        5179,
+        590,
+        51064
+      ],
+      "avg_logprob": -1.158793830871582,
+      "compression_ratio": 0.9736842105263158,
+      "no_speech_prob": 0.2214047759771347,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 191.3,
+          "end": 193.4,
+          "word": " Hatsunoviz",
+          "probability": 0.6472535312175751
+        }
+      ],
+      "temperature": 1.0
+    }
+  ],
+  "words_flat": [
+    {
+      "__type__": "Word",
+      "start": 181.2,
+      "end": 182.6,
+      "word": " Hatsunoviz",
+      "probability": 0.19931650422513486
+    },
+    {
+      "__type__": "Word",
+      "start": 186.6,
+      "end": 188.0,
+      "word": " Anta",
+      "probability": 0.1867615506052971
+    },
+    {
+      "__type__": "Word",
+      "start": 189.9,
+      "end": 191.3,
+      "word": " Errakanski",
+      "probability": 0.2838720064610243
+    },
+    {
+      "__type__": "Word",
+      "start": 191.3,
+      "end": 193.4,
+      "word": " Hatsunoviz",
+      "probability": 0.6472535312175751
+    }
+  ]
+}

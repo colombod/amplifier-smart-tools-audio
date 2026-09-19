@@ -1,0 +1,251 @@
+{
+  "provenance": {
+    "recorded_at_utc": "2026-09-19T12:19:37Z",
+    "source_wav": "speech_long_16000.wav",
+    "source_wav_sha256": "e0fb7678f127b7c935a46ef3bb31d1cc99e333ec95532240996ac633bb686659",
+    "command": "aud detect fillers /rec/wav/speech_long_16000.wav",
+    "aud_manifest": {
+      "result": {
+        "description": "Anything to do with finishing an audio file the user already has -- .wav, .flac, .aiff, .mp3. Reach for it when the ask sounds like \"make this sound finished\", \"this is too quiet for YouTube\", \"get rid of the harsh S sounds\", \"the room sounds boxy\", \"make this podcast match last week's episode\", \"level these three files to each other\", \"tighten the low end\", \"hit -14 LUFS without clipping\", \"trim the silences\", \"get rid of the umms and ehms\", or \"tighten up this recording\". It measures what is actually there (loudness, true peak, spectral balance, crest factor, sibilance, ambience), FINDS things in it (onsets, silent spans, filler words with their timings), then runs an EDITING and MASTERING chain over it: cut listed regions, strip or shorten silences, de-ess, de-verb, parametric EQ, EQ-match against a reference recording, MULTIBAND compression and multiband dynamic range control, saturation, controlled ambience, loudness targeting and true-peak brickwall limiting. Every verb appends to a plan and one render applies the whole chain in a single pass, so a chain can be inspected and re-run, and the whole job is ONE shell command rather than a round trip per stage. This is mastering and cleanup, NOT mixing: it works on a finished stereo or mono programme, not on multitrack stems. It uses speech recognition internally to locate filler words, but it does NOT produce transcripts -- do NOT use it for video files, for transcription as an output, or for music generation.",
+        "name": "aud",
+        "platforms": [
+          "linux",
+          "macos",
+          "windows"
+        ],
+        "requires": [
+          {
+            "install": "docs/CONFIGURATION.md",
+            "name": "ai-provider",
+            "optional": true,
+            "purpose": "Backs the verbs that choose a chain rather than apply one -- `advise` and `master --auto` read the measurements and decide what the chain should be and why. Without it those two verbs refuse, saying so, rather than guessing a chain; every other verb -- analysing, building a chain by hand, rendering, verifying, extracting and applying EQ curves -- keeps working with no credential configured at all. Any one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY or AZURE_OPENAI_API_KEY satisfies it. This tool stores no credentials of its own."
+          },
+          {
+            "install": "docs/CONFIGURATION.md",
+            "name": "faster-whisper",
+            "optional": true,
+            "purpose": "Provides the word-level speech timings that `detect fillers` needs to locate \"umm\", \"uh\" and \"ehm\" in a recording. Installed as the `speech` extra of this package, not as a host program. Without it, exactly one capability is lost: `detect fillers` refuses, naming the extra. Nothing else changes -- `detect silence`, `detect transients`, `cut`, `strip-silence` and the whole mastering chain are unaffected, because none of them needs to know what was said. It is a LOCAL model: no AI provider, no credential, and no network call once the model is cached. faster-whisper is MIT; a GPL-family recogniser would relicense this tool and is excluded on purpose."
+          },
+          {
+            "install": "https://ffmpeg.org/download.html",
+            "name": "ffmpeg",
+            "optional": true,
+            "purpose": "Decodes and encodes the compressed formats libsndfile does not handle on its own -- mp3, m4a, ogg. WAV, FLAC and AIFF need nothing beyond the bundled libsndfile, so the whole tool works on uncompressed material with ffmpeg absent. `aud check` reports which state this host is in."
+          }
+        ],
+        "smart_tool_format": 1,
+        "use_cases": [
+          "Measure a file honestly before touching it -- LUFS, true peak, crest factor, spectral balance",
+          "Bring a podcast or music file to a loudness target without clipping or inter-sample peaks",
+          "Trim the silences out of a spoken-word recording, or shorten them to a fixed length",
+          "Trim the pauses without chopping the start of a word -- edits are padded, snapped to a safe cut point and crossfaded, rather than falling wherever the detector put the boundary",
+          "Get rid of the \"umms\" and \"ehms\" and long hesitations in an interview or a voice-over",
+          "Tighten up a rambling recording -- find the pauses and fillers, cut them, master the result",
+          "Find where the onsets are in a recording, to decide where an edit should land",
+          "Tame harsh sibilance on a vocal or spoken-word recording",
+          "Reduce a boxy or reverberant room on a recording made in the wrong space",
+          "Make one recording sit in the same tonal balance as a reference recording",
+          "Extract the EQ curve of a recording you like and apply it to another file",
+          "Even out dynamics per frequency band with multiband compression, not one blunt full-band squeeze",
+          "Retime or re-pitch a programme without changing the other",
+          "Verify that a finished render actually meets the loudness and ceiling it was asked for"
+        ],
+        "version": "0.8.0"
+      }
+    }
+  },
+  "exit_code": 0,
+  "stderr": "[2026-09-19 12:19:51.046] [ctranslate2] [thread 4969] [warning] The compute type inferred from the saved model is float16, but the target device or backend do not support efficient float16 computation. The model weights have been automatically converted to use the float32 compute type instead.",
+  "stdout": {
+    "regions_format": 1,
+    "created_with": "aud/0.8.0",
+    "source": "/rec/wav/speech_long_16000.wav",
+    "sample_rate": 16000,
+    "kind": "filler",
+    "detection": {
+      "words": [
+        "um",
+        "umm",
+        "uh",
+        "erm",
+        "ehm",
+        "ah",
+        "er"
+      ],
+      "min_pause_ms": 700.0,
+      "engine": "faster-whisper",
+      "model": "base",
+      "degenerate_words_dropped": 0
+    },
+    "regions": [
+      {
+        "start_s": 0.54,
+        "end_s": 0.7,
+        "text": "um",
+        "confidence": 0.5082252025604248
+      },
+      {
+        "start_s": 3.14,
+        "end_s": 3.24,
+        "text": "uh",
+        "confidence": 0.5064699649810791
+      },
+      {
+        "start_s": 4.22,
+        "end_s": 5.280000000000001,
+        "text": "",
+        "confidence": 1.0
+      },
+      {
+        "start_s": 6.46,
+        "end_s": 6.68,
+        "text": "erm",
+        "confidence": 0.21642707288265228
+      },
+      {
+        "start_s": 8.64,
+        "end_s": 8.88,
+        "text": "um",
+        "confidence": 0.9793192744255066
+      },
+      {
+        "start_s": 11.2,
+        "end_s": 11.3,
+        "text": "uh",
+        "confidence": 0.9428521990776062
+      },
+      {
+        "start_s": 12.28,
+        "end_s": 13.340000000000002,
+        "text": "",
+        "confidence": 1.0
+      },
+      {
+        "start_s": 14.54,
+        "end_s": 14.8,
+        "text": "erm",
+        "confidence": 0.8691926598548889
+      },
+      {
+        "start_s": 16.7,
+        "end_s": 16.94,
+        "text": "um",
+        "confidence": 0.9893518090248108
+      },
+      {
+        "start_s": 19.26,
+        "end_s": 19.36,
+        "text": "uh",
+        "confidence": 0.9815570116043091
+      },
+      {
+        "start_s": 20.36,
+        "end_s": 21.4,
+        "text": "",
+        "confidence": 1.0
+      },
+      {
+        "start_s": 22.62,
+        "end_s": 22.88,
+        "text": "erm",
+        "confidence": 0.9199833869934082
+      },
+      {
+        "start_s": 24.78,
+        "end_s": 25.02,
+        "text": "um",
+        "confidence": 0.9925009608268738
+      },
+      {
+        "start_s": 27.32,
+        "end_s": 27.44,
+        "text": "uh",
+        "confidence": 0.9810191988945007
+      },
+      {
+        "start_s": 28.42,
+        "end_s": 29.460000000000004,
+        "text": "",
+        "confidence": 1.0
+      },
+      {
+        "start_s": 32.86,
+        "end_s": 32.98,
+        "text": "um",
+        "confidence": 0.5664570331573486
+      },
+      {
+        "start_s": 35.38,
+        "end_s": 35.5,
+        "text": "uh",
+        "confidence": 0.474460244178772
+      },
+      {
+        "start_s": 36.48,
+        "end_s": 37.540000000000006,
+        "text": "",
+        "confidence": 1.0
+      },
+      {
+        "start_s": 40.92,
+        "end_s": 41.16,
+        "text": "um",
+        "confidence": 0.9274982810020447
+      },
+      {
+        "start_s": 43.44,
+        "end_s": 43.58,
+        "text": "uh",
+        "confidence": 0.9539986252784729
+      },
+      {
+        "start_s": 44.58,
+        "end_s": 45.6,
+        "text": "",
+        "confidence": 1.0
+      },
+      {
+        "start_s": 48.98,
+        "end_s": 49.2,
+        "text": "um",
+        "confidence": 0.958074688911438
+      },
+      {
+        "start_s": 51.52,
+        "end_s": 51.64,
+        "text": "uh",
+        "confidence": 0.9761145114898682
+      },
+      {
+        "start_s": 52.64,
+        "end_s": 53.660000000000004,
+        "text": "",
+        "confidence": 1.0
+      },
+      {
+        "start_s": 57.06,
+        "end_s": 57.24,
+        "text": "um",
+        "confidence": 0.738984227180481
+      },
+      {
+        "start_s": 59.6,
+        "end_s": 59.72,
+        "text": "uh",
+        "confidence": 0.6130736470222473
+      },
+      {
+        "start_s": 60.78,
+        "end_s": 61.78,
+        "text": "",
+        "confidence": 1.0
+      },
+      {
+        "start_s": 62.98,
+        "end_s": 63.2,
+        "text": "erm",
+        "confidence": 0.1981005072593689
+      }
+    ]
+  }
+}

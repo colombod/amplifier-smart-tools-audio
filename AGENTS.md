@@ -65,6 +65,38 @@ Corollary: **never import a provider or agent engine at module level.** Import i
 verbs that need it. A top-level import makes every deterministic path depend on the provider
 being installed and can rewrite environment state for unrelated code.
 
+## 3b. Never hand-write a mock. Replay a recording instead
+
+A fake built from the fields your own reader consults can only confirm the shape you already
+assumed. It is brittle, it is a failure point, and it manufactures confidence. **Do not write
+one.** Where a third-party library cannot run in CI, substitute a **replay of a real recorded
+run** — a captured response played back verbatim — never a hand-authored object.
+
+This repo paid for that rule three times in one day, with 284 tests passing throughout:
+
+- A hand-written whisper transcript, built from the three fields the parser reads, could not
+  produce a word with `start == end` and carried no sample rate. Those were exactly the two
+  defects that made `detect fillers` wrong on every real file — one destroyed the entire regions
+  document, the other put every timestamp up to 3× out.
+- A hand-written provider fake always returned a single text block, so every reasoning model —
+  which returns a `thinking` block first — was unusable in production while the suite was green.
+- A hand-written Signalsmith stub reproduced our own belief about `timeFactor`, which was the
+  reciprocal of the truth. It confirmed the bug rather than catching it.
+
+The recordings live in `tests/fixtures/recorded/`, each with provenance (library version, source
+audio sha256, capture date, the command that produced it). `tests/replay.py` is the one shared
+harness; it **fails loudly** on a missing recording rather than falling back to a made-up value.
+`tests/fixtures/recorded/RECORDING.md` says how to re-record when a library version moves.
+
+Two things to hold onto. A replay is **bound to its exact input bytes** — the same speech at
+16 kHz and at 48-kHz-resampled-to-16 kHz produced different transcripts, so a replay asserting
+recorded output against *similar* audio is testing nothing. And a replay that is **tidier than
+the real library is a fake again**: reproduce the awkward parts — the degenerate word, the
+hallucinated word on silence, the float32 read-back, the attributes that are really methods.
+
+The tell: if the fixture was written by the same person who wrote the reader, it tests the
+reader against itself.
+
 ## 4. Failures name what went wrong and the remedy
 
 The caller is usually an agent, and an agent cannot act on a stack trace.

@@ -17,8 +17,9 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from aud import lib
 from aud.cli import _build_parser, _dispatch
+from aud.dsp import speech as dsp_speech
+from tests import replay
 
 
 def _run(args: list[str], input_text: str = "", env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -173,25 +174,29 @@ def test_detect_fillers_cli_words_defaults_to_none_not_a_second_vocabulary() -> 
     assert args.words is None
 
 
-def test_detect_fillers_cli_default_vocabulary_is_speechs_filler_words(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_detect_fillers_cli_default_vocabulary_is_speechs_filler_words(
+    monkeypatch: pytest.MonkeyPatch, tiny_wav: Path
+) -> None:
     """The effective vocabulary the CLI hands to the library, with no
     --words given, must be `None` -- so `aud.dsp.speech.FILLER_WORDS`, the
     one place that vocabulary is defined, is what actually runs.
+
+    Proved end-to-end through the REAL `dsp.speech.detect_fillers`, with
+    only faster-whisper itself replayed (a real recorded transcription,
+    tests/replay.py) -- not by monkeypatching `lib.detect_fillers` and
+    inventing its return value. `tiny_wav` drives the call; the recording
+    replayed does not depend on what audio it is handed (see
+    `replay.install_faster_whisper_replay`), so this is free to use any
+    real wav and still proves the CLI -> lib -> dsp.speech vocabulary
+    wiring for real.
     """
-    captured: dict[str, object] = {}
-
-    def fake_detect_fillers(path: str, words: list[str] | None = None, min_pause_ms: float = 700.0) -> dict:
-        captured["words"] = words
-        captured["min_pause_ms"] = min_pause_ms
-        return {"kind": "filler"}
-
-    monkeypatch.setattr(lib, "detect_fillers", fake_detect_fillers)
+    replay.install_faster_whisper_replay(monkeypatch, "speech_short_16000__raw")
 
     parser = _build_parser()
-    args: argparse.Namespace = parser.parse_args(["detect", "fillers", "in.wav"])
-    _dispatch("detect", args, None)
+    args: argparse.Namespace = parser.parse_args(["detect", "fillers", str(tiny_wav)])
+    result = _dispatch("detect", args, None)
 
-    assert captured["words"] is None
+    assert result.detection["words"] == list(dsp_speech.FILLER_WORDS)
 
 
 def test_detect_fillers_cli_explicit_words_still_override() -> None:

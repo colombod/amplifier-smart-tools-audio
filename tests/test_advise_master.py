@@ -1,8 +1,14 @@
 """Integration tests for `advise`/`master` -- the smart tier.
 
-Every test injects a FakeBackend (no network, no credential, no cost)
-except the ones proving the opposite: that with no credential configured,
-advise/master refuse honestly while every deterministic verb keeps working.
+Every test that needs a model's answer replays a REAL recorded Anthropic
+response (`tests/replay.py`'s `ReplayAdviceBackend`, backed by
+`tests/fixtures/recorded/anthropic/`) -- never a hand-authored plan. The
+one deliberate exception is `_GarbageTextBackend`, used for exactly one
+test (bad-model-output rejection): no real *successful* recording can ever
+supply invalid JSON, because recordings only capture calls that worked, so
+that one adversarial-input case is the one thing a replay structurally
+cannot provide. It stands in for OUR OWN error-handling path, not for any
+third party's shape.
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ import soundfile as sf
 
 from aud import lib
 from aud.schemas import AudError
+from tests import replay
 
 _SR = 44100
 
@@ -30,57 +37,32 @@ _PROVIDER_ENV_VARS = (
 )
 
 
-class FakeBackend:
-    def __init__(self, response_text: str) -> None:
-        self.response_text = response_text
+class _GarbageTextBackend:
+    """Returns literally invalid text -- no real recording can supply this
+    (every recording captured a call that worked). Stands in for OUR OWN
+    `bad_model_output` error path, not for any provider's real shape.
+    """
 
     def complete(self, system: str, user: str, *, model: str, max_tokens: int = 2000) -> str:
-        return self.response_text
+        del system, user, model, max_tokens
+        return "garbage, not json"
 
-
-_SIMPLE_CHAIN = json.dumps(
-    {
-        "stages": [
-            {"stage": "loudness", "params": {"target_lufs": -14.0}, "reason": "bring it up to -14 LUFS"},
-            {"stage": "limit", "params": {"ceiling_dbtp": -1.0}, "reason": "protect against inter-sample overs"},
-        ]
-    }
-)
 
 # --- Regression guard: `lufs_ok`/`ceiling_ok` must not be vacuous ----------
 #
 # Both are booleans that read True whenever the measured value happens to
 # land on the right side of the line -- including when the limiter never
-# engaged at all. Measured (see agent report): `tiny_wav` run through
-# `_SIMPLE_CHAIN` (just loudness + limit) never engages the limiter
-# (max_gain_reduction_db == 0.0) -- the loudness stage's own gain already
-# lands the peak under the ceiling by luck of this content, not by
-# enforcement. A bare loudness+limit chain also turns out to be a poor
-# vehicle for *forcing* engagement with real margin: a brief transient hot
-# enough to push the true peak over the ceiling gets fully absorbed by the
-# limiter only to within its own ~0.05 dB numerical tolerance (see
-# limiter.py), not lib.verify()'s zero-tolerance `ceiling_ok` -- there is no
-# transient shape that is simultaneously "hot enough to force engagement"
-# and "settles with comfortable strict-ceiling margin" without some tonal
-# reshaping ahead of the limiter (measured extensively; see agent report).
-# `tests/test_pipeline_all_stages.py` already established exactly such a
-# shape -- a brief hot spike through eq/compress/saturate/loudness/limit,
-# landing at -1.24 dBTP (comfortable margin) with -3.3 dB of real gain
-# reduction. This test reuses that same proven recipe (as a richer,
-# still-simple FakeBackend plan) rather than re-deriving a new one for a
-# bare two-stage chain that structurally can't produce a clean result.
-_HOT_CHAIN = json.dumps(
-    {
-        "stages": [
-            {"stage": "eq", "params": {"hpf": 40.0, "peaks": [[3000.0, -3.0, 1.2]]}, "reason": "tone shaping"},
-            {"stage": "compress", "params": {"bands": [120.0, 900.0, 5500.0], "ratio": 3.0}, "reason": "dynamics"},
-            {"stage": "saturate", "params": {"drive": 1.5, "mix": 0.25}, "reason": "warmth"},
-            {"stage": "loudness", "params": {"target_lufs": -14.0}, "reason": "loudness target"},
-            {"stage": "limit", "params": {"ceiling_dbtp": -1.0}, "reason": "ceiling"},
-        ]
-    }
-)
-_HOT_SPIKE_SAMPLES = 50  # ~1.1 ms @ 44.1kHz -- same recipe as test_pipeline_all_stages.py
+# engaged at all. Measured directly (see the module docstring on replays):
+# `tiny_wav` run through a bare loudness+limit chain never engages the
+# limiter (max_gain_reduction_db == 0.0) -- the loudness stage's own gain
+# already lands the peak under the ceiling by luck of this content, not by
+# enforcement. Widening the hot spike to 200 samples (still the same
+# multiplier as before) is what forces real engagement with the REAL
+# recorded "expand, loudness, limit" chain below -- measured directly by
+# running that real plan against several spike widths until one produced
+# nonzero max_gain_reduction_db while still settling within lib.verify()'s
+# tolerances; 200 samples is the smallest that does.
+_HOT_SPIKE_SAMPLES = 200
 _HOT_SPIKE_MULTIPLIER = 300.0
 _CEILING_TOLERANCE_DB = 0.05  # same numerical tolerance limiter.py itself uses for ceiling_met
 _LUFS_TOLERANCE_LU = 0.5  # same tolerance lib.verify() itself uses for lufs_ok
@@ -88,7 +70,8 @@ _LUFS_TOLERANCE_LU = 0.5  # same tolerance lib.verify() itself uses for lufs_ok
 
 def _hot_wav(tmp_path: Path) -> Path:
     """Like conftest's `tiny_wav`, but with a hot enough transient that the
-    limiter must engage once run through `_HOT_CHAIN`.
+    limiter must engage once run through the real recorded hissy chain
+    (expand, loudness, limit; see `replay.ReplayAdviceBackend`).
     """
     seconds = 2.0
     t = np.arange(int(_SR * seconds)) / _SR
@@ -102,11 +85,13 @@ def _hot_wav(tmp_path: Path) -> Path:
     return path
 
 
-# --- lib-level: FakeBackend injection, real render/verify -------------------
+# --- lib-level: real recorded responses replayed, real render/verify -------
 
 
 def test_lib_advise_returns_a_plan_that_pipes_into_render(tiny_wav: Path, tmp_path: Path) -> None:
-    outcome = lib.advise(str(tiny_wav), target_lufs=-14.0, backend=FakeBackend(_SIMPLE_CHAIN), model="fake-1")
+    """Replays anthropic/advise-clean-haiku.json -- a real (loudness, limit) answer."""
+    backend = replay.ReplayAdviceBackend("advise-clean-haiku")
+    outcome = lib.advise(str(tiny_wav), target_lufs=-16.0, backend=backend, model="fake-1")
     assert [s["stage"] for s in outcome["stages"]] == ["loudness", "limit"]
     assert outcome["measurements"]["sample_rate"] == 44100
     assert outcome["provider"] == "injected"
@@ -120,19 +105,24 @@ def test_lib_advise_returns_a_plan_that_pipes_into_render(tiny_wav: Path, tmp_pa
 
 
 def test_lib_master_renders_and_verifies_end_to_end(tmp_path: Path) -> None:
+    """Replays anthropic/advise-hissy-sonnet-thinking.json -- a real
+    (expand, loudness, limit) answer, chosen for a genuinely noisy/hissy
+    measurement report, not hand-authored for this test.
+    """
     hot_wav = _hot_wav(tmp_path)
     out_path = tmp_path / "mastered.wav"
+    backend = replay.ReplayAdviceBackend("advise-hissy-sonnet-thinking")
     result = lib.master(
         str(hot_wav),
         str(out_path),
-        target_lufs=-14.0,
+        target_lufs=-16.0,
         ceiling_dbtp=-1.0,
-        backend=FakeBackend(_HOT_CHAIN),
+        backend=backend,
         model="fake-1",
     )
     assert out_path.exists()
     assert result["out_path"] == str(out_path)
-    assert [s["stage"] for s in result["stages"]] == ["eq", "compress", "saturate", "loudness", "limit"]
+    assert [s["stage"] for s in result["stages"]] == ["expand", "loudness", "limit"]
     assert result["render"]["stages"][-1]["stage"] == "limit"
 
     limit_stage = result["render"]["stages"][-1]
@@ -145,7 +135,7 @@ def test_lib_master_renders_and_verifies_end_to_end(tmp_path: Path) -> None:
     )
 
     measured = result["verify"]["measured"]
-    assert abs(measured["integrated_lufs"] - (-14.0)) <= _LUFS_TOLERANCE_LU, result["verify"]
+    assert abs(measured["integrated_lufs"] - (-16.0)) <= _LUFS_TOLERANCE_LU, result["verify"]
     assert measured["true_peak_dbtp"] <= -1.0 + _CEILING_TOLERANCE_DB, result["verify"]
     # The booleans are still necessary, just no longer sufficient on their own.
     assert result["verify"]["lufs_ok"] is True
@@ -153,16 +143,17 @@ def test_lib_master_renders_and_verifies_end_to_end(tmp_path: Path) -> None:
     assert isinstance(result["verify"]["measured"]["integrated_lufs"], float)
     assert isinstance(result["verify"]["measured"]["true_peak_dbtp"], float)
     # The plan travels as a plain dict in master's result -- JSON-serializable, matching the CLI's envelope.
-    assert result["plan"]["stages"][0]["stage"] == "eq"
+    assert result["plan"]["stages"][0]["stage"] == "expand"
     json.dumps(result)  # must not raise: master's whole result is one JSON document
 
 
 def test_lib_master_dry_run_does_not_render(tiny_wav: Path, tmp_path: Path) -> None:
     out_path = tmp_path / "should-not-exist.wav"
+    backend = replay.ReplayAdviceBackend("advise-clean-haiku")
     result = lib.master(
         str(tiny_wav),
         str(out_path),
-        backend=FakeBackend(_SIMPLE_CHAIN),
+        backend=backend,
         model="fake-1",
         dry_run=True,
     )
@@ -179,10 +170,11 @@ def test_lib_advise_with_reference_measures_both_files(tiny_wav: Path, tmp_path:
     tone = 0.2 * np.sin(2 * np.pi * 440 * t)
     sf.write(str(reference), np.stack([tone, tone], axis=1), sr, subtype="PCM_24")
 
+    backend = replay.ReplayAdviceBackend("advise-clean-haiku")
     outcome = lib.advise(
         str(tiny_wav),
         reference_path=str(reference),
-        backend=FakeBackend(_SIMPLE_CHAIN),
+        backend=backend,
         model="fake-1",
     )
     assert outcome["reference_measurements"] is not None
@@ -211,7 +203,7 @@ def test_lib_master_refuses_with_no_credentials_and_touches_nothing(
 
 def test_lib_advise_bad_model_output_never_produces_a_partial_plan(tiny_wav: Path) -> None:
     with pytest.raises(AudError) as excinfo:
-        lib.advise(str(tiny_wav), backend=FakeBackend("garbage, not json"), model="fake-1")
+        lib.advise(str(tiny_wav), backend=_GarbageTextBackend(), model="fake-1")
     assert excinfo.value.code == "bad_model_output"
 
 

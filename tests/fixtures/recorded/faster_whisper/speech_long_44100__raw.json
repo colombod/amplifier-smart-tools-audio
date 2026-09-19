@@ -1,0 +1,2227 @@
+{
+  "provenance": {
+    "recorded_at_utc": "2026-09-19T12:15:24.192397+00:00",
+    "faster_whisper_version": "1.2.1",
+    "ctranslate2_version": "4.8.2",
+    "numpy_version": "2.5.3",
+    "scipy_version": "1.18.1",
+    "soundfile_version": "0.13.1",
+    "python_version": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "model": "base",
+    "model_constructor": "WhisperModel(\"base\")  # all other args left at library defaults",
+    "transcribe_call": "model.transcribe(audio, word_timestamps=True)",
+    "source_wav": "speech_long_44100.wav",
+    "source_wav_sha256": "06698bca997c822aab419e3060b14dbd06c3663cafb804b79204d376efdbbae8",
+    "source_sample_rate": 44100,
+    "input_path": "raw",
+    "snippet": "import numpy as np, soundfile as sf\nfrom faster_whisper import WhisperModel\nx, sr = sf.read(WAV, dtype=\"float64\", always_2d=False)\nif x.ndim == 2:\n    x = x.mean(axis=1)\n# path == \"resampled_16k\" only:\n#   from fractions import Fraction; from scipy import signal\n#   frac = Fraction(16000, sr).limit_denominator(2000)\n#   x = signal.resample_poly(x, up=frac.numerator, down=frac.denominator)\naudio = x.astype(\"float32\")\nmodel = WhisperModel(\"base\")\nsegments, info = model.transcribe(audio, word_timestamps=True)\nsegments = list(segments)   # generator: nothing runs until it is drained\n",
+    "wall_seconds": 14.361
+  },
+  "input": {
+    "path_mode": "raw",
+    "source_sample_rate": 44100,
+    "source_channels": 1,
+    "source_samples": 2847264,
+    "source_duration_s": 64.56381,
+    "fed_sample_rate_assumed_by_library": 16000,
+    "fed_samples": 2847264,
+    "fed_dtype": "float32",
+    "fed_duration_s_if_16k": 177.954,
+    "true_duration_s": 64.56381,
+    "resampled_before_transcribe": false,
+    "declared_sample_rate_of_fed_array": 44100
+  },
+  "type_inventory": {
+    "info": {
+      "type": "TranscriptionInfo",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "all_language_probs",
+        "duration",
+        "duration_after_vad",
+        "language",
+        "language_probability",
+        "transcription_options",
+        "vad_options"
+      ],
+      "public_non_callable": [
+        "all_language_probs",
+        "duration",
+        "duration_after_vad",
+        "language",
+        "language_probability",
+        "transcription_options",
+        "vad_options"
+      ],
+      "has_dict": true,
+      "has_asdict": false,
+      "fields": []
+    },
+    "segment": {
+      "type": "Segment",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "_asdict",
+        "avg_logprob",
+        "compression_ratio",
+        "end",
+        "id",
+        "no_speech_prob",
+        "seek",
+        "start",
+        "temperature",
+        "text",
+        "tokens",
+        "words"
+      ],
+      "public_non_callable": [
+        "avg_logprob",
+        "compression_ratio",
+        "end",
+        "id",
+        "no_speech_prob",
+        "seek",
+        "start",
+        "temperature",
+        "text",
+        "tokens",
+        "words"
+      ],
+      "has_dict": true,
+      "has_asdict": true,
+      "fields": []
+    },
+    "word": {
+      "type": "Word",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "_asdict",
+        "end",
+        "probability",
+        "start",
+        "word"
+      ],
+      "public_non_callable": [
+        "end",
+        "probability",
+        "start",
+        "word"
+      ],
+      "has_dict": true,
+      "has_asdict": true,
+      "fields": []
+    }
+  },
+  "summary": {
+    "n_segments": 16,
+    "n_words": 67,
+    "text": " Shun, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Shun, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Shun, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj,",
+    "last_word_end": 177.54,
+    "degenerate_word_count": 5,
+    "degenerate_words": [
+      {
+        "index": 7,
+        "word": " Taka",
+        "start": 11.42,
+        "end": 11.42
+      },
+      {
+        "index": 41,
+        "word": " Taka",
+        "start": 100.36,
+        "end": 100.36
+      },
+      {
+        "index": 50,
+        "word": "-Raj,",
+        "start": 130.98,
+        "end": 130.98
+      },
+      {
+        "index": 58,
+        "word": "-Raj,",
+        "start": 160.96,
+        "end": 160.96
+      },
+      {
+        "index": 60,
+        "word": " Asakangranga",
+        "start": 161.58,
+        "end": 161.58
+      }
+    ]
+  },
+  "info": {
+    "__type__": "TranscriptionInfo",
+    "language": "en",
+    "language_probability": 0.25547799468040466,
+    "duration": 177.954,
+    "duration_after_vad": 177.954,
+    "all_language_probs": [
+      [
+        "en",
+        0.25547799468040466
+      ],
+      [
+        "la",
+        0.1265362799167633
+      ],
+      [
+        "ja",
+        0.08875811100006104
+      ],
+      [
+        "jw",
+        0.06860212981700897
+      ],
+      [
+        "nn",
+        0.06650103628635406
+      ],
+      [
+        "th",
+        0.03444751724600792
+      ],
+      [
+        "de",
+        0.030677378177642822
+      ],
+      [
+        "ko",
+        0.02763623371720314
+      ],
+      [
+        "haw",
+        0.026608319953083992
+      ],
+      [
+        "br",
+        0.02437582239508629
+      ],
+      [
+        "ms",
+        0.024323318153619766
+      ],
+      [
+        "cy",
+        0.024254152551293373
+      ],
+      [
+        "zh",
+        0.02191232331097126
+      ],
+      [
+        "ar",
+        0.02070922590792179
+      ],
+      [
+        "km",
+        0.017836794257164
+      ],
+      [
+        "fr",
+        0.015985215082764626
+      ],
+      [
+        "tr",
+        0.00949106365442276
+      ],
+      [
+        "mn",
+        0.008082154206931591
+      ],
+      [
+        "es",
+        0.007202147506177425
+      ],
+      [
+        "my",
+        0.006361500360071659
+      ],
+      [
+        "hi",
+        0.006114540155977011
+      ],
+      [
+        "sa",
+        0.005954202730208635
+      ],
+      [
+        "sn",
+        0.004845041781663895
+      ],
+      [
+        "sv",
+        0.004557089880108833
+      ],
+      [
+        "it",
+        0.004360764753073454
+      ],
+      [
+        "bo",
+        0.004219315946102142
+      ],
+      [
+        "ru",
+        0.0037418948486447334
+      ],
+      [
+        "id",
+        0.0036201272159814835
+      ],
+      [
+        "ur",
+        0.0035551730543375015
+      ],
+      [
+        "vi",
+        0.0033450128976255655
+      ],
+      [
+        "pl",
+        0.0029788920655846596
+      ],
+      [
+        "fa",
+        0.002939650323241949
+      ],
+      [
+        "tl",
+        0.002904978347942233
+      ],
+      [
+        "mi",
+        0.0028668087907135487
+      ],
+      [
+        "fo",
+        0.0026801759377121925
+      ],
+      [
+        "bn",
+        0.00232369895093143
+      ],
+      [
+        "si",
+        0.002219097688794136
+      ],
+      [
+        "eu",
+        0.0021364984568208456
+      ],
+      [
+        "pt",
+        0.0017057808581739664
+      ],
+      [
+        "ht",
+        0.0016584348632022738
+      ],
+      [
+        "ro",
+        0.0016238301759585738
+      ],
+      [
+        "yo",
+        0.0015163066564127803
+      ],
+      [
+        "te",
+        0.0014479480450972915
+      ],
+      [
+        "hy",
+        0.0013335624244064093
+      ],
+      [
+        "oc",
+        0.0012804212747141719
+      ],
+      [
+        "fi",
+        0.0012725827982649207
+      ],
+      [
+        "hu",
+        0.0011016499483957887
+      ],
+      [
+        "cs",
+        0.0009851319482550025
+      ],
+      [
+        "yi",
+        0.0009303508559241891
+      ],
+      [
+        "sw",
+        0.0008897082880139351
+      ],
+      [
+        "ta",
+        0.000871244992595166
+      ],
+      [
+        "lo",
+        0.0008377794292755425
+      ],
+      [
+        "sl",
+        0.0008128304034471512
+      ],
+      [
+        "el",
+        0.00080829206854105
+      ],
+      [
+        "nl",
+        0.0007537495112046599
+      ],
+      [
+        "uk",
+        0.0007387810037471354
+      ],
+      [
+        "ml",
+        0.0007016779272817075
+      ],
+      [
+        "da",
+        0.0006375210941769183
+      ],
+      [
+        "ne",
+        0.0006273349863477051
+      ],
+      [
+        "he",
+        0.000580259773414582
+      ],
+      [
+        "sd",
+        0.0005729949334636331
+      ],
+      [
+        "gl",
+        0.000543874513823539
+      ],
+      [
+        "lv",
+        0.0004768049984704703
+      ],
+      [
+        "no",
+        0.000375125790014863
+      ],
+      [
+        "is",
+        0.0003495951823424548
+      ],
+      [
+        "ka",
+        0.0003326559963170439
+      ],
+      [
+        "lt",
+        0.000326950685121119
+      ],
+      [
+        "kk",
+        0.0002463514683768153
+      ],
+      [
+        "ps",
+        0.00023695128038525581
+      ],
+      [
+        "af",
+        0.00023026108101475984
+      ],
+      [
+        "az",
+        0.00022719203843735158
+      ],
+      [
+        "hr",
+        0.0001837027375586331
+      ],
+      [
+        "ca",
+        0.00017747117090038955
+      ],
+      [
+        "am",
+        0.00015452070510946214
+      ],
+      [
+        "be",
+        0.00014300597831606865
+      ],
+      [
+        "pa",
+        0.00014086462033446878
+      ],
+      [
+        "as",
+        0.0001314590044785291
+      ],
+      [
+        "mt",
+        0.00010955471225315705
+      ],
+      [
+        "bs",
+        0.00010825703793670982
+      ],
+      [
+        "mr",
+        9.261128434445709e-05
+      ],
+      [
+        "bg",
+        7.874140283092856e-05
+      ],
+      [
+        "et",
+        7.516939513152465e-05
+      ],
+      [
+        "sk",
+        7.276245014509186e-05
+      ],
+      [
+        "ln",
+        6.23983796685934e-05
+      ],
+      [
+        "sr",
+        6.028958159731701e-05
+      ],
+      [
+        "sq",
+        5.891128603252582e-05
+      ],
+      [
+        "so",
+        4.50115512649063e-05
+      ],
+      [
+        "kn",
+        4.2394025513203815e-05
+      ],
+      [
+        "gu",
+        2.3883099856902845e-05
+      ],
+      [
+        "su",
+        1.6554782632738352e-05
+      ],
+      [
+        "tg",
+        1.596046786289662e-05
+      ],
+      [
+        "lb",
+        1.1650543456198648e-05
+      ],
+      [
+        "mk",
+        6.446281986427493e-06
+      ],
+      [
+        "tt",
+        5.795087417936884e-06
+      ],
+      [
+        "ha",
+        4.655199973058188e-06
+      ],
+      [
+        "uz",
+        7.711073521932121e-07
+      ],
+      [
+        "mg",
+        6.016642828399199e-07
+      ],
+      [
+        "tk",
+        4.812800398212858e-07
+      ],
+      [
+        "ba",
+        3.498409455460205e-07
+      ]
+    ],
+    "transcription_options": {
+      "__type__": "TranscriptionOptions",
+      "beam_size": 5,
+      "best_of": 5,
+      "patience": 1,
+      "length_penalty": 1,
+      "repetition_penalty": 1,
+      "no_repeat_ngram_size": 0,
+      "log_prob_threshold": -1.0,
+      "no_speech_threshold": 0.6,
+      "compression_ratio_threshold": 2.4,
+      "condition_on_previous_text": true,
+      "prompt_reset_on_temperature": 0.5,
+      "temperatures": [
+        0.0,
+        0.2,
+        0.4,
+        0.6,
+        0.8,
+        1.0
+      ],
+      "initial_prompt": null,
+      "prefix": null,
+      "suppress_blank": true,
+      "suppress_tokens": [
+        1,
+        2,
+        7,
+        8,
+        9,
+        10,
+        14,
+        25,
+        26,
+        27,
+        28,
+        29,
+        31,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        90,
+        91,
+        92,
+        93,
+        359,
+        503,
+        522,
+        542,
+        873,
+        893,
+        902,
+        918,
+        922,
+        931,
+        1350,
+        1853,
+        1982,
+        2460,
+        2627,
+        3246,
+        3253,
+        3268,
+        3536,
+        3846,
+        3961,
+        4183,
+        4667,
+        6585,
+        6647,
+        7273,
+        9061,
+        9383,
+        10428,
+        10929,
+        11938,
+        12033,
+        12331,
+        12562,
+        13793,
+        14157,
+        14635,
+        15265,
+        15618,
+        16553,
+        16604,
+        18362,
+        18956,
+        20075,
+        21675,
+        22520,
+        26130,
+        26161,
+        26435,
+        28279,
+        29464,
+        31650,
+        32302,
+        32470,
+        36865,
+        42863,
+        47425,
+        49870,
+        50254,
+        50258,
+        50358,
+        50359,
+        50360,
+        50361,
+        50362
+      ],
+      "without_timestamps": false,
+      "max_initial_timestamp": 1.0,
+      "word_timestamps": true,
+      "prepend_punctuations": "\"'\u201c\u00bf([{-",
+      "append_punctuations": "\"'.\u3002,\uff0c!\uff01?\uff1f:\uff1a\u201d)]}\u3001",
+      "multilingual": false,
+      "max_new_tokens": null,
+      "clip_timestamps": [
+        0.0
+      ],
+      "hallucination_silence_threshold": null,
+      "hotwords": null
+    },
+    "vad_options": null
+  },
+  "segments": [
+    {
+      "__type__": "Segment",
+      "id": 1,
+      "seek": 0,
+      "start": 0.0,
+      "end": 7.32,
+      "text": " Shun, Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        50364,
+        1160,
+        409,
+        11,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        50774
+      ],
+      "avg_logprob": -0.8191560214420535,
+      "compression_ratio": 2.2439024390243905,
+      "no_speech_prob": 0.6403216123580933,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 0.0,
+          "end": 0.44,
+          "word": " Shun,",
+          "probability": 0.11997141689062119
+        },
+        {
+          "__type__": "Word",
+          "start": 1.14,
+          "end": 1.8,
+          "word": " Er,",
+          "probability": 0.16262513399124146
+        },
+        {
+          "__type__": "Word",
+          "start": 2.6,
+          "end": 5.46,
+          "word": " Asakangranga",
+          "probability": 0.17471983656287193
+        },
+        {
+          "__type__": "Word",
+          "start": 5.46,
+          "end": 6.16,
+          "word": " Taka",
+          "probability": 0.18169528245925903
+        },
+        {
+          "__type__": "Word",
+          "start": 6.16,
+          "end": 7.32,
+          "word": "-Raj,",
+          "probability": 0.28681519875923794
+        }
+      ],
+      "temperature": 0.2
+    },
+    {
+      "__type__": "Segment",
+      "id": 2,
+      "seek": 0,
+      "start": 8.46,
+      "end": 11.96,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        50774,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        51124
+      ],
+      "avg_logprob": -0.8191560214420535,
+      "compression_ratio": 2.2439024390243905,
+      "no_speech_prob": 0.6403216123580933,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 8.46,
+          "end": 8.84,
+          "word": " Er,",
+          "probability": 0.5392500758171082
+        },
+        {
+          "__type__": "Word",
+          "start": 9.92,
+          "end": 11.42,
+          "word": " Asakangranga",
+          "probability": 0.8008169829845428
+        },
+        {
+          "__type__": "Word",
+          "start": 11.42,
+          "end": 11.42,
+          "word": " Taka",
+          "probability": 0.9885581731796265
+        },
+        {
+          "__type__": "Word",
+          "start": 11.42,
+          "end": 11.96,
+          "word": "-Raj,",
+          "probability": 0.9888277053833008
+        }
+      ],
+      "temperature": 0.2
+    },
+    {
+      "__type__": "Segment",
+      "id": 3,
+      "seek": 0,
+      "start": 21.28,
+      "end": 29.36,
+      "text": " Shun, Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        51124,
+        1160,
+        409,
+        11,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        51614
+      ],
+      "avg_logprob": -0.8191560214420535,
+      "compression_ratio": 2.2439024390243905,
+      "no_speech_prob": 0.6403216123580933,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 21.28,
+          "end": 22.68,
+          "word": " Shun,",
+          "probability": 0.45095072081312537
+        },
+        {
+          "__type__": "Word",
+          "start": 22.68,
+          "end": 24.08,
+          "word": " Er,",
+          "probability": 0.9879665970802307
+        },
+        {
+          "__type__": "Word",
+          "start": 25.44,
+          "end": 27.48,
+          "word": " Asakangranga",
+          "probability": 0.9527211427688599
+        },
+        {
+          "__type__": "Word",
+          "start": 27.48,
+          "end": 28.32,
+          "word": " Taka",
+          "probability": 0.9936809241771698
+        },
+        {
+          "__type__": "Word",
+          "start": 28.32,
+          "end": 29.36,
+          "word": "-Raj,",
+          "probability": 0.9937251210212708
+        }
+      ],
+      "temperature": 0.2
+    },
+    {
+      "__type__": "Segment",
+      "id": 4,
+      "seek": 2936,
+      "start": 47.160000000000004,
+      "end": 51.58,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        50414,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        51514
+      ],
+      "avg_logprob": -0.19314411186402844,
+      "compression_ratio": 1.5142857142857142,
+      "no_speech_prob": 0.09797713160514832,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 47.160000000000004,
+          "end": 48.56,
+          "word": " Er,",
+          "probability": 0.0011640004813671112
+        },
+        {
+          "__type__": "Word",
+          "start": 48.56,
+          "end": 49.96,
+          "word": " Asakangranga",
+          "probability": 0.06804897706169868
+        },
+        {
+          "__type__": "Word",
+          "start": 49.96,
+          "end": 50.8,
+          "word": " Taka",
+          "probability": 0.06277820840477943
+        },
+        {
+          "__type__": "Word",
+          "start": 50.8,
+          "end": 51.58,
+          "word": "-Raj,",
+          "probability": 0.18870136886835098
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 5,
+      "seek": 2936,
+      "start": 53.0,
+      "end": 56.46,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        51514,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        51764
+      ],
+      "avg_logprob": -0.19314411186402844,
+      "compression_ratio": 1.5142857142857142,
+      "no_speech_prob": 0.09797713160514832,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 53.0,
+          "end": 53.3,
+          "word": " Er,",
+          "probability": 0.9182050228118896
+        },
+        {
+          "__type__": "Word",
+          "start": 53.98,
+          "end": 55.86,
+          "word": " Asakangranga",
+          "probability": 0.8976506233215332
+        },
+        {
+          "__type__": "Word",
+          "start": 55.86,
+          "end": 56.28,
+          "word": " Taka",
+          "probability": 0.9250032007694244
+        },
+        {
+          "__type__": "Word",
+          "start": 56.28,
+          "end": 56.46,
+          "word": "-Raj,",
+          "probability": 0.9706246455510458
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 6,
+      "seek": 5936,
+      "start": 69.43999999999998,
+      "end": 74.04,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        50364,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        51114
+      ],
+      "avg_logprob": -0.12423302074696155,
+      "compression_ratio": 2.2857142857142856,
+      "no_speech_prob": 0.2584936320781708,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 69.43999999999998,
+          "end": 70.83999999999999,
+          "word": " Er,",
+          "probability": 0.0006604866939596832
+        },
+        {
+          "__type__": "Word",
+          "start": 70.83999999999999,
+          "end": 72.24,
+          "word": " Asakangranga",
+          "probability": 0.10151856512075028
+        },
+        {
+          "__type__": "Word",
+          "start": 72.24,
+          "end": 73.04,
+          "word": " Taka",
+          "probability": 0.10230736061930656
+        },
+        {
+          "__type__": "Word",
+          "start": 73.04,
+          "end": 74.04,
+          "word": "-Raj,",
+          "probability": 0.1974217171470324
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 7,
+      "seek": 5936,
+      "start": 75.26,
+      "end": 78.84,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        51114,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        51464
+      ],
+      "avg_logprob": -0.12423302074696155,
+      "compression_ratio": 2.2857142857142856,
+      "no_speech_prob": 0.2584936320781708,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 75.26,
+          "end": 75.7,
+          "word": " Er,",
+          "probability": 0.87074875831604
+        },
+        {
+          "__type__": "Word",
+          "start": 76.54,
+          "end": 78.14,
+          "word": " Asakangranga",
+          "probability": 0.8322252869606018
+        },
+        {
+          "__type__": "Word",
+          "start": 78.14,
+          "end": 78.28,
+          "word": " Taka",
+          "probability": 0.9612587988376617
+        },
+        {
+          "__type__": "Word",
+          "start": 78.28,
+          "end": 78.84,
+          "word": "-Raj,",
+          "probability": 0.9753917654355367
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 8,
+      "seek": 5936,
+      "start": 84.46,
+      "end": 88.68,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        51464,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        51814
+      ],
+      "avg_logprob": -0.12423302074696155,
+      "compression_ratio": 2.2857142857142856,
+      "no_speech_prob": 0.2584936320781708,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 84.46,
+          "end": 85.86,
+          "word": " Er,",
+          "probability": 0.9574234485626221
+        },
+        {
+          "__type__": "Word",
+          "start": 85.86,
+          "end": 87.26,
+          "word": " Asakangranga",
+          "probability": 0.9509343504905701
+        },
+        {
+          "__type__": "Word",
+          "start": 87.26,
+          "end": 88.18,
+          "word": " Taka",
+          "probability": 0.9747874438762665
+        },
+        {
+          "__type__": "Word",
+          "start": 88.18,
+          "end": 88.68,
+          "word": "-Raj,",
+          "probability": 0.9835720459620158
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 9,
+      "seek": 8868,
+      "start": 88.68,
+      "end": 96.16,
+      "text": " Shun, Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        50364,
+        1160,
+        409,
+        11,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        50764
+      ],
+      "avg_logprob": -0.0675362731729235,
+      "compression_ratio": 1.5526315789473684,
+      "no_speech_prob": 0.12472346425056458,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 88.68,
+          "end": 89.4,
+          "word": " Shun,",
+          "probability": 0.1461125761270523
+        },
+        {
+          "__type__": "Word",
+          "start": 90.16,
+          "end": 90.76,
+          "word": " Er,",
+          "probability": 0.172392338514328
+        },
+        {
+          "__type__": "Word",
+          "start": 91.56,
+          "end": 94.46,
+          "word": " Asakangranga",
+          "probability": 0.12405207678675652
+        },
+        {
+          "__type__": "Word",
+          "start": 94.46,
+          "end": 95.28,
+          "word": " Taka",
+          "probability": 0.32308579236268997
+        },
+        {
+          "__type__": "Word",
+          "start": 95.28,
+          "end": 96.16,
+          "word": "-Raj,",
+          "probability": 0.24263838678598404
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 10,
+      "seek": 8868,
+      "start": 97.46,
+      "end": 101.0,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        50764,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        51114
+      ],
+      "avg_logprob": -0.0675362731729235,
+      "compression_ratio": 1.5526315789473684,
+      "no_speech_prob": 0.12472346425056458,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 97.46,
+          "end": 97.92,
+          "word": " Er,",
+          "probability": 0.36757421493530273
+        },
+        {
+          "__type__": "Word",
+          "start": 98.88,
+          "end": 100.36,
+          "word": " Asakangranga",
+          "probability": 0.8226363301277161
+        },
+        {
+          "__type__": "Word",
+          "start": 100.36,
+          "end": 100.36,
+          "word": " Taka",
+          "probability": 0.9906095266342163
+        },
+        {
+          "__type__": "Word",
+          "start": 100.36,
+          "end": 101.0,
+          "word": "-Raj,",
+          "probability": 0.9873048464457194
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 11,
+      "seek": 10100,
+      "start": 113.85999999999999,
+      "end": 118.56,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        50364,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        51114
+      ],
+      "avg_logprob": -0.1667341524735093,
+      "compression_ratio": 1.5142857142857142,
+      "no_speech_prob": 0.7061216235160828,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 113.85999999999999,
+          "end": 115.25999999999999,
+          "word": " Er,",
+          "probability": 0.0005788397393189371
+        },
+        {
+          "__type__": "Word",
+          "start": 115.25999999999999,
+          "end": 116.66,
+          "word": " Asakangranga",
+          "probability": 0.0773198872935609
+        },
+        {
+          "__type__": "Word",
+          "start": 116.66,
+          "end": 117.54,
+          "word": " Taka",
+          "probability": 0.3125408962368965
+        },
+        {
+          "__type__": "Word",
+          "start": 117.54,
+          "end": 118.56,
+          "word": "-Raj,",
+          "probability": 0.1404693921407064
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 12,
+      "seek": 10100,
+      "start": 119.74,
+      "end": 130.98,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        51114,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        51614
+      ],
+      "avg_logprob": -0.1667341524735093,
+      "compression_ratio": 1.5142857142857142,
+      "no_speech_prob": 0.7061216235160828,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 119.74,
+          "end": 120.12,
+          "word": " Er,",
+          "probability": 0.8496958613395691
+        },
+        {
+          "__type__": "Word",
+          "start": 120.7,
+          "end": 122.62,
+          "word": " Asakangranga",
+          "probability": 0.915342116355896
+        },
+        {
+          "__type__": "Word",
+          "start": 122.62,
+          "end": 130.98,
+          "word": " Taka",
+          "probability": 0.8837901651859283
+        },
+        {
+          "__type__": "Word",
+          "start": 130.98,
+          "end": 130.98,
+          "word": "-Raj,",
+          "probability": 0.9715742270151774
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 13,
+      "seek": 13098,
+      "start": 136.11999999999998,
+      "end": 140.76,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        50364,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        50864
+      ],
+      "avg_logprob": -0.07020169822499156,
+      "compression_ratio": 1.5142857142857142,
+      "no_speech_prob": 0.3817943334579468,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 136.11999999999998,
+          "end": 137.51999999999998,
+          "word": " Er,",
+          "probability": 0.00037622996023856103
+        },
+        {
+          "__type__": "Word",
+          "start": 137.51999999999998,
+          "end": 138.92,
+          "word": " Asakangranga",
+          "probability": 0.08218425735394704
+        },
+        {
+          "__type__": "Word",
+          "start": 138.92,
+          "end": 139.78,
+          "word": " Taka",
+          "probability": 0.11844411492347717
+        },
+        {
+          "__type__": "Word",
+          "start": 139.78,
+          "end": 140.76,
+          "word": "-Raj,",
+          "probability": 0.17579641193151474
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 14,
+      "seek": 13098,
+      "start": 141.98,
+      "end": 160.96,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        50864,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        51214
+      ],
+      "avg_logprob": -0.07020169822499156,
+      "compression_ratio": 1.5142857142857142,
+      "no_speech_prob": 0.3817943334579468,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 141.98,
+          "end": 142.3,
+          "word": " Er,",
+          "probability": 0.6987009048461914
+        },
+        {
+          "__type__": "Word",
+          "start": 142.9,
+          "end": 154.26,
+          "word": " Asakangranga",
+          "probability": 0.9013317704200745
+        },
+        {
+          "__type__": "Word",
+          "start": 154.26,
+          "end": 160.96,
+          "word": " Taka",
+          "probability": 0.9302794635295868
+        },
+        {
+          "__type__": "Word",
+          "start": 160.96,
+          "end": 160.96,
+          "word": "-Raj,",
+          "probability": 0.9808434247970581
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 15,
+      "seek": 16096,
+      "start": 160.96,
+      "end": 163.0,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        50364,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        50864
+      ],
+      "avg_logprob": -0.09371982226448675,
+      "compression_ratio": 1.5142857142857142,
+      "no_speech_prob": 0.3933323919773102,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 160.96,
+          "end": 161.58,
+          "word": " Er,",
+          "probability": 0.0009100526222027838
+        },
+        {
+          "__type__": "Word",
+          "start": 161.58,
+          "end": 161.58,
+          "word": " Asakangranga",
+          "probability": 0.003140687786071794
+        },
+        {
+          "__type__": "Word",
+          "start": 161.58,
+          "end": 161.72,
+          "word": " Taka",
+          "probability": 0.053603908978402615
+        },
+        {
+          "__type__": "Word",
+          "start": 161.72,
+          "end": 163.0,
+          "word": "-Raj,",
+          "probability": 0.21058383211493492
+        }
+      ],
+      "temperature": 0.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 16,
+      "seek": 16096,
+      "start": 164.18,
+      "end": 177.54,
+      "text": " Er, Asakangranga Taka-Raj,",
+      "tokens": [
+        50864,
+        3300,
+        11,
+        1018,
+        514,
+        656,
+        81,
+        26005,
+        314,
+        7849,
+        12,
+        49,
+        1805,
+        11,
+        51214
+      ],
+      "avg_logprob": -0.09371982226448675,
+      "compression_ratio": 1.5142857142857142,
+      "no_speech_prob": 0.3933323919773102,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 164.18,
+          "end": 164.54,
+          "word": " Er,",
+          "probability": 0.4112981855869293
+        },
+        {
+          "__type__": "Word",
+          "start": 165.3,
+          "end": 167.66,
+          "word": " Asakangranga",
+          "probability": 0.6668386995792389
+        },
+        {
+          "__type__": "Word",
+          "start": 167.66,
+          "end": 176.48,
+          "word": " Taka",
+          "probability": 0.80706387758255
+        },
+        {
+          "__type__": "Word",
+          "start": 176.48,
+          "end": 177.54,
+          "word": "-Raj,",
+          "probability": 0.9000219901402792
+        }
+      ],
+      "temperature": 0.0
+    }
+  ],
+  "words_flat": [
+    {
+      "__type__": "Word",
+      "start": 0.0,
+      "end": 0.44,
+      "word": " Shun,",
+      "probability": 0.11997141689062119
+    },
+    {
+      "__type__": "Word",
+      "start": 1.14,
+      "end": 1.8,
+      "word": " Er,",
+      "probability": 0.16262513399124146
+    },
+    {
+      "__type__": "Word",
+      "start": 2.6,
+      "end": 5.46,
+      "word": " Asakangranga",
+      "probability": 0.17471983656287193
+    },
+    {
+      "__type__": "Word",
+      "start": 5.46,
+      "end": 6.16,
+      "word": " Taka",
+      "probability": 0.18169528245925903
+    },
+    {
+      "__type__": "Word",
+      "start": 6.16,
+      "end": 7.32,
+      "word": "-Raj,",
+      "probability": 0.28681519875923794
+    },
+    {
+      "__type__": "Word",
+      "start": 8.46,
+      "end": 8.84,
+      "word": " Er,",
+      "probability": 0.5392500758171082
+    },
+    {
+      "__type__": "Word",
+      "start": 9.92,
+      "end": 11.42,
+      "word": " Asakangranga",
+      "probability": 0.8008169829845428
+    },
+    {
+      "__type__": "Word",
+      "start": 11.42,
+      "end": 11.42,
+      "word": " Taka",
+      "probability": 0.9885581731796265
+    },
+    {
+      "__type__": "Word",
+      "start": 11.42,
+      "end": 11.96,
+      "word": "-Raj,",
+      "probability": 0.9888277053833008
+    },
+    {
+      "__type__": "Word",
+      "start": 21.28,
+      "end": 22.68,
+      "word": " Shun,",
+      "probability": 0.45095072081312537
+    },
+    {
+      "__type__": "Word",
+      "start": 22.68,
+      "end": 24.08,
+      "word": " Er,",
+      "probability": 0.9879665970802307
+    },
+    {
+      "__type__": "Word",
+      "start": 25.44,
+      "end": 27.48,
+      "word": " Asakangranga",
+      "probability": 0.9527211427688599
+    },
+    {
+      "__type__": "Word",
+      "start": 27.48,
+      "end": 28.32,
+      "word": " Taka",
+      "probability": 0.9936809241771698
+    },
+    {
+      "__type__": "Word",
+      "start": 28.32,
+      "end": 29.36,
+      "word": "-Raj,",
+      "probability": 0.9937251210212708
+    },
+    {
+      "__type__": "Word",
+      "start": 47.160000000000004,
+      "end": 48.56,
+      "word": " Er,",
+      "probability": 0.0011640004813671112
+    },
+    {
+      "__type__": "Word",
+      "start": 48.56,
+      "end": 49.96,
+      "word": " Asakangranga",
+      "probability": 0.06804897706169868
+    },
+    {
+      "__type__": "Word",
+      "start": 49.96,
+      "end": 50.8,
+      "word": " Taka",
+      "probability": 0.06277820840477943
+    },
+    {
+      "__type__": "Word",
+      "start": 50.8,
+      "end": 51.58,
+      "word": "-Raj,",
+      "probability": 0.18870136886835098
+    },
+    {
+      "__type__": "Word",
+      "start": 53.0,
+      "end": 53.3,
+      "word": " Er,",
+      "probability": 0.9182050228118896
+    },
+    {
+      "__type__": "Word",
+      "start": 53.98,
+      "end": 55.86,
+      "word": " Asakangranga",
+      "probability": 0.8976506233215332
+    },
+    {
+      "__type__": "Word",
+      "start": 55.86,
+      "end": 56.28,
+      "word": " Taka",
+      "probability": 0.9250032007694244
+    },
+    {
+      "__type__": "Word",
+      "start": 56.28,
+      "end": 56.46,
+      "word": "-Raj,",
+      "probability": 0.9706246455510458
+    },
+    {
+      "__type__": "Word",
+      "start": 69.43999999999998,
+      "end": 70.83999999999999,
+      "word": " Er,",
+      "probability": 0.0006604866939596832
+    },
+    {
+      "__type__": "Word",
+      "start": 70.83999999999999,
+      "end": 72.24,
+      "word": " Asakangranga",
+      "probability": 0.10151856512075028
+    },
+    {
+      "__type__": "Word",
+      "start": 72.24,
+      "end": 73.04,
+      "word": " Taka",
+      "probability": 0.10230736061930656
+    },
+    {
+      "__type__": "Word",
+      "start": 73.04,
+      "end": 74.04,
+      "word": "-Raj,",
+      "probability": 0.1974217171470324
+    },
+    {
+      "__type__": "Word",
+      "start": 75.26,
+      "end": 75.7,
+      "word": " Er,",
+      "probability": 0.87074875831604
+    },
+    {
+      "__type__": "Word",
+      "start": 76.54,
+      "end": 78.14,
+      "word": " Asakangranga",
+      "probability": 0.8322252869606018
+    },
+    {
+      "__type__": "Word",
+      "start": 78.14,
+      "end": 78.28,
+      "word": " Taka",
+      "probability": 0.9612587988376617
+    },
+    {
+      "__type__": "Word",
+      "start": 78.28,
+      "end": 78.84,
+      "word": "-Raj,",
+      "probability": 0.9753917654355367
+    },
+    {
+      "__type__": "Word",
+      "start": 84.46,
+      "end": 85.86,
+      "word": " Er,",
+      "probability": 0.9574234485626221
+    },
+    {
+      "__type__": "Word",
+      "start": 85.86,
+      "end": 87.26,
+      "word": " Asakangranga",
+      "probability": 0.9509343504905701
+    },
+    {
+      "__type__": "Word",
+      "start": 87.26,
+      "end": 88.18,
+      "word": " Taka",
+      "probability": 0.9747874438762665
+    },
+    {
+      "__type__": "Word",
+      "start": 88.18,
+      "end": 88.68,
+      "word": "-Raj,",
+      "probability": 0.9835720459620158
+    },
+    {
+      "__type__": "Word",
+      "start": 88.68,
+      "end": 89.4,
+      "word": " Shun,",
+      "probability": 0.1461125761270523
+    },
+    {
+      "__type__": "Word",
+      "start": 90.16,
+      "end": 90.76,
+      "word": " Er,",
+      "probability": 0.172392338514328
+    },
+    {
+      "__type__": "Word",
+      "start": 91.56,
+      "end": 94.46,
+      "word": " Asakangranga",
+      "probability": 0.12405207678675652
+    },
+    {
+      "__type__": "Word",
+      "start": 94.46,
+      "end": 95.28,
+      "word": " Taka",
+      "probability": 0.32308579236268997
+    },
+    {
+      "__type__": "Word",
+      "start": 95.28,
+      "end": 96.16,
+      "word": "-Raj,",
+      "probability": 0.24263838678598404
+    },
+    {
+      "__type__": "Word",
+      "start": 97.46,
+      "end": 97.92,
+      "word": " Er,",
+      "probability": 0.36757421493530273
+    },
+    {
+      "__type__": "Word",
+      "start": 98.88,
+      "end": 100.36,
+      "word": " Asakangranga",
+      "probability": 0.8226363301277161
+    },
+    {
+      "__type__": "Word",
+      "start": 100.36,
+      "end": 100.36,
+      "word": " Taka",
+      "probability": 0.9906095266342163
+    },
+    {
+      "__type__": "Word",
+      "start": 100.36,
+      "end": 101.0,
+      "word": "-Raj,",
+      "probability": 0.9873048464457194
+    },
+    {
+      "__type__": "Word",
+      "start": 113.85999999999999,
+      "end": 115.25999999999999,
+      "word": " Er,",
+      "probability": 0.0005788397393189371
+    },
+    {
+      "__type__": "Word",
+      "start": 115.25999999999999,
+      "end": 116.66,
+      "word": " Asakangranga",
+      "probability": 0.0773198872935609
+    },
+    {
+      "__type__": "Word",
+      "start": 116.66,
+      "end": 117.54,
+      "word": " Taka",
+      "probability": 0.3125408962368965
+    },
+    {
+      "__type__": "Word",
+      "start": 117.54,
+      "end": 118.56,
+      "word": "-Raj,",
+      "probability": 0.1404693921407064
+    },
+    {
+      "__type__": "Word",
+      "start": 119.74,
+      "end": 120.12,
+      "word": " Er,",
+      "probability": 0.8496958613395691
+    },
+    {
+      "__type__": "Word",
+      "start": 120.7,
+      "end": 122.62,
+      "word": " Asakangranga",
+      "probability": 0.915342116355896
+    },
+    {
+      "__type__": "Word",
+      "start": 122.62,
+      "end": 130.98,
+      "word": " Taka",
+      "probability": 0.8837901651859283
+    },
+    {
+      "__type__": "Word",
+      "start": 130.98,
+      "end": 130.98,
+      "word": "-Raj,",
+      "probability": 0.9715742270151774
+    },
+    {
+      "__type__": "Word",
+      "start": 136.11999999999998,
+      "end": 137.51999999999998,
+      "word": " Er,",
+      "probability": 0.00037622996023856103
+    },
+    {
+      "__type__": "Word",
+      "start": 137.51999999999998,
+      "end": 138.92,
+      "word": " Asakangranga",
+      "probability": 0.08218425735394704
+    },
+    {
+      "__type__": "Word",
+      "start": 138.92,
+      "end": 139.78,
+      "word": " Taka",
+      "probability": 0.11844411492347717
+    },
+    {
+      "__type__": "Word",
+      "start": 139.78,
+      "end": 140.76,
+      "word": "-Raj,",
+      "probability": 0.17579641193151474
+    },
+    {
+      "__type__": "Word",
+      "start": 141.98,
+      "end": 142.3,
+      "word": " Er,",
+      "probability": 0.6987009048461914
+    },
+    {
+      "__type__": "Word",
+      "start": 142.9,
+      "end": 154.26,
+      "word": " Asakangranga",
+      "probability": 0.9013317704200745
+    },
+    {
+      "__type__": "Word",
+      "start": 154.26,
+      "end": 160.96,
+      "word": " Taka",
+      "probability": 0.9302794635295868
+    },
+    {
+      "__type__": "Word",
+      "start": 160.96,
+      "end": 160.96,
+      "word": "-Raj,",
+      "probability": 0.9808434247970581
+    },
+    {
+      "__type__": "Word",
+      "start": 160.96,
+      "end": 161.58,
+      "word": " Er,",
+      "probability": 0.0009100526222027838
+    },
+    {
+      "__type__": "Word",
+      "start": 161.58,
+      "end": 161.58,
+      "word": " Asakangranga",
+      "probability": 0.003140687786071794
+    },
+    {
+      "__type__": "Word",
+      "start": 161.58,
+      "end": 161.72,
+      "word": " Taka",
+      "probability": 0.053603908978402615
+    },
+    {
+      "__type__": "Word",
+      "start": 161.72,
+      "end": 163.0,
+      "word": "-Raj,",
+      "probability": 0.21058383211493492
+    },
+    {
+      "__type__": "Word",
+      "start": 164.18,
+      "end": 164.54,
+      "word": " Er,",
+      "probability": 0.4112981855869293
+    },
+    {
+      "__type__": "Word",
+      "start": 165.3,
+      "end": 167.66,
+      "word": " Asakangranga",
+      "probability": 0.6668386995792389
+    },
+    {
+      "__type__": "Word",
+      "start": 167.66,
+      "end": 176.48,
+      "word": " Taka",
+      "probability": 0.80706387758255
+    },
+    {
+      "__type__": "Word",
+      "start": 176.48,
+      "end": 177.54,
+      "word": "-Raj,",
+      "probability": 0.9000219901402792
+    }
+  ]
+}

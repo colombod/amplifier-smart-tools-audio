@@ -1,0 +1,716 @@
+{
+  "provenance": {
+    "recorded_at_utc": "2026-09-19T12:14:20.781799+00:00",
+    "python_stretch_version": "0.3.1",
+    "python_stretch_file": "/root/.local/share/uv/tools/aud/lib/python3.12/site-packages/python_stretch/__init__.py",
+    "loaded_shared_objects": [
+      {
+        "path": "/root/.local/share/uv/tools/aud/lib/python3.12/site-packages/python_stretch/Signalsmith.abi3.so",
+        "bytes": 242736
+      }
+    ],
+    "numpy_version": "2.5.3",
+    "python_version": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "sample_rate": 22050,
+    "channels": 1,
+    "snippet": "import numpy as np, python_stretch as ps\naudio = np.ascontiguousarray(x2.T, dtype=np.float32)   # (channels, samples)\nstretch = ps.Signalsmith.Stretch()\nstretch.preset(n_channels, sr)\nstretch.timeFactor = <value>                # only when a time factor is under test\nstretch.setTransposeSemitones(<value>)      # only when a pitch shift is under test\nout = stretch.process(audio)                # -> (channels, samples_out)\n",
+    "input_signal": "0.4*sin(220Hz) + 0.2*sin(1000Hz), raised-hanning envelope, +0.5 click at n/2, 1.000 s @ 22050 Hz"
+  },
+  "api_inventory": {
+    "module": {
+      "type": "module",
+      "module": "builtins",
+      "dir": [
+        "Signalsmith",
+        "__builtins__",
+        "__cached__",
+        "__doc__",
+        "__file__",
+        "__loader__",
+        "__name__",
+        "__package__",
+        "__path__",
+        "__spec__",
+        "__version__"
+      ],
+      "public_non_callable": [
+        {
+          "name": "Signalsmith",
+          "value": "<module 'python_stretch.Signalsmith' from '/root/.local/share/uv/tools/aud/lib/python3.12/site-packages/python_stretch/Signalsmith.abi3.so'>",
+          "type": "module"
+        }
+      ],
+      "public_callables": []
+    },
+    "Signalsmith": {
+      "type": "module",
+      "module": "builtins",
+      "dir": [
+        "Stretch",
+        "__doc__",
+        "__file__",
+        "__loader__",
+        "__name__",
+        "__package__",
+        "__spec__"
+      ],
+      "public_non_callable": [],
+      "public_callables": [
+        "Stretch"
+      ]
+    },
+    "Stretch_instance_after_preset": {
+      "type": "Stretch",
+      "module": "python_stretch.Signalsmith",
+      "dir": [
+        "__class__",
+        "__delattr__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "blockSamples",
+        "configure",
+        "inputLatency",
+        "intervalSamples",
+        "outputLatency",
+        "preset",
+        "process",
+        "reset",
+        "sampleRate",
+        "setTimeFactor",
+        "setTransposeFactor",
+        "setTransposeSemitones",
+        "timeFactor"
+      ],
+      "public_non_callable": [
+        {
+          "name": "sampleRate",
+          "value": "22050.0",
+          "type": "float"
+        },
+        {
+          "name": "timeFactor",
+          "value": "1.0",
+          "type": "float"
+        }
+      ],
+      "public_callables": [
+        "blockSamples",
+        "configure",
+        "inputLatency",
+        "intervalSamples",
+        "outputLatency",
+        "preset",
+        "process",
+        "reset",
+        "setTimeFactor",
+        "setTransposeFactor",
+        "setTransposeSemitones"
+      ]
+    }
+  },
+  "time_factor_direct": [
+    {
+      "time_factor_set": 0.5,
+      "semitones_set": null,
+      "input_samples": 22050,
+      "output_samples": 44100,
+      "ratio_out_over_in": 2.0,
+      "input_duration_s": 1.0,
+      "output_duration_s": 2.0,
+      "output_shape": [
+        1,
+        44100
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.7609341144561768,
+      "output_rms": 0.24123280216910903,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 0.5
+      },
+      "requested_duration_factor": 0.5,
+      "convention_under_test": "timeFactor = factor"
+    },
+    {
+      "time_factor_set": 0.800000011920929,
+      "semitones_set": null,
+      "input_samples": 22050,
+      "output_samples": 27563,
+      "ratio_out_over_in": 1.2500226757369615,
+      "input_duration_s": 1.0,
+      "output_duration_s": 1.250023,
+      "output_shape": [
+        1,
+        27563
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.599966287612915,
+      "output_rms": 0.24282170598084915,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 0.800000011920929
+      },
+      "requested_duration_factor": 0.8,
+      "convention_under_test": "timeFactor = factor"
+    },
+    {
+      "time_factor_set": 1.0,
+      "semitones_set": null,
+      "input_samples": 22050,
+      "output_samples": 22050,
+      "ratio_out_over_in": 1.0,
+      "input_duration_s": 1.0,
+      "output_duration_s": 1.0,
+      "output_shape": [
+        1,
+        22050
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.5995016694068909,
+      "output_rms": 0.24318307109904388,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 1.0
+      },
+      "requested_duration_factor": 1.0,
+      "convention_under_test": "timeFactor = factor"
+    },
+    {
+      "time_factor_set": 1.2000000476837158,
+      "semitones_set": null,
+      "input_samples": 22050,
+      "output_samples": 18375,
+      "ratio_out_over_in": 0.8333333333333334,
+      "input_duration_s": 1.0,
+      "output_duration_s": 0.833333,
+      "output_shape": [
+        1,
+        18375
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.8740187287330627,
+      "output_rms": 0.24243163093433118,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 1.2000000476837158
+      },
+      "requested_duration_factor": 1.2,
+      "convention_under_test": "timeFactor = factor"
+    },
+    {
+      "time_factor_set": 1.5,
+      "semitones_set": null,
+      "input_samples": 22050,
+      "output_samples": 14700,
+      "ratio_out_over_in": 0.6666666666666666,
+      "input_duration_s": 1.0,
+      "output_duration_s": 0.666667,
+      "output_shape": [
+        1,
+        14700
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.5979896783828735,
+      "output_rms": 0.2427496948854427,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 1.5
+      },
+      "requested_duration_factor": 1.5,
+      "convention_under_test": "timeFactor = factor"
+    },
+    {
+      "time_factor_set": 2.0,
+      "semitones_set": null,
+      "input_samples": 22050,
+      "output_samples": 11025,
+      "ratio_out_over_in": 0.5,
+      "input_duration_s": 1.0,
+      "output_duration_s": 0.5,
+      "output_shape": [
+        1,
+        11025
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.5970700979232788,
+      "output_rms": 0.241633413741863,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 2.0
+      },
+      "requested_duration_factor": 2.0,
+      "convention_under_test": "timeFactor = factor"
+    }
+  ],
+  "time_factor_reciprocal": [
+    {
+      "time_factor_set": 2.0,
+      "semitones_set": null,
+      "input_samples": 22050,
+      "output_samples": 11025,
+      "ratio_out_over_in": 0.5,
+      "input_duration_s": 1.0,
+      "output_duration_s": 0.5,
+      "output_shape": [
+        1,
+        11025
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.5970700979232788,
+      "output_rms": 0.241633413741863,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 2.0
+      },
+      "requested_duration_factor": 0.5,
+      "convention_under_test": "timeFactor = 1/factor"
+    },
+    {
+      "time_factor_set": 1.25,
+      "semitones_set": null,
+      "input_samples": 22050,
+      "output_samples": 17640,
+      "ratio_out_over_in": 0.8,
+      "input_duration_s": 1.0,
+      "output_duration_s": 0.8,
+      "output_shape": [
+        1,
+        17640
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.5977221131324768,
+      "output_rms": 0.24260061846383993,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 1.25
+      },
+      "requested_duration_factor": 0.8,
+      "convention_under_test": "timeFactor = 1/factor"
+    },
+    {
+      "time_factor_set": 1.0,
+      "semitones_set": null,
+      "input_samples": 22050,
+      "output_samples": 22050,
+      "ratio_out_over_in": 1.0,
+      "input_duration_s": 1.0,
+      "output_duration_s": 1.0,
+      "output_shape": [
+        1,
+        22050
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.5995016694068909,
+      "output_rms": 0.24318307109904388,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 1.0
+      },
+      "requested_duration_factor": 1.0,
+      "convention_under_test": "timeFactor = 1/factor"
+    },
+    {
+      "time_factor_set": 0.8333333134651184,
+      "semitones_set": null,
+      "input_samples": 22050,
+      "output_samples": 26460,
+      "ratio_out_over_in": 1.2,
+      "input_duration_s": 1.0,
+      "output_duration_s": 1.2,
+      "output_shape": [
+        1,
+        26460
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.6082273721694946,
+      "output_rms": 0.24334011993565963,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 0.8333333134651184
+      },
+      "requested_duration_factor": 1.2,
+      "convention_under_test": "timeFactor = 1/factor"
+    },
+    {
+      "time_factor_set": 0.6666666865348816,
+      "semitones_set": null,
+      "input_samples": 22050,
+      "output_samples": 33075,
+      "ratio_out_over_in": 1.5,
+      "input_duration_s": 1.0,
+      "output_duration_s": 1.5,
+      "output_shape": [
+        1,
+        33075
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.6057510375976562,
+      "output_rms": 0.24312080224188498,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 0.6666666865348816
+      },
+      "requested_duration_factor": 1.5,
+      "convention_under_test": "timeFactor = 1/factor"
+    },
+    {
+      "time_factor_set": 0.5,
+      "semitones_set": null,
+      "input_samples": 22050,
+      "output_samples": 44100,
+      "ratio_out_over_in": 2.0,
+      "input_duration_s": 1.0,
+      "output_duration_s": 2.0,
+      "output_shape": [
+        1,
+        44100
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.7668161392211914,
+      "output_rms": 0.24123341659798772,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 0.5
+      },
+      "requested_duration_factor": 2.0,
+      "convention_under_test": "timeFactor = 1/factor"
+    }
+  ],
+  "transpose_only": [
+    {
+      "time_factor_set": null,
+      "semitones_set": -12.0,
+      "input_samples": 22050,
+      "output_samples": 22050,
+      "ratio_out_over_in": 1.0,
+      "input_duration_s": 1.0,
+      "output_duration_s": 1.0,
+      "output_shape": [
+        1,
+        22050
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.6102036833763123,
+      "output_rms": 0.2403067307312287,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 1.0
+      }
+    },
+    {
+      "time_factor_set": null,
+      "semitones_set": -7.0,
+      "input_samples": 22050,
+      "output_samples": 22050,
+      "ratio_out_over_in": 1.0,
+      "input_duration_s": 1.0,
+      "output_duration_s": 1.0,
+      "output_shape": [
+        1,
+        22050
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.5939173102378845,
+      "output_rms": 0.24112455220951767,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 1.0
+      }
+    },
+    {
+      "time_factor_set": null,
+      "semitones_set": 0.0,
+      "input_samples": 22050,
+      "output_samples": 22050,
+      "ratio_out_over_in": 1.0,
+      "input_duration_s": 1.0,
+      "output_duration_s": 1.0,
+      "output_shape": [
+        1,
+        22050
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.5995016694068909,
+      "output_rms": 0.24318307109904388,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 1.0
+      }
+    },
+    {
+      "time_factor_set": null,
+      "semitones_set": 7.0,
+      "input_samples": 22050,
+      "output_samples": 22050,
+      "ratio_out_over_in": 1.0,
+      "input_duration_s": 1.0,
+      "output_duration_s": 1.0,
+      "output_shape": [
+        1,
+        22050
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.6004720330238342,
+      "output_rms": 0.23921237639363446,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 1.0
+      }
+    },
+    {
+      "time_factor_set": null,
+      "semitones_set": 12.0,
+      "input_samples": 22050,
+      "output_samples": 22050,
+      "ratio_out_over_in": 1.0,
+      "input_duration_s": 1.0,
+      "output_duration_s": 1.0,
+      "output_shape": [
+        1,
+        22050
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.5964469313621521,
+      "output_rms": 0.23788167709197597,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 1.0
+      }
+    }
+  ],
+  "combined": [
+    {
+      "time_factor_set": 0.8333333134651184,
+      "semitones_set": 7.0,
+      "input_samples": 22050,
+      "output_samples": 26460,
+      "ratio_out_over_in": 1.2,
+      "input_duration_s": 1.0,
+      "output_duration_s": 1.2,
+      "output_shape": [
+        1,
+        26460
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.5876534581184387,
+      "output_rms": 0.23911562930148197,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 0.8333333134651184
+      },
+      "requested_duration_factor": 1.2,
+      "convention_under_test": "timeFactor = 1/factor, with transpose"
+    },
+    {
+      "time_factor_set": 1.25,
+      "semitones_set": -12.0,
+      "input_samples": 22050,
+      "output_samples": 17640,
+      "ratio_out_over_in": 0.8,
+      "input_duration_s": 1.0,
+      "output_duration_s": 0.8,
+      "output_shape": [
+        1,
+        17640
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.7623626589775085,
+      "output_rms": 0.24001675095556377,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 1.25
+      },
+      "requested_duration_factor": 0.8,
+      "convention_under_test": "timeFactor = 1/factor, with transpose"
+    },
+    {
+      "time_factor_set": 0.5,
+      "semitones_set": 12.0,
+      "input_samples": 22050,
+      "output_samples": 44100,
+      "ratio_out_over_in": 2.0,
+      "input_duration_s": 1.0,
+      "output_duration_s": 2.0,
+      "output_shape": [
+        1,
+        44100
+      ],
+      "output_dtype": "float32",
+      "output_peak": 0.6040496826171875,
+      "output_rms": 0.23547792194591158,
+      "stretch_state_after_process": {
+        "inputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "outputLatency": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "blockSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "intervalSamples": "TypeError(\"float() argument must be a string or a real number, not 'nanobind.nb_bound_method'\")",
+        "timeFactor": 0.5
+      },
+      "requested_duration_factor": 2.0,
+      "convention_under_test": "timeFactor = 1/factor, with transpose"
+    }
+  ],
+  "audio_pair": [
+    {
+      "label": "timeFactor_0.5",
+      "time_factor_set": 0.5,
+      "input_npy": "input_mono_22050.npy",
+      "output_npy": "output_timeFactor_0.5.npy",
+      "input_samples": 22050,
+      "output_samples": 44100,
+      "ratio_out_over_in": 2.0,
+      "output_first16": [
+        0.18513259291648865,
+        0.2178344428539276,
+        0.2204376757144928,
+        0.20203283429145813,
+        0.18988700211048126,
+        0.16554585099220276,
+        0.14438699185848236,
+        0.12012133002281189,
+        0.10087094455957413,
+        0.0833394005894661,
+        0.0727691501379013,
+        0.06635520607233047,
+        0.06732962280511856,
+        0.07264294475317001,
+        0.08396782726049423,
+        0.09791213274002075
+      ],
+      "output_peak": 0.7718585729598999
+    },
+    {
+      "label": "timeFactor_2.0",
+      "time_factor_set": 2.0,
+      "input_npy": "input_mono_22050.npy",
+      "output_npy": "output_timeFactor_2.0.npy",
+      "input_samples": 22050,
+      "output_samples": 11025,
+      "ratio_out_over_in": 0.5,
+      "output_first16": [
+        0.14907704293727875,
+        0.11156067997217178,
+        0.0915084183216095,
+        0.07921165972948074,
+        0.07946410030126572,
+        0.0880289375782013,
+        0.10713718086481094,
+        0.1328185349702835,
+        0.1653183549642563,
+        0.20036470890045166,
+        0.23704057931900024,
+        0.2711317241191864,
+        0.30146580934524536,
+        0.3245227038860321,
+        0.33970698714256287,
+        0.34476616978645325
+      ],
+      "output_peak": 0.5970700979232788
+    },
+    {
+      "label": "timeFactor_1.0",
+      "time_factor_set": 1.0,
+      "input_npy": "input_mono_22050.npy",
+      "output_npy": "output_timeFactor_1.0.npy",
+      "input_samples": 22050,
+      "output_samples": 22050,
+      "ratio_out_over_in": 1.0,
+      "output_first16": [
+        -1.7893950765568434e-09,
+        0.033901650458574295,
+        0.06592975556850433,
+        0.09429609775543213,
+        0.11750020831823349,
+        0.13444754481315613,
+        0.14453573524951935,
+        0.14770086109638214,
+        0.1444205939769745,
+        0.1356734335422516,
+        0.12285803258419037,
+        0.1076778769493103,
+        0.09200171381235123,
+        0.07771027088165283,
+        0.06654204428195953,
+        0.05995022505521774
+      ],
+      "output_peak": 0.5995016694068909
+    }
+  ]
+}

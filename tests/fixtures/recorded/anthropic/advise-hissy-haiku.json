@@ -1,0 +1,50 @@
+{
+  "provenance": {
+    "anthropic_version": "2023-06-01",
+    "aud_version": "0.8.0",
+    "captured_at": "2026-09-19T12:03:56.687909+00:00",
+    "endpoint": "https://api.anthropic.com/v1/messages",
+    "model_requested": "claude-haiku-4-5-20251001",
+    "note": "Captured from a REAL successful call. Replayed verbatim in tests; never hand-edited.",
+    "request_sha256": "5d354a0bdc8e5e48cda543c9eb2e0cd77ad2f341dacd3655f03a0131ba8583e5"
+  },
+  "request": {
+    "max_tokens": 2000,
+    "messages": [
+      {
+        "content": "Measurements for the file to master:\n{\n  \"ambience_decay_estimate_ms\": 2285.99834435782,\n  \"channels\": 2,\n  \"clipped_sample_count\": 0,\n  \"crest_factor_db\": 9.46992183409101,\n  \"dc_offset\": [\n    -0.00011310425016709149,\n    -0.00011310425016709149\n  ],\n  \"duration_seconds\": 4.6,\n  \"integrated_lufs\": -13.060630322473447,\n  \"loudness_range_lu\": 2.6889596577709387,\n  \"mid_side_ratio\": 0.0,\n  \"noise_floor_dbfs\": -30.50676485763009,\n  \"octave_band_energy_db\": {\n    \"1000.0\": -44.66096551900327,\n    \"125.0\": -25.537562185158016,\n    \"16000.0\": -33.60053657043905,\n    \"2000.0\": -42.348700926914724,\n    \"250.0\": -17.734908815688915,\n    \"31.5\": -60.63798249317067,\n    \"4000.0\": -39.260614886189344,\n    \"500.0\": -25.746633290182622,\n    \"63.0\": -56.64027195147475,\n    \"8000.0\": -36.2737075944205\n  },\n  \"rms_dbfs\": -16.42733830885828,\n  \"sample_peak_dbfs\": -6.957416474767268,\n  \"sample_rate\": 44100,\n  \"sibilance_ratio\": 0.007369872407841724,\n  \"stereo_correlation\": 1.0,\n  \"true_peak_dbtp\": -6.9518890997361975\n}\n\nTarget integrated loudness: -16.0 LUFS.\nTarget true-peak ceiling: -1.0 dBTP.\n\nPropose the mastering chain now, as one JSON object.",
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5-20251001",
+    "system": "You are the mastering advisor inside `aud`, an audio mastering tool. You are given honest numeric measurements of a finished recording -- never the audio itself -- and you choose a mastering chain: which stages to apply, with what parameters, and why.\n\nAvailable stages and their exact JSON parameter shapes -- only these eight;\nno others exist for this decision:\n\n  gate      {\"threshold_above_floor_db\": float >= 0, \"range_db\": float >= 0,\n             \"hold_ms\": float >= 0}\n  expand    {\"threshold_above_floor_db\": float >= 0, \"ratio\": float >= 1.0,\n             \"knee_db\": float >= 0}\n  deess     {\"amount_db\": float >= 0, \"freq_hz\": float > 0}\n  dereverb  {\"amount_db\": float >= 0}\n  eq        {\"hpf\": float > 0 or null, \"lpf\": float > 0 or null,\n             \"peaks\": [[freq_hz, gain_db, q], ...] or null}\n  compress  {\"bands\": [ascending crossover Hz, at least one],\n             \"ratio\": float >= 1.0}\n  saturate  {\"drive\": float >= 0, \"mix\": float in [0, 1]}\n  reverb    {\"amount\": float in [0, 1], \"decay\": float > 0,\n             \"predelay_ms\": float >= 0}\n  loudness  {\"target_lufs\": float < 0}\n  limit     {\"ceiling_dbtp\": float <= 0.0}\n\n`gate` and `expand` work on the QUIET end and are the right answer to an\naudible noise floor between phrases. `expand` is gentler and usually correct\nfor a voice; `gate` is for harder cases. Both take their threshold RELATIVE\nto the measured noise floor, so read `noise_floor_dbfs` from the report --\na larger `threshold_above_floor_db` gates more aggressively. Neither belongs\nin a chain whose noise floor is already low; say so rather than adding one.\n\nRespond with EXACTLY one JSON object and nothing else -- no markdown fences, no prose before or after it. The shape is:\n\n{\"stages\": [{\"stage\": \"<name>\", \"params\": {...}, \"reason\": \"<short, grounded reason>\"}, ...]}\n\nRules:\n- Only use stage names from the list above. Do not invent one, and do not propose editing (cutting/trimming) -- this decision is measurement-based only, with no information about where anything is in time.\n- Include each stage at most once.\n- 'reason' must cite a specific number from the measurements you were given (e.g. 'crest factor is 18.2 dB, so...'), not a generic remark. A stage with no stated, measurement-grounded reason is not useful.\n- Order the stages however you like; aud reorders them into its own canonical mastering order before rendering, regardless of the order you list them in.\n- Usually include 'loudness' and 'limit' so the render actually reaches the requested target and ceiling, unless the measurements say it is already there.\n- If a stage would do nothing useful for this file, leave it out entirely rather than including it with a null-ish/no-op parameter.\n- CHECK THE NOISE FLOOR BEFORE ANYTHING ELSE, because every later stage makes it worse: compression and loudness both LIFT a noise floor, so hiss or room tone that was tolerable in the source is audible in the master. Compare 'noise_floor_dbfs' against 'integrated_lufs'. Roughly 40 dB or more of separation is a clean recording -- do not gate it. Under about 25 dB is an audible floor that the chain is about to amplify: reach for 'expand' (gentler, usually right for a voice) or 'gate' (harder cases), and cite the two numbers and their difference in your reason."
+  },
+  "response": {
+    "container": null,
+    "content": [
+      {
+        "text": "```json\n{\n  \"stages\": [\n    {\n      \"stage\": \"loudness\",\n      \"params\": {\"target_lufs\": -16.0},\n      \"reason\": \"Integrated LUFS is -13.06, which is 2.94 dB above target of -16.0 LUFS; loudness stage will reduce level to match target.\"\n    },\n    {\n      \"stage\": \"limit\",\n      \"params\": {\"ceiling_dbtp\": -1.0},\n      \"reason\": \"True peak is -6.95 dBTP; loudness adjustment will raise peaks, so limiter at -1.0 dBTP ceiling prevents clipping and meets the specified true-peak target.\"\n    }\n  ]\n}\n```",
+        "type": "text"
+      }
+    ],
+    "id": "msg_011CfCmNtBtNvPSuroGtxWDR",
+    "model": "claude-haiku-4-5-20251001",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "not_available",
+      "input_tokens": 1437,
+      "output_tokens": 179,
+      "service_tier": "standard"
+    }
+  }
+}

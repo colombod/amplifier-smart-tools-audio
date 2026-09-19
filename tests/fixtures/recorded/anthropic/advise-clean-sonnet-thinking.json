@@ -1,0 +1,58 @@
+{
+  "provenance": {
+    "anthropic_version": "2023-06-01",
+    "aud_version": "0.8.0",
+    "captured_at": "2026-09-19T12:03:54.196564+00:00",
+    "endpoint": "https://api.anthropic.com/v1/messages",
+    "model_requested": "claude-sonnet-5",
+    "note": "Captured from a REAL successful call. Replayed verbatim in tests; never hand-edited.",
+    "request_sha256": "21abc5c8bc77a8c2c6dd5aea9d704e0e0014de1550ddd03c524b4fd992cf286c"
+  },
+  "request": {
+    "max_tokens": 2000,
+    "messages": [
+      {
+        "content": "Measurements for the file to master:\n{\n  \"ambience_decay_estimate_ms\": 770.10839011453,\n  \"channels\": 2,\n  \"clipped_sample_count\": 0,\n  \"crest_factor_db\": 5.789872494642363,\n  \"dc_offset\": [\n    3.9069647239037825e-07,\n    3.9069647239037825e-07\n  ],\n  \"duration_seconds\": 4.299977324263039,\n  \"integrated_lufs\": -11.758904229033602,\n  \"loudness_range_lu\": 0.6400786185963003,\n  \"mid_side_ratio\": 0.0,\n  \"noise_floor_dbfs\": -64.54365672903448,\n  \"octave_band_energy_db\": {\n    \"1000.0\": -51.07027762272806,\n    \"125.0\": -23.649779633868736,\n    \"16000.0\": -72.79432700185228,\n    \"2000.0\": -79.13410361441345,\n    \"250.0\": -15.675820604847218,\n    \"31.5\": -81.18183624094804,\n    \"4000.0\": -78.42410358397261,\n    \"500.0\": -23.695006588637884,\n    \"63.0\": -62.38845477102149,\n    \"8000.0\": -75.56763296586556\n  },\n  \"rms_dbfs\": -14.558258969318999,\n  \"sample_peak_dbfs\": -8.768386474676635,\n  \"sample_rate\": 44100,\n  \"sibilance_ratio\": 5.60572498000261e-07,\n  \"stereo_correlation\": 1.0,\n  \"true_peak_dbtp\": -8.762859099645564\n}\n\nTarget integrated loudness: -16.0 LUFS.\nTarget true-peak ceiling: -1.0 dBTP.\n\nPropose the mastering chain now, as one JSON object.",
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-5",
+    "system": "You are the mastering advisor inside `aud`, an audio mastering tool. You are given honest numeric measurements of a finished recording -- never the audio itself -- and you choose a mastering chain: which stages to apply, with what parameters, and why.\n\nAvailable stages and their exact JSON parameter shapes -- only these eight;\nno others exist for this decision:\n\n  gate      {\"threshold_above_floor_db\": float >= 0, \"range_db\": float >= 0,\n             \"hold_ms\": float >= 0}\n  expand    {\"threshold_above_floor_db\": float >= 0, \"ratio\": float >= 1.0,\n             \"knee_db\": float >= 0}\n  deess     {\"amount_db\": float >= 0, \"freq_hz\": float > 0}\n  dereverb  {\"amount_db\": float >= 0}\n  eq        {\"hpf\": float > 0 or null, \"lpf\": float > 0 or null,\n             \"peaks\": [[freq_hz, gain_db, q], ...] or null}\n  compress  {\"bands\": [ascending crossover Hz, at least one],\n             \"ratio\": float >= 1.0}\n  saturate  {\"drive\": float >= 0, \"mix\": float in [0, 1]}\n  reverb    {\"amount\": float in [0, 1], \"decay\": float > 0,\n             \"predelay_ms\": float >= 0}\n  loudness  {\"target_lufs\": float < 0}\n  limit     {\"ceiling_dbtp\": float <= 0.0}\n\n`gate` and `expand` work on the QUIET end and are the right answer to an\naudible noise floor between phrases. `expand` is gentler and usually correct\nfor a voice; `gate` is for harder cases. Both take their threshold RELATIVE\nto the measured noise floor, so read `noise_floor_dbfs` from the report --\na larger `threshold_above_floor_db` gates more aggressively. Neither belongs\nin a chain whose noise floor is already low; say so rather than adding one.\n\nRespond with EXACTLY one JSON object and nothing else -- no markdown fences, no prose before or after it. The shape is:\n\n{\"stages\": [{\"stage\": \"<name>\", \"params\": {...}, \"reason\": \"<short, grounded reason>\"}, ...]}\n\nRules:\n- Only use stage names from the list above. Do not invent one, and do not propose editing (cutting/trimming) -- this decision is measurement-based only, with no information about where anything is in time.\n- Include each stage at most once.\n- 'reason' must cite a specific number from the measurements you were given (e.g. 'crest factor is 18.2 dB, so...'), not a generic remark. A stage with no stated, measurement-grounded reason is not useful.\n- Order the stages however you like; aud reorders them into its own canonical mastering order before rendering, regardless of the order you list them in.\n- Usually include 'loudness' and 'limit' so the render actually reaches the requested target and ceiling, unless the measurements say it is already there.\n- If a stage would do nothing useful for this file, leave it out entirely rather than including it with a null-ish/no-op parameter.\n- CHECK THE NOISE FLOOR BEFORE ANYTHING ELSE, because every later stage makes it worse: compression and loudness both LIFT a noise floor, so hiss or room tone that was tolerable in the source is audible in the master. Compare 'noise_floor_dbfs' against 'integrated_lufs'. Roughly 40 dB or more of separation is a clean recording -- do not gate it. Under about 25 dB is an audible floor that the chain is about to amplify: reach for 'expand' (gentler, usually right for a voice) or 'gate' (harder cases), and cite the two numbers and their difference in your reason."
+  },
+  "response": {
+    "container": null,
+    "content": [
+      {
+        "signature": "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",
+        "thinking": "",
+        "type": "thinking"
+      },
+      {
+        "text": "{\"stages\": [{\"stage\": \"eq\", \"params\": {\"hpf\": null, \"lpf\": null, \"peaks\": [[250.0, -4.0, 1.1], [125.0, -2.0, 1.0]]}, \"reason\": \"Octave-band energy shows a resonant buildup at 250 Hz (-15.68 dB) and 125 Hz (-23.65 dB), much hotter than the 500 Hz (-23.7 dB) and 1000 Hz (-51.1 dB) bands, so a modest low-mid cut removes the boominess.\"}, {\"stage\": \"loudness\", \"params\": {\"target_lufs\": -16.0}, \"reason\": \"Integrated loudness is -11.76 LUFS, 4.24 LU above the -16.0 LUFS target, so gain needs to be pulled down to match.\"}, {\"stage\": \"limit\", \"params\": {\"ceiling_dbtp\": -1.0}, \"reason\": \"True peak is -8.76 dBTP now, but after applying loudness reduction downstream gain-staging could still approach the ceiling, so a limiter enforces the -1.0 dBTP target safely.\"}]}",
+        "type": "text"
+      }
+    ],
+    "id": "msg_011CfCmMrpkV2Ud5Ea5pmYat",
+    "model": "claude-sonnet-5",
+    "role": "assistant",
+    "stop_details": null,
+    "stop_reason": "end_turn",
+    "stop_sequence": null,
+    "type": "message",
+    "usage": {
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "inference_geo": "global",
+      "input_tokens": 1826,
+      "output_tokens": 1252,
+      "output_tokens_details": {
+        "thinking_tokens": 876
+      },
+      "service_tier": "standard"
+    }
+  }
+}

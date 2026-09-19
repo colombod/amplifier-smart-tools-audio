@@ -1,23 +1,28 @@
 """Behavioural tests for aud.dsp.detect and aud.dsp.speech.
 
-Every signal is synthesised in-test (no committed binaries). Detection
-tests plant known events at known times and assert the detector recovers
-them within a stated tolerance -- this is what proves the numbers in the
-lane report, not just that the code runs without raising.
+Every energy-domain signal (silence/transient detection) is synthesised
+in-test (no committed binaries) -- this proves the numbers in the lane
+report, not just that the code runs without raising.
+
+Every faster-whisper-touching test below replays a REAL recorded
+transcription from tests/fixtures/recorded/faster_whisper/ (see
+tests/replay.py and RECORDING.md) instead of a hand-written fake
+transcript. Two real defects (a degenerate word with no sample rate at
+all, and a sample-rate mismatch) survived a green test suite built on
+hand-written fakes; the recordings exist so those exact failure modes are
+what gets tested.
 """
 
 from __future__ import annotations
-
-import sys
-import types
-from dataclasses import dataclass
 
 import numpy as np
 import pytest
 
 from aud.dsp import detect
+from aud.dsp import io as dsp_io
 from aud.dsp import speech as dsp_speech
 from aud.schemas import AudError
+from tests import replay
 
 _SR = 44100
 
@@ -241,208 +246,244 @@ def test_is_available_reports_false_when_faster_whisper_is_not_installed() -> No
     assert dsp_speech.is_available() is False
 
 
-# --- dsp.speech: word -> region parsing, faster-whisper-free ----------------
+# --- dsp.speech: word -> region parsing, against REAL recorded words -------
+#
+# `replay.load_words(name)` returns the flat, ordered, real word list from
+# one recorded faster-whisper run (tests/fixtures/recorded/faster_whisper/),
+# each object exposing exactly `.start`, `.end`, `.word`, `.probability` --
+# the real values faster-whisper produced, verbatim. No hand-authored
+# `_FakeWord` stands in for any of these any more: a hand-rolled fake built
+# from the fields this module reads could not produce a real degenerate
+# word (D2) or omit a field it didn't know to include, which is exactly how
+# both defects survived a green suite (see RECORDING.md).
 
 
-@dataclass
-class _FakeWord:
-    start: float
-    end: float
-    word: str
-    probability: float = 1.0
-
-
-def test_words_to_regions_finds_filler_words() -> None:
-    words = [
-        _FakeWord(0.0, 0.3, "hello"),
-        _FakeWord(0.3, 0.5, "um", probability=0.87),
-        _FakeWord(0.5, 0.8, "world"),
+def test_words_to_regions_finds_filler_words_in_a_real_transcript() -> None:
+    """speech_short_16000__raw.json: real transcript of "So, um, the first
+    thing we need to do is, uh, check the levels. And then, erm, we can
+    start recording." -- three real, correctly-timed filler words.
+    """
+    words = replay.load_words("speech_short_16000__raw")
+    regions, degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=100000.0)
+    fillers = [r for r in regions if r["text"]]
+    assert [(r["start_s"], r["end_s"], r["text"]) for r in fillers] == [
+        (0.56, 0.7, "um"),
+        (3.1, 3.22, "uh"),
+        (6.5, 6.7, "erm"),
     ]
-    regions, degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=700.0)
-    assert regions == [{"start_s": 0.3, "end_s": 0.5, "text": "um", "confidence": 0.87}]
     assert degenerate == 0
 
 
-def test_words_to_regions_finds_hesitation_gaps() -> None:
-    words = [
-        _FakeWord(0.0, 0.3, "hello"),
-        _FakeWord(1.2, 1.5, "world"),  # 0.9s gap -- a hesitation
-    ]
-    regions, degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=700.0)
-    assert regions == [{"start_s": 0.3, "end_s": 1.2, "text": "", "confidence": 1.0}]
-    assert degenerate == 0
+def test_words_to_regions_finds_a_real_hesitation_gap() -> None:
+    """Same real transcript: "... check the levels." ends at 4.24s, "And
+    then ..." starts at 5.30s -- a real 1.06s pause, above the 700ms
+    default threshold.
+    """
+    words = replay.load_words("speech_short_16000__raw")
+    regions, _degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=700.0)
+    hesitations = [r for r in regions if not r["text"]]
+    assert len(hesitations) == 1
+    assert hesitations[0]["start_s"] == pytest.approx(4.24)
+    assert hesitations[0]["end_s"] == pytest.approx(5.300000000000001)
+    assert hesitations[0]["confidence"] == 1.0
 
 
-def test_words_to_regions_ignores_gap_shorter_than_min_pause() -> None:
-    words = [
-        _FakeWord(0.0, 0.3, "hello"),
-        _FakeWord(0.5, 0.8, "world"),  # 0.2s gap -- below the 700ms threshold
-    ]
-    regions, degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=700.0)
-    assert regions == []
-    assert degenerate == 0
+def test_words_to_regions_ignores_a_real_gap_shorter_than_min_pause() -> None:
+    """Same real transcript: "is," ends at 2.68s, "uh," starts at 3.10s --
+    a real 0.42s gap, below the 700ms default threshold.
+    """
+    words = replay.load_words("speech_short_16000__raw")
+    regions, _degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=700.0)
+    hesitation_starts = [r["start_s"] for r in regions if not r["text"]]
+    assert 2.68 not in hesitation_starts
 
 
-def test_words_to_regions_output_is_ascending_and_non_overlapping() -> None:
-    words = [
-        _FakeWord(0.0, 0.2, "um"),
-        _FakeWord(1.5, 1.8, "uh"),
-        _FakeWord(3.5, 3.8, "erm"),
-    ]
-    regions, _degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=500.0)
+def test_words_to_regions_output_is_ascending_and_non_overlapping_on_a_real_transcript() -> None:
+    words = replay.load_words("speech_short_16000__raw")
+    regions, _degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=300.0)
     starts = [r["start_s"] for r in regions]
     ends = [r["end_s"] for r in regions]
+    assert len(regions) > 1  # otherwise the invariant below is checking nothing
     assert starts == sorted(starts)
     for i in range(len(regions) - 1):
         assert ends[i] <= starts[i + 1]
 
 
-def test_words_to_regions_normalizes_case_and_punctuation() -> None:
-    words = [_FakeWord(0.0, 0.3, " Um, ")]
-    regions, _degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=700.0)
-    assert regions[0]["text"] == "um"
-
-
-def test_words_to_regions_respects_custom_vocabulary() -> None:
-    words = [_FakeWord(0.0, 0.3, "like")]
-    regions, _degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=700.0)
-    assert regions == []
-    custom_regions, _degenerate2 = dsp_speech._words_to_regions(words, ("like",), min_pause_ms=700.0)
-    assert custom_regions[0]["text"] == "like"
-
-
-# --- dsp.speech: D2 -- a degenerate (zero-duration) word -------------------
-
-
-def test_words_to_regions_drops_a_degenerate_filler_word_and_counts_it() -> None:
-    """faster-whisper can emit a word with start == end. Building a filler
-    region for it would fail new_regions's `end_s > start_s` check and, since
-    that check is whole-document, take every other correctly-timed word in
-    the transcript down with it (D2, lane report). It must instead be
-    dropped -- and counted, not silently swallowed.
+def test_words_to_regions_normalizes_a_real_capitalized_word_and_respects_custom_vocabulary() -> None:
+    """speech_long_16000__raw.json really contains a capitalized ' Urm,' at
+    30.48-31.04s -- faster-whisper's own capitalization/punctuation choice,
+    not a synthetic one. It normalizes to "urm", which is not in the
+    built-in FILLER_WORDS (only "erm" is), so it is found only once a
+    caller supplies "urm" as a custom vocabulary word -- proving
+    normalization and custom-vocabulary support together, on real output.
     """
-    words = [
-        _FakeWord(0.0, 0.3, "hello"),
-        _FakeWord(0.3, 0.3, "um"),  # degenerate: start == end
-        _FakeWord(0.5, 0.8, "uh"),  # a real, correctly-timed filler
-    ]
-    regions, degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=700.0)
+    words = replay.load_words("speech_long_16000__raw")
+    urm = next(w for w in words if w.word == " Urm,")
+    assert urm.start == 30.48
+    assert urm.end == 31.04
+
+    default_regions, _ = dsp_speech._words_to_regions([urm], dsp_speech.FILLER_WORDS, min_pause_ms=100000.0)
+    assert default_regions == []
+
+    custom_regions, _ = dsp_speech._words_to_regions([urm], ("urm",), min_pause_ms=100000.0)
+    assert len(custom_regions) == 1
+    assert custom_regions[0]["text"] == "urm"
+
+
+def test_words_to_regions_drops_a_real_degenerate_filler_word_and_counts_it() -> None:
+    """The literal case named in the task: speech_long_48000__resampled_16k
+    -- the correct (resampled) whisper path -- really produced a degenerate
+    (`start == end`) filler word, ' um,' at 24.0s, alongside 13 other real,
+    correctly-timed filler words in the same transcript. Building a filler
+    region for a zero-duration word would fail new_regions's `end_s >
+    start_s` check and, because that check is whole-document, take every
+    other correctly-timed word down with it (D2, lane report) -- so it must
+    be dropped, and counted, while its neighbours survive.
+    """
+    words = replay.load_words("speech_long_48000__resampled_16k")
+    regions, degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=100000.0)
+
     assert degenerate == 1
-    # The one real filler word survives -- the degenerate one did not cost it.
-    assert regions == [{"start_s": 0.5, "end_s": 0.8, "text": "uh", "confidence": 1.0}]
+    filler_regions = [r for r in regions if r["text"]]
+    assert len(filler_regions) == 13, "13 real fillers must survive the one degenerate word being dropped"
+    assert not any(r["start_s"] == 24.0 for r in filler_regions), "the degenerate word at 24.0s must not appear"
+    # its immediate real neighbours (see RECORDING.md) must still be there
+    assert any(r["start_s"] == 27.12 and r["text"] == "uh" for r in filler_regions)
+    assert any(r["start_s"] == 30.6 and r["text"] == "erm" for r in filler_regions)
+
+
+def test_words_to_regions_counts_a_real_and_a_synthetic_degenerate_word_independently() -> None:
+    """`_words_to_regions` only counts a degenerate word if it is ALSO a
+    recognised filler -- speech_short_48000__raw.json really produced four
+    degenerate words, but none of them ("kappa", "ra,") are fillers, so
+    they contribute 0 to `degenerate_words_dropped` (proved directly
+    below). Across all 18 real recordings, exactly one real degenerate
+    FILLER word exists (see
+    test_words_to_regions_drops_a_real_degenerate_filler_word_and_counts_it).
+    To prove independent counting of more than one degenerate filler word
+    without inventing a second real one that was never recorded, this test
+    combines that one real degenerate filler word with the one
+    deliberately-synthetic negative-duration case (see
+    test_words_to_regions_drops_a_negative_duration_word_too) and confirms
+    the count is exactly their sum, with the real surviving fillers intact.
+    """
+    non_filler_degenerate_recording = replay.load_recording("faster_whisper", "speech_short_48000__raw")
+    non_filler_words = replay.load_words("speech_short_48000__raw")
+    _regions, non_filler_degenerate = dsp_speech._words_to_regions(
+        non_filler_words, dsp_speech.FILLER_WORDS, min_pause_ms=100000.0
+    )
+    assert non_filler_degenerate == 0, "degenerate non-filler words must not be counted at all"
+    assert non_filler_degenerate_recording["summary"]["degenerate_word_count"] == 4  # they are real, just not fillers
+
+    class _SyntheticNegativeDurationWord:
+        start = 1.0
+        end = 0.9
+        word = "uh"
+        probability = 1.0
+
+    real_words = replay.load_words("speech_long_48000__resampled_16k")  # 13 real fillers + 1 real degenerate
+    combined = [*real_words, _SyntheticNegativeDurationWord()]
+    regions, degenerate = dsp_speech._words_to_regions(combined, dsp_speech.FILLER_WORDS, min_pause_ms=100000.0)
+    assert degenerate == 2  # the one real degenerate word + the one synthetic negative-duration word
+    assert len([r for r in regions if r["text"]]) == 13
 
 
 def test_words_to_regions_drops_a_negative_duration_word_too() -> None:
-    """`end < start` is equally degenerate (a malformed timing, not just a
-    zero-width one) and must be dropped the same way, not merely `==`."""
-    words = [_FakeWord(0.5, 0.4, "um")]
-    regions, degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=700.0)
+    """`end < start` is equally degenerate and must be dropped the same way
+    (the code checks `<=`, not `==`). No real recording ever produced
+    `end < start` (only `end == start` -- see RECORDING.md), so this one
+    boundary condition is a deliberately-constructed, clearly-disclosed
+    synthetic input: it stands in for nothing faster-whisper actually
+    does, it only exercises the `<=` comparison itself.
+    """
+
+    class _NegativeDurationWord:
+        start = 0.5
+        end = 0.4
+        word = "um"
+        probability = 1.0
+
+    regions, degenerate = dsp_speech._words_to_regions(
+        [_NegativeDurationWord()], dsp_speech.FILLER_WORDS, min_pause_ms=700.0
+    )
     assert regions == []
     assert degenerate == 1
 
 
-def test_words_to_regions_counts_multiple_degenerate_words_independently() -> None:
-    # A huge min_pause_ms keeps the gaps between these words from also
-    # being reported as hesitation regions -- this test is only about the
-    # degenerate-word count and the one real filler word surviving.
-    words = [
-        _FakeWord(0.0, 0.0, "um"),
-        _FakeWord(1.0, 1.0, "uh"),
-        _FakeWord(2.0, 2.3, "erm"),  # real
-    ]
-    regions, degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=100000.0)
-    assert degenerate == 2
-    assert regions == [{"start_s": 2.0, "end_s": 2.3, "text": "erm", "confidence": 1.0}]
+# --- dsp.speech: D2 -- a degenerate word must not sink the whole document -
 
 
-def test_detect_fillers_full_document_survives_one_degenerate_word(monkeypatch: pytest.MonkeyPatch) -> None:
-    """End-to-end (via a fake faster_whisper module): a regions document is
-    still produced, with the degenerate word accounted for in `detection`,
-    rather than the whole run failing new_regions validation.
+def test_detect_fillers_full_document_survives_the_real_degenerate_word(monkeypatch: pytest.MonkeyPatch) -> None:
+    """End-to-end through `detect_fillers`, replaying
+    speech_long_48000__resampled_16k -- the recording RECORDING.md names as
+    containing a real degenerate word on the *correct* (resampled) path.
+    The source wav for this recording was not shipped (RECORDING.md: the
+    48kHz 'long' variant was transcribed but deliberately not committed, to
+    keep this directory small), so the array handed to `detect_fillers`
+    here is a placeholder of the right duration/rate -- it drives the call,
+    it is not claimed to be the recorded bytes. What is replayed verbatim
+    is faster-whisper's real recorded ANSWER, degenerate word included.
     """
+    replay.install_faster_whisper_replay(monkeypatch, "speech_long_48000__resampled_16k")
 
-    class _FakeSegment:
-        def __init__(self, words: list[_FakeWord]) -> None:
-            self.words = words
+    duration_s = 64.563812
+    x = np.zeros(int(duration_s * 48000))
+    regions, detection = dsp_speech.detect_fillers(x, 48000)
 
-    class _FakeWhisperModel:
-        def __init__(self, model_size: str) -> None:
-            self.model_size = model_size
-
-        def transcribe(self, audio, word_timestamps: bool = True):
-            words = [
-                _FakeWord(0.0, 0.3, "hello"),
-                _FakeWord(0.3, 0.3, "um"),  # degenerate
-                _FakeWord(0.5, 0.8, "uh"),
-            ]
-            return [_FakeSegment(words)], None
-
-    fake_module = types.ModuleType("faster_whisper")
-    fake_module.WhisperModel = _FakeWhisperModel  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
-
-    x = np.zeros(int(1.0 * _SR))
-    regions, detection = dsp_speech.detect_fillers(x, _SR)
-
-    assert len(regions) == 1
-    assert regions[0]["text"] == "uh"
     assert detection["degenerate_words_dropped"] == 1
+    filler_regions = [r for r in regions if r["text"]]
+    assert len(filler_regions) == 13
+    assert regions, "the regions document must not come back empty just because one word was degenerate"
 
 
 # --- dsp.speech: D1 -- sample rate was accepted and then ignored -----------
 
 
-def test_detect_fillers_resamples_before_transcribe_so_position_is_sr_independent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """faster-whisper's ndarray path has no sample-rate parameter -- it always
-    assumes 16 kHz. A fake model that reports a word timestamp derived purely
-    from the LENGTH of the array it receives (exactly what faster-whisper
-    does internally) proves whether `detect_fillers` resampled to 16 kHz
-    before calling it: if it did, the same real-world midpoint is reported
-    regardless of the file's native sample rate; if it didn't (the bug), a
-    higher native sample rate reports a position stretched out by
-    `sr / 16000`, same as the measured ~1.37x drift in the lane report.
+def test_detect_fillers_is_sample_rate_independent_on_two_real_recordings() -> None:
+    """The literal sample-rate-independence proof: replay
+    speech_short_16000__resampled_16k against the real speech_short_16000
+    wav, and speech_short_48000__resampled_16k against the real
+    speech_short_48000 wav -- two different native sample rates of the
+    exact same spoken content (RECORDING.md's "_index.json": both
+    resampled_16k paths report 2 segments / 21 words / last word end 7.72s,
+    identically). Each replay is bound to its own recorded source's exact
+    bytes via `assert_matches_recorded_source` -- this is deliberately NOT
+    testing "similar audio produces the recorded output" (the one trap
+    RECORDING.md warns against), it is testing that two *different*, each
+    individually real and verified, (audio, recording) pairs agree once
+    resampled to 16 kHz.
     """
+    results: dict[int, list[dict]] = {}
+    for sr, recording_name, wav_name in (
+        (16000, "speech_short_16000__resampled_16k", "speech_short_16000.wav"),
+        (48000, "speech_short_48000__resampled_16k", "speech_short_48000.wav"),
+    ):
+        recording = replay.load_recording("faster_whisper", recording_name)
+        wav_file = replay.wav_path(wav_name)
+        replay.assert_matches_recorded_source(recording, wav_file)
 
-    class _FakeSegment:
-        def __init__(self, words: list[_FakeWord]) -> None:
-            self.words = words
+        samples, sample_rate = dsp_io.read_audio(wav_file)
+        assert sample_rate == sr
 
-    class _FakeWhisperModel:
-        def __init__(self, model_size: str) -> None:
-            self.model_size = model_size
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            replay.install_faster_whisper_replay(monkeypatch, recording_name)
+            regions, _detection = dsp_speech.detect_fillers(samples, sample_rate)
+        results[sr] = regions
 
-        def transcribe(self, audio, word_timestamps: bool = True):
-            n = len(audio)
-            mid = n // 2
-            # faster-whisper always treats the array it is handed as 16kHz PCM.
-            start_s = mid / 16000.0
-            end_s = (mid + 800) / 16000.0  # ~50ms "word"
-            return [_FakeSegment([_FakeWord(start_s, end_s, "um")])], None
-
-    fake_module = types.ModuleType("faster_whisper")
-    fake_module.WhisperModel = _FakeWhisperModel  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "faster_whisper", fake_module)
-
-    duration_s = 4.0
-    x_16k = np.zeros(int(duration_s * 16000))
-    x_44k = np.zeros(int(duration_s * 44100))
-
-    regions_16k, _ = dsp_speech.detect_fillers(x_16k, 16000)
-    regions_44k, _ = dsp_speech.detect_fillers(x_44k, 44100)
-
-    assert len(regions_16k) == 1
-    assert len(regions_44k) == 1
-    tolerance_s = 0.05  # generous: whisper-side timestamp quantisation is ~20ms
-    assert abs(regions_16k[0]["start_s"] - regions_44k[0]["start_s"]) <= tolerance_s, (
-        regions_16k[0],
-        regions_44k[0],
-    )
-    # Both should land near the real midpoint (2.0s), not near sr-scaled
-    # nonsense (e.g. ~5.5s, which is what the un-resampled bug produced for
-    # a 44.1kHz file of this length).
-    assert abs(regions_44k[0]["start_s"] - duration_s / 2.0) <= 0.1, regions_44k[0]
+    # start_s/end_s/text agree exactly (whisper's own timing/text was
+    # identical at both native rates once resampled to 16kHz -- see
+    # RECORDING.md's _index.json). `confidence` (== whisper's per-word
+    # `probability`) is NOT claimed identical: it is a real measurement,
+    # and differs in the last few decimal digits because the two runs
+    # resampled from different native rates, which is a real, if tiny,
+    # difference in the bits whisper actually saw -- not a bug to hide
+    # behind exact equality.
+    assert len(results[16000]) == len(results[48000]) > 0
+    for region_16k, region_48k in zip(results[16000], results[48000], strict=True):
+        assert region_16k["start_s"] == region_48k["start_s"]
+        assert region_16k["end_s"] == region_48k["end_s"]
+        assert region_16k["text"] == region_48k["text"]
+        assert region_16k["confidence"] == pytest.approx(region_48k["confidence"], abs=1e-2)
 
 
 def test_resample_to_whisper_rate_is_a_no_op_at_16k() -> None:

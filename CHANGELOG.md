@@ -9,6 +9,65 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-19
+
+Every hand-written mock in the test suite is gone, replaced by replays of real recorded runs.
+
+### Changed
+
+- **No test fakes a third-party library any more.** `tests/replay.py` is one shared harness that
+  plays back real captured responses: faster-whisper transcriptions, python-stretch input/output
+  pairs, and Anthropic request/response envelopes. It fails loudly on a missing recording rather
+  than falling back to a made-up value.
+- **`tests/fixtures/recorded/`** holds those captures — 6.2 MB, recorded in a throwaway container
+  against real piper-tts speech, each with provenance: library version, source audio sha256,
+  capture date, and the command that produced it. `RECORDING.md` documents how to re-record when
+  a library version moves.
+- **The three Signalsmith tests stopped skipping.** They skipped because `python_stretch` is not
+  installed on the development host; the recording is, so they replay. 330 tests, **0 skips.**
+
+### Why
+
+A fake built from the fields your own reader consults can only confirm the shape you already
+assumed. This repo paid for that three times in one day, with 284 tests passing throughout:
+
+- the hand-written whisper transcript could not produce a word with `start == end` and carried no
+  sample rate — the two defects that made `detect fillers` wrong on every real file;
+- the hand-written provider fake always returned a single text block, so every reasoning model
+  was unusable in production while the suite was green;
+- the hand-written Signalsmith stub reproduced our own belief about `timeFactor`, which was the
+  reciprocal of the truth — it confirmed the bug instead of catching it.
+
+The rule is now in AGENTS.md, with the two traps that make a replay worthless: a replay is bound
+to its **exact input bytes** (the same speech at 16 kHz and at 48-kHz-resampled-to-16 kHz gave
+different transcripts — 168 words versus 106), and a replay **tidier than the real library is a
+fake again**, so the recordings keep the awkward parts.
+
+### Verified
+
+Only real data makes these assertions possible:
+
+- a **real** degenerate `' um,'` at 24.0 s on the correct resampled path — the whole document now
+  survives it and the other 13 real fillers come through, with the drop counted;
+- sample-rate independence asserted across **real** 16 kHz and 48 kHz recordings of identical
+  content, each checked against its source wav's sha256;
+- the Anthropic parser exercised against both **real** content shapes, `['text']` and
+  `['thinking', 'text']` — the second is the shape that raised `KeyError` in production;
+- the Signalsmith reciprocal settled by the **real** recorded table (`timeFactor` 1.2 set
+  literally gives out/in 0.8333; set as 1/f gives 1.2000), plus a byte-exact replay of real audio;
+- silence really returns one hallucinated word, and a 1 kHz tone really returns zero segments —
+  both now handled deliberately rather than by assumption.
+- 330 tests pass, 0 skipped (was 315 + 3 skips). Conformance 16 PASS / 0 FAIL.
+
+### Known limits
+
+- The four Anthropic recordings have no automated re-record script; RECORDING.md documents the
+  manual recapture. The two library recordings do have one.
+- Two disclosed synthetic values remain, both testing OUR code rather than a library's: a
+  negative-duration word (no real recording ever produced one — only zero-duration), and a
+  backend returning deliberately invalid text, which no successful recording can supply because
+  recordings only capture calls that worked.
+
 ## [0.8.0] - 2026-09-19
 
 Five defects, every one found by running the tool for real in a throwaway container against

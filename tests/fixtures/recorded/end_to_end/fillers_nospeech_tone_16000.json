@@ -1,0 +1,82 @@
+{
+  "provenance": {
+    "recorded_at_utc": "2026-09-19T12:19:37Z",
+    "source_wav": "nospeech_tone_16000.wav",
+    "source_wav_sha256": "540a6e57921a7e468b8d8a0a6b87ee3217f344161045ed7c9aacb214cec55bec",
+    "command": "aud detect fillers /rec/wav/nospeech_tone_16000.wav",
+    "aud_manifest": {
+      "result": {
+        "description": "Anything to do with finishing an audio file the user already has -- .wav, .flac, .aiff, .mp3. Reach for it when the ask sounds like \"make this sound finished\", \"this is too quiet for YouTube\", \"get rid of the harsh S sounds\", \"the room sounds boxy\", \"make this podcast match last week's episode\", \"level these three files to each other\", \"tighten the low end\", \"hit -14 LUFS without clipping\", \"trim the silences\", \"get rid of the umms and ehms\", or \"tighten up this recording\". It measures what is actually there (loudness, true peak, spectral balance, crest factor, sibilance, ambience), FINDS things in it (onsets, silent spans, filler words with their timings), then runs an EDITING and MASTERING chain over it: cut listed regions, strip or shorten silences, de-ess, de-verb, parametric EQ, EQ-match against a reference recording, MULTIBAND compression and multiband dynamic range control, saturation, controlled ambience, loudness targeting and true-peak brickwall limiting. Every verb appends to a plan and one render applies the whole chain in a single pass, so a chain can be inspected and re-run, and the whole job is ONE shell command rather than a round trip per stage. This is mastering and cleanup, NOT mixing: it works on a finished stereo or mono programme, not on multitrack stems. It uses speech recognition internally to locate filler words, but it does NOT produce transcripts -- do NOT use it for video files, for transcription as an output, or for music generation.",
+        "name": "aud",
+        "platforms": [
+          "linux",
+          "macos",
+          "windows"
+        ],
+        "requires": [
+          {
+            "install": "docs/CONFIGURATION.md",
+            "name": "ai-provider",
+            "optional": true,
+            "purpose": "Backs the verbs that choose a chain rather than apply one -- `advise` and `master --auto` read the measurements and decide what the chain should be and why. Without it those two verbs refuse, saying so, rather than guessing a chain; every other verb -- analysing, building a chain by hand, rendering, verifying, extracting and applying EQ curves -- keeps working with no credential configured at all. Any one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY or AZURE_OPENAI_API_KEY satisfies it. This tool stores no credentials of its own."
+          },
+          {
+            "install": "docs/CONFIGURATION.md",
+            "name": "faster-whisper",
+            "optional": true,
+            "purpose": "Provides the word-level speech timings that `detect fillers` needs to locate \"umm\", \"uh\" and \"ehm\" in a recording. Installed as the `speech` extra of this package, not as a host program. Without it, exactly one capability is lost: `detect fillers` refuses, naming the extra. Nothing else changes -- `detect silence`, `detect transients`, `cut`, `strip-silence` and the whole mastering chain are unaffected, because none of them needs to know what was said. It is a LOCAL model: no AI provider, no credential, and no network call once the model is cached. faster-whisper is MIT; a GPL-family recogniser would relicense this tool and is excluded on purpose."
+          },
+          {
+            "install": "https://ffmpeg.org/download.html",
+            "name": "ffmpeg",
+            "optional": true,
+            "purpose": "Decodes and encodes the compressed formats libsndfile does not handle on its own -- mp3, m4a, ogg. WAV, FLAC and AIFF need nothing beyond the bundled libsndfile, so the whole tool works on uncompressed material with ffmpeg absent. `aud check` reports which state this host is in."
+          }
+        ],
+        "smart_tool_format": 1,
+        "use_cases": [
+          "Measure a file honestly before touching it -- LUFS, true peak, crest factor, spectral balance",
+          "Bring a podcast or music file to a loudness target without clipping or inter-sample peaks",
+          "Trim the silences out of a spoken-word recording, or shorten them to a fixed length",
+          "Trim the pauses without chopping the start of a word -- edits are padded, snapped to a safe cut point and crossfaded, rather than falling wherever the detector put the boundary",
+          "Get rid of the \"umms\" and \"ehms\" and long hesitations in an interview or a voice-over",
+          "Tighten up a rambling recording -- find the pauses and fillers, cut them, master the result",
+          "Find where the onsets are in a recording, to decide where an edit should land",
+          "Tame harsh sibilance on a vocal or spoken-word recording",
+          "Reduce a boxy or reverberant room on a recording made in the wrong space",
+          "Make one recording sit in the same tonal balance as a reference recording",
+          "Extract the EQ curve of a recording you like and apply it to another file",
+          "Even out dynamics per frequency band with multiband compression, not one blunt full-band squeeze",
+          "Retime or re-pitch a programme without changing the other",
+          "Verify that a finished render actually meets the loudness and ceiling it was asked for"
+        ],
+        "version": "0.8.0"
+      }
+    }
+  },
+  "exit_code": 0,
+  "stderr": "[2026-09-19 12:20:21.669] [ctranslate2] [thread 5101] [warning] The compute type inferred from the saved model is float16, but the target device or backend do not support efficient float16 computation. The model weights have been automatically converted to use the float32 compute type instead.",
+  "stdout": {
+    "regions_format": 1,
+    "created_with": "aud/0.8.0",
+    "source": "/rec/wav/nospeech_tone_16000.wav",
+    "sample_rate": 16000,
+    "kind": "filler",
+    "detection": {
+      "words": [
+        "um",
+        "umm",
+        "uh",
+        "erm",
+        "ehm",
+        "ah",
+        "er"
+      ],
+      "min_pause_ms": 700.0,
+      "engine": "faster-whisper",
+      "model": "base",
+      "degenerate_words_dropped": 0
+    },
+    "regions": []
+  }
+}

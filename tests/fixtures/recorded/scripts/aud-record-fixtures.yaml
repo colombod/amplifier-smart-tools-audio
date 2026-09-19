@@ -1,0 +1,55 @@
+# Recording rig for `aud` replay fixtures.
+#
+# Purpose: capture REAL behaviour of the two third-party libraries `aud`
+# depends on (faster-whisper via the `speech` extra, python_stretch via the
+# `stretch` extra) so hand-written fakes can be replaced by replays of a
+# real recorded run.
+#
+# Deliberately NO passthrough section: neither library needs a provider
+# credential, and forwarding one would weaken the claim that these paths
+# run credential-free.
+#
+# Launch:
+#   amplifier-digital-twin launch \
+#     .amplifier/digital-twin-universe/profiles/aud-record-fixtures.yaml \
+#     --name aud-record-fixtures --max-instances 0
+name: aud-record-fixtures
+description: >
+  Isolated rig that installs aud[speech,stretch] plus piper-tts and records
+  real faster-whisper / python_stretch behaviour as replay fixtures.
+
+base:
+  image: ubuntu:24.04
+  config:
+    limits.cpu: "4"
+    limits.memory: "6GiB"
+
+provision:
+  setup_cmds:
+    # System deps. ffmpeg does the resampling; no compiler is needed for
+    # either extra (both ship wheels) -- build-essential is deliberately absent
+    # so a wheel-less dependency would fail loudly rather than quietly compile.
+    - apt-get update && apt-get install -y git curl ffmpeg python3-venv ca-certificates jq
+
+    # uv
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+
+    # The tool under recording, with both optional extras.
+    - uv tool install "aud[speech,stretch] @ git+https://github.com/colombod/amplifier-smart-tools-audio"
+    - aud manifest > /tmp/aud-manifest.json && cat /tmp/aud-manifest.json
+
+    # piper-tts lives in its own venv: it is the speech SOURCE, not part of
+    # what is being recorded, and must not perturb aud's resolved versions.
+    - uv venv /opt/piper
+    - /opt/piper/bin/python -m ensurepip --upgrade || true
+    - VIRTUAL_ENV=/opt/piper uv pip install piper-tts
+
+    - mkdir -p /rec/out /rec/wav /opt/voices
+
+readiness:
+  - name: aud-installed
+    command: "aud manifest"
+  - name: speech-extra-importable
+    command: "$(uv tool dir)/aud/bin/python -c 'import faster_whisper, python_stretch'"
+  - name: ffmpeg-present
+    command: "ffmpeg -version"

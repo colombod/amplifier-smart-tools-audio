@@ -1,0 +1,1255 @@
+{
+  "provenance": {
+    "recorded_at_utc": "2026-09-19T12:16:14.224692+00:00",
+    "faster_whisper_version": "1.2.1",
+    "ctranslate2_version": "4.8.2",
+    "numpy_version": "2.5.3",
+    "scipy_version": "1.18.1",
+    "soundfile_version": "0.13.1",
+    "python_version": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "model": "base",
+    "model_constructor": "WhisperModel(\"base\")  # all other args left at library defaults",
+    "transcribe_call": "model.transcribe(audio, word_timestamps=True)",
+    "source_wav": "speech_short_48000.wav",
+    "source_wav_sha256": "d6ddaac6d796d44d0549f2367b4e05daf06ef7387f70e9066688684852f88bb8",
+    "source_sample_rate": 48000,
+    "input_path": "raw",
+    "snippet": "import numpy as np, soundfile as sf\nfrom faster_whisper import WhisperModel\nx, sr = sf.read(WAV, dtype=\"float64\", always_2d=False)\nif x.ndim == 2:\n    x = x.mean(axis=1)\n# path == \"resampled_16k\" only:\n#   from fractions import Fraction; from scipy import signal\n#   frac = Fraction(16000, sr).limit_denominator(2000)\n#   x = signal.resample_poly(x, up=frac.numerator, down=frac.denominator)\naudio = x.astype(\"float32\")\nmodel = WhisperModel(\"base\")\nsegments, info = model.transcribe(audio, word_timestamps=True)\nsegments = list(segments)   # generator: nothing runs until it is drained\n",
+    "wall_seconds": 20.391
+  },
+  "input": {
+    "path_mode": "raw",
+    "source_sample_rate": 48000,
+    "source_channels": 1,
+    "source_samples": 387383,
+    "source_duration_s": 8.070479,
+    "fed_sample_rate_assumed_by_library": 16000,
+    "fed_samples": 387383,
+    "fed_dtype": "float32",
+    "fed_duration_s_if_16k": 24.211437,
+    "true_duration_s": 8.070479,
+    "resampled_before_transcribe": false,
+    "declared_sample_rate_of_fed_array": 48000
+  },
+  "type_inventory": {
+    "info": {
+      "type": "TranscriptionInfo",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "all_language_probs",
+        "duration",
+        "duration_after_vad",
+        "language",
+        "language_probability",
+        "transcription_options",
+        "vad_options"
+      ],
+      "public_non_callable": [
+        "all_language_probs",
+        "duration",
+        "duration_after_vad",
+        "language",
+        "language_probability",
+        "transcription_options",
+        "vad_options"
+      ],
+      "has_dict": true,
+      "has_asdict": false,
+      "fields": []
+    },
+    "segment": {
+      "type": "Segment",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "_asdict",
+        "avg_logprob",
+        "compression_ratio",
+        "end",
+        "id",
+        "no_speech_prob",
+        "seek",
+        "start",
+        "temperature",
+        "text",
+        "tokens",
+        "words"
+      ],
+      "public_non_callable": [
+        "avg_logprob",
+        "compression_ratio",
+        "end",
+        "id",
+        "no_speech_prob",
+        "seek",
+        "start",
+        "temperature",
+        "text",
+        "tokens",
+        "words"
+      ],
+      "has_dict": true,
+      "has_asdict": true,
+      "fields": []
+    },
+    "word": {
+      "type": "Word",
+      "module": "faster_whisper.transcribe",
+      "dir": [
+        "__annotations__",
+        "__class__",
+        "__dataclass_fields__",
+        "__dataclass_params__",
+        "__delattr__",
+        "__dict__",
+        "__dir__",
+        "__doc__",
+        "__eq__",
+        "__format__",
+        "__ge__",
+        "__getattribute__",
+        "__getstate__",
+        "__gt__",
+        "__hash__",
+        "__init__",
+        "__init_subclass__",
+        "__le__",
+        "__lt__",
+        "__match_args__",
+        "__module__",
+        "__ne__",
+        "__new__",
+        "__reduce__",
+        "__reduce_ex__",
+        "__repr__",
+        "__setattr__",
+        "__sizeof__",
+        "__str__",
+        "__subclasshook__",
+        "__weakref__",
+        "_asdict",
+        "end",
+        "probability",
+        "start",
+        "word"
+      ],
+      "public_non_callable": [
+        "end",
+        "probability",
+        "start",
+        "word"
+      ],
+      "has_dict": true,
+      "has_asdict": true,
+      "fields": []
+    }
+  },
+  "summary": {
+    "n_segments": 3,
+    "n_words": 27,
+    "text": " Thym, u, at se s chang rana kappa ra, u, at se s chang rana kappa ra, And he, u, at se s chang rana kappa ra,",
+    "last_word_end": 23.48,
+    "degenerate_word_count": 4,
+    "degenerate_words": [
+      {
+        "index": 15,
+        "word": " kappa",
+        "start": 15.52,
+        "end": 15.52
+      },
+      {
+        "index": 16,
+        "word": " ra,",
+        "start": 15.52,
+        "end": 15.52
+      },
+      {
+        "index": 25,
+        "word": " kappa",
+        "start": 23.48,
+        "end": 23.48
+      },
+      {
+        "index": 26,
+        "word": " ra,",
+        "start": 23.48,
+        "end": 23.48
+      }
+    ]
+  },
+  "info": {
+    "__type__": "TranscriptionInfo",
+    "language": "la",
+    "language_probability": 0.20364612340927124,
+    "duration": 24.2114375,
+    "duration_after_vad": 24.2114375,
+    "all_language_probs": [
+      [
+        "la",
+        0.20364612340927124
+      ],
+      [
+        "ja",
+        0.17041335999965668
+      ],
+      [
+        "en",
+        0.12671352922916412
+      ],
+      [
+        "nn",
+        0.08563259243965149
+      ],
+      [
+        "jw",
+        0.0735577866435051
+      ],
+      [
+        "fr",
+        0.0356920100748539
+      ],
+      [
+        "de",
+        0.024635178968310356
+      ],
+      [
+        "ko",
+        0.02222646214067936
+      ],
+      [
+        "br",
+        0.0214898269623518
+      ],
+      [
+        "haw",
+        0.020725540816783905
+      ],
+      [
+        "th",
+        0.0199640691280365
+      ],
+      [
+        "km",
+        0.0178921427577734
+      ],
+      [
+        "es",
+        0.016422592103481293
+      ],
+      [
+        "zh",
+        0.014658731408417225
+      ],
+      [
+        "ru",
+        0.010529820807278156
+      ],
+      [
+        "ar",
+        0.008943499997258186
+      ],
+      [
+        "cy",
+        0.008695943281054497
+      ],
+      [
+        "tr",
+        0.007951047271490097
+      ],
+      [
+        "ms",
+        0.0071418131701648235
+      ],
+      [
+        "mn",
+        0.0070678298361599445
+      ],
+      [
+        "pl",
+        0.006497308146208525
+      ],
+      [
+        "it",
+        0.006175739225000143
+      ],
+      [
+        "hu",
+        0.005596811417490244
+      ],
+      [
+        "eu",
+        0.00548943318426609
+      ],
+      [
+        "pt",
+        0.00422408664599061
+      ],
+      [
+        "sv",
+        0.004215603228658438
+      ],
+      [
+        "fi",
+        0.004094226751476526
+      ],
+      [
+        "ro",
+        0.0035013798624277115
+      ],
+      [
+        "sn",
+        0.0032533928751945496
+      ],
+      [
+        "id",
+        0.003244605613872409
+      ],
+      [
+        "vi",
+        0.002786114811897278
+      ],
+      [
+        "sa",
+        0.002616955665871501
+      ],
+      [
+        "tl",
+        0.0025463558267802
+      ],
+      [
+        "my",
+        0.002540587680414319
+      ],
+      [
+        "fa",
+        0.0024738991633057594
+      ],
+      [
+        "hi",
+        0.002100330078974366
+      ],
+      [
+        "fo",
+        0.0020834426395595074
+      ],
+      [
+        "el",
+        0.0018899427959695458
+      ],
+      [
+        "cs",
+        0.0018229007255285978
+      ],
+      [
+        "oc",
+        0.00168475357349962
+      ],
+      [
+        "he",
+        0.001675781444646418
+      ],
+      [
+        "bn",
+        0.0015424058074131608
+      ],
+      [
+        "te",
+        0.0015151543775573373
+      ],
+      [
+        "bo",
+        0.001334045547991991
+      ],
+      [
+        "hy",
+        0.001311565632931888
+      ],
+      [
+        "yo",
+        0.0012600627960637212
+      ],
+      [
+        "si",
+        0.0012463830644264817
+      ],
+      [
+        "ht",
+        0.0011875672498717904
+      ],
+      [
+        "mi",
+        0.0010544878896325827
+      ],
+      [
+        "uk",
+        0.0010281350696459413
+      ],
+      [
+        "ca",
+        0.0009405591408722103
+      ],
+      [
+        "ur",
+        0.0008167029591277242
+      ],
+      [
+        "lo",
+        0.0008040081011131406
+      ],
+      [
+        "nl",
+        0.0007933176239021122
+      ],
+      [
+        "gl",
+        0.0006892482051625848
+      ],
+      [
+        "ka",
+        0.000679740565828979
+      ],
+      [
+        "sw",
+        0.0006693949108012021
+      ],
+      [
+        "lv",
+        0.0006692034075967968
+      ],
+      [
+        "sl",
+        0.0006584302172996104
+      ],
+      [
+        "ta",
+        0.0006580290501005948
+      ],
+      [
+        "ne",
+        0.0006490863743238151
+      ],
+      [
+        "yi",
+        0.0005510542541742325
+      ],
+      [
+        "da",
+        0.0005343074444681406
+      ],
+      [
+        "is",
+        0.0004726425395347178
+      ],
+      [
+        "no",
+        0.00043438764987513423
+      ],
+      [
+        "lt",
+        0.000433147419244051
+      ],
+      [
+        "hr",
+        0.00040779163828119636
+      ],
+      [
+        "ml",
+        0.000337307748850435
+      ],
+      [
+        "sk",
+        0.00033556888229213655
+      ],
+      [
+        "sd",
+        0.0002569788775872439
+      ],
+      [
+        "kk",
+        0.0002541512076277286
+      ],
+      [
+        "be",
+        0.00022282286954578012
+      ],
+      [
+        "bg",
+        0.0001995694765355438
+      ],
+      [
+        "az",
+        0.00019260426051914692
+      ],
+      [
+        "et",
+        0.00017113260400947183
+      ],
+      [
+        "bs",
+        0.0001481802755733952
+      ],
+      [
+        "ps",
+        0.00012797873932868242
+      ],
+      [
+        "af",
+        0.00012568518286570907
+      ],
+      [
+        "as",
+        9.85280130407773e-05
+      ],
+      [
+        "ln",
+        9.457801206735894e-05
+      ],
+      [
+        "mt",
+        9.193504229187965e-05
+      ],
+      [
+        "mr",
+        9.186194802168757e-05
+      ],
+      [
+        "sr",
+        7.57713642087765e-05
+      ],
+      [
+        "am",
+        6.955980643397197e-05
+      ],
+      [
+        "sq",
+        6.595906597794965e-05
+      ],
+      [
+        "kn",
+        4.987638385500759e-05
+      ],
+      [
+        "pa",
+        4.3407642806414515e-05
+      ],
+      [
+        "so",
+        2.0457186110434122e-05
+      ],
+      [
+        "gu",
+        1.856373819464352e-05
+      ],
+      [
+        "mk",
+        1.2807678103854414e-05
+      ],
+      [
+        "su",
+        1.1716738299583085e-05
+      ],
+      [
+        "tg",
+        1.1213344805582892e-05
+      ],
+      [
+        "lb",
+        1.0194561582466122e-05
+      ],
+      [
+        "tt",
+        3.873281457345001e-06
+      ],
+      [
+        "ha",
+        1.859851408880786e-06
+      ],
+      [
+        "mg",
+        3.8639817034891166e-07
+      ],
+      [
+        "uz",
+        3.637731254002574e-07
+      ],
+      [
+        "tk",
+        3.291290227025456e-07
+      ],
+      [
+        "ba",
+        2.778552357085573e-07
+      ]
+    ],
+    "transcription_options": {
+      "__type__": "TranscriptionOptions",
+      "beam_size": 5,
+      "best_of": 5,
+      "patience": 1,
+      "length_penalty": 1,
+      "repetition_penalty": 1,
+      "no_repeat_ngram_size": 0,
+      "log_prob_threshold": -1.0,
+      "no_speech_threshold": 0.6,
+      "compression_ratio_threshold": 2.4,
+      "condition_on_previous_text": true,
+      "prompt_reset_on_temperature": 0.5,
+      "temperatures": [
+        0.0,
+        0.2,
+        0.4,
+        0.6,
+        0.8,
+        1.0
+      ],
+      "initial_prompt": null,
+      "prefix": null,
+      "suppress_blank": true,
+      "suppress_tokens": [
+        1,
+        2,
+        7,
+        8,
+        9,
+        10,
+        14,
+        25,
+        26,
+        27,
+        28,
+        29,
+        31,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        90,
+        91,
+        92,
+        93,
+        359,
+        503,
+        522,
+        542,
+        873,
+        893,
+        902,
+        918,
+        922,
+        931,
+        1350,
+        1853,
+        1982,
+        2460,
+        2627,
+        3246,
+        3253,
+        3268,
+        3536,
+        3846,
+        3961,
+        4183,
+        4667,
+        6585,
+        6647,
+        7273,
+        9061,
+        9383,
+        10428,
+        10929,
+        11938,
+        12033,
+        12331,
+        12562,
+        13793,
+        14157,
+        14635,
+        15265,
+        15618,
+        16553,
+        16604,
+        18362,
+        18956,
+        20075,
+        21675,
+        22520,
+        26130,
+        26161,
+        26435,
+        28279,
+        29464,
+        31650,
+        32302,
+        32470,
+        36865,
+        42863,
+        47425,
+        49870,
+        50254,
+        50258,
+        50358,
+        50359,
+        50360,
+        50361,
+        50362
+      ],
+      "without_timestamps": false,
+      "max_initial_timestamp": 1.0,
+      "word_timestamps": true,
+      "prepend_punctuations": "\"'\u201c\u00bf([{-",
+      "append_punctuations": "\"'.\u3002,\uff0c!\uff01?\uff1f:\uff1a\u201d)]}\u3001",
+      "multilingual": false,
+      "max_new_tokens": null,
+      "clip_timestamps": [
+        0.0
+      ],
+      "hallucination_silence_threshold": null,
+      "hotwords": null
+    },
+    "vad_options": null
+  },
+  "segments": [
+    {
+      "__type__": "Segment",
+      "id": 1,
+      "seek": 0,
+      "start": 0.0,
+      "end": 7.46,
+      "text": " Thym, u, at se s chang rana kappa ra,",
+      "tokens": [
+        50364,
+        334,
+        4199,
+        11,
+        344,
+        11,
+        412,
+        369,
+        262,
+        417,
+        656,
+        367,
+        2095,
+        350,
+        25637,
+        3342,
+        11,
+        50803
+      ],
+      "avg_logprob": -1.69211280804414,
+      "compression_ratio": 2.056603773584906,
+      "no_speech_prob": 0.46499764919281006,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 0.0,
+          "end": 0.68,
+          "word": " Thym,",
+          "probability": 0.013266284484416246
+        },
+        {
+          "__type__": "Word",
+          "start": 1.44,
+          "end": 1.84,
+          "word": " u,",
+          "probability": 0.007548584137111902
+        },
+        {
+          "__type__": "Word",
+          "start": 3.04,
+          "end": 3.66,
+          "word": " at",
+          "probability": 0.03197257220745087
+        },
+        {
+          "__type__": "Word",
+          "start": 3.66,
+          "end": 3.84,
+          "word": " se",
+          "probability": 0.034506797790527344
+        },
+        {
+          "__type__": "Word",
+          "start": 3.84,
+          "end": 4.24,
+          "word": " s",
+          "probability": 0.10603009164333344
+        },
+        {
+          "__type__": "Word",
+          "start": 4.24,
+          "end": 5.08,
+          "word": " chang",
+          "probability": 0.13718765741214156
+        },
+        {
+          "__type__": "Word",
+          "start": 5.08,
+          "end": 5.78,
+          "word": " rana",
+          "probability": 0.09417107701301575
+        },
+        {
+          "__type__": "Word",
+          "start": 5.78,
+          "end": 6.9,
+          "word": " kappa",
+          "probability": 0.01844818308018148
+        },
+        {
+          "__type__": "Word",
+          "start": 6.9,
+          "end": 7.46,
+          "word": " ra,",
+          "probability": 0.14299805462360382
+        }
+      ],
+      "temperature": 1.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 2,
+      "seek": 0,
+      "start": 9.040000000000001,
+      "end": 15.52,
+      "text": " u, at se s chang rana kappa ra,",
+      "tokens": [
+        50816,
+        344,
+        11,
+        412,
+        369,
+        262,
+        417,
+        656,
+        367,
+        2095,
+        350,
+        25637,
+        3342,
+        11,
+        51125
+      ],
+      "avg_logprob": -1.69211280804414,
+      "compression_ratio": 2.056603773584906,
+      "no_speech_prob": 0.46499764919281006,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 8.93,
+          "end": 9.62,
+          "word": " u,",
+          "probability": 0.6405012011528015
+        },
+        {
+          "__type__": "Word",
+          "start": 10.5,
+          "end": 11.16,
+          "word": " at",
+          "probability": 0.7051737904548645
+        },
+        {
+          "__type__": "Word",
+          "start": 11.16,
+          "end": 11.76,
+          "word": " se",
+          "probability": 0.8113094568252563
+        },
+        {
+          "__type__": "Word",
+          "start": 11.76,
+          "end": 12.18,
+          "word": " s",
+          "probability": 0.059417109936475754
+        },
+        {
+          "__type__": "Word",
+          "start": 12.18,
+          "end": 14.06,
+          "word": " chang",
+          "probability": 0.8168020248413086
+        },
+        {
+          "__type__": "Word",
+          "start": 14.06,
+          "end": 15.52,
+          "word": " rana",
+          "probability": 0.9328300058841705
+        },
+        {
+          "__type__": "Word",
+          "start": 15.52,
+          "end": 15.52,
+          "word": " kappa",
+          "probability": 0.7997672855854034
+        },
+        {
+          "__type__": "Word",
+          "start": 15.52,
+          "end": 15.52,
+          "word": " ra,",
+          "probability": 0.9844858646392822
+        }
+      ],
+      "temperature": 1.0
+    },
+    {
+      "__type__": "Segment",
+      "id": 3,
+      "seek": 0,
+      "start": 16.740000000000002,
+      "end": 23.48,
+      "text": " And he, u, at se s chang rana kappa ra,",
+      "tokens": [
+        51201,
+        400,
+        415,
+        11,
+        344,
+        11,
+        412,
+        369,
+        262,
+        417,
+        656,
+        367,
+        2095,
+        350,
+        25637,
+        3342,
+        11,
+        51612
+      ],
+      "avg_logprob": -1.69211280804414,
+      "compression_ratio": 2.056603773584906,
+      "no_speech_prob": 0.46499764919281006,
+      "words": [
+        {
+          "__type__": "Word",
+          "start": 16.45,
+          "end": 17.14,
+          "word": " And",
+          "probability": 0.0013541067019104958
+        },
+        {
+          "__type__": "Word",
+          "start": 17.14,
+          "end": 17.64,
+          "word": " he,",
+          "probability": 0.02283594198524952
+        },
+        {
+          "__type__": "Word",
+          "start": 18.58,
+          "end": 20.0,
+          "word": " u,",
+          "probability": 0.5836212038993835
+        },
+        {
+          "__type__": "Word",
+          "start": 20.76,
+          "end": 20.98,
+          "word": " at",
+          "probability": 0.7346445918083191
+        },
+        {
+          "__type__": "Word",
+          "start": 20.98,
+          "end": 21.6,
+          "word": " se",
+          "probability": 0.5345571041107178
+        },
+        {
+          "__type__": "Word",
+          "start": 21.6,
+          "end": 21.9,
+          "word": " s",
+          "probability": 0.9763864874839783
+        },
+        {
+          "__type__": "Word",
+          "start": 21.9,
+          "end": 22.48,
+          "word": " chang",
+          "probability": 0.8769519627094269
+        },
+        {
+          "__type__": "Word",
+          "start": 22.48,
+          "end": 23.48,
+          "word": " rana",
+          "probability": 0.9624166488647461
+        },
+        {
+          "__type__": "Word",
+          "start": 23.48,
+          "end": 23.48,
+          "word": " kappa",
+          "probability": 0.7218451201915741
+        },
+        {
+          "__type__": "Word",
+          "start": 23.48,
+          "end": 23.48,
+          "word": " ra,",
+          "probability": 0.9839112758636475
+        }
+      ],
+      "temperature": 1.0
+    }
+  ],
+  "words_flat": [
+    {
+      "__type__": "Word",
+      "start": 0.0,
+      "end": 0.68,
+      "word": " Thym,",
+      "probability": 0.013266284484416246
+    },
+    {
+      "__type__": "Word",
+      "start": 1.44,
+      "end": 1.84,
+      "word": " u,",
+      "probability": 0.007548584137111902
+    },
+    {
+      "__type__": "Word",
+      "start": 3.04,
+      "end": 3.66,
+      "word": " at",
+      "probability": 0.03197257220745087
+    },
+    {
+      "__type__": "Word",
+      "start": 3.66,
+      "end": 3.84,
+      "word": " se",
+      "probability": 0.034506797790527344
+    },
+    {
+      "__type__": "Word",
+      "start": 3.84,
+      "end": 4.24,
+      "word": " s",
+      "probability": 0.10603009164333344
+    },
+    {
+      "__type__": "Word",
+      "start": 4.24,
+      "end": 5.08,
+      "word": " chang",
+      "probability": 0.13718765741214156
+    },
+    {
+      "__type__": "Word",
+      "start": 5.08,
+      "end": 5.78,
+      "word": " rana",
+      "probability": 0.09417107701301575
+    },
+    {
+      "__type__": "Word",
+      "start": 5.78,
+      "end": 6.9,
+      "word": " kappa",
+      "probability": 0.01844818308018148
+    },
+    {
+      "__type__": "Word",
+      "start": 6.9,
+      "end": 7.46,
+      "word": " ra,",
+      "probability": 0.14299805462360382
+    },
+    {
+      "__type__": "Word",
+      "start": 8.93,
+      "end": 9.62,
+      "word": " u,",
+      "probability": 0.6405012011528015
+    },
+    {
+      "__type__": "Word",
+      "start": 10.5,
+      "end": 11.16,
+      "word": " at",
+      "probability": 0.7051737904548645
+    },
+    {
+      "__type__": "Word",
+      "start": 11.16,
+      "end": 11.76,
+      "word": " se",
+      "probability": 0.8113094568252563
+    },
+    {
+      "__type__": "Word",
+      "start": 11.76,
+      "end": 12.18,
+      "word": " s",
+      "probability": 0.059417109936475754
+    },
+    {
+      "__type__": "Word",
+      "start": 12.18,
+      "end": 14.06,
+      "word": " chang",
+      "probability": 0.8168020248413086
+    },
+    {
+      "__type__": "Word",
+      "start": 14.06,
+      "end": 15.52,
+      "word": " rana",
+      "probability": 0.9328300058841705
+    },
+    {
+      "__type__": "Word",
+      "start": 15.52,
+      "end": 15.52,
+      "word": " kappa",
+      "probability": 0.7997672855854034
+    },
+    {
+      "__type__": "Word",
+      "start": 15.52,
+      "end": 15.52,
+      "word": " ra,",
+      "probability": 0.9844858646392822
+    },
+    {
+      "__type__": "Word",
+      "start": 16.45,
+      "end": 17.14,
+      "word": " And",
+      "probability": 0.0013541067019104958
+    },
+    {
+      "__type__": "Word",
+      "start": 17.14,
+      "end": 17.64,
+      "word": " he,",
+      "probability": 0.02283594198524952
+    },
+    {
+      "__type__": "Word",
+      "start": 18.58,
+      "end": 20.0,
+      "word": " u,",
+      "probability": 0.5836212038993835
+    },
+    {
+      "__type__": "Word",
+      "start": 20.76,
+      "end": 20.98,
+      "word": " at",
+      "probability": 0.7346445918083191
+    },
+    {
+      "__type__": "Word",
+      "start": 20.98,
+      "end": 21.6,
+      "word": " se",
+      "probability": 0.5345571041107178
+    },
+    {
+      "__type__": "Word",
+      "start": 21.6,
+      "end": 21.9,
+      "word": " s",
+      "probability": 0.9763864874839783
+    },
+    {
+      "__type__": "Word",
+      "start": 21.9,
+      "end": 22.48,
+      "word": " chang",
+      "probability": 0.8769519627094269
+    },
+    {
+      "__type__": "Word",
+      "start": 22.48,
+      "end": 23.48,
+      "word": " rana",
+      "probability": 0.9624166488647461
+    },
+    {
+      "__type__": "Word",
+      "start": 23.48,
+      "end": 23.48,
+      "word": " kappa",
+      "probability": 0.7218451201915741
+    },
+    {
+      "__type__": "Word",
+      "start": 23.48,
+      "end": 23.48,
+      "word": " ra,",
+      "probability": 0.9839112758636475
+    }
+  ]
+}

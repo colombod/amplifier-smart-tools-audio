@@ -1,19 +1,23 @@
-"""Behavioural tests for the phase-vocoder time-stretch and pitch-shift."""
+"""Behavioural tests for the phase-vocoder time-stretch and pitch-shift.
+
+The Signalsmith (python_stretch) quality tier is not installable in this
+environment (extras are DTU-only). Every test below that exercises it
+replays a REAL recorded python_stretch 0.3.1 run (tests/replay.py,
+tests/fixtures/recorded/python_stretch/) instead of a hand-written fake --
+see RECORDING.md for the measured timeFactor<->length relationship, the
+float32 read-back quirk, and the methods-not-attributes quirk the replay
+reproduces faithfully.
+"""
 
 from __future__ import annotations
-
-import importlib.util
-import sys
-import types
 
 import numpy as np
 import pytest
 
 from aud.dsp import timepitch
+from tests import replay
 
 SR = 44100
-
-_SIGNALSMITH_INSTALLED = importlib.util.find_spec("python_stretch") is not None
 
 
 def _tone(freq: float, seconds: float, sr: int = SR, amplitude: float = 0.5) -> np.ndarray:
@@ -140,16 +144,16 @@ def test_forcing_signalsmith_without_the_extra_raises_a_clear_error():
 
 @pytest.mark.parametrize("quality", ["phase_vocoder", "signalsmith"])
 @pytest.mark.parametrize("factor", [0.8, 1.2, 2.0])
-def test_measured_duration_ratio_matches_requested_factor(quality, factor):
+def test_measured_duration_ratio_matches_requested_factor(quality, factor, monkeypatch):
     """Real call, both engines -- the literal regression guard for D4.
 
-    `signalsmith` is skipped-with-reason when python_stretch is not
-    installed (installs here are DTU-only, see AGENTS.md); the assertion
-    below is therefore UNVERIFIED against a real Signalsmith install on
-    this host and is only exercised by the mocked test below instead.
+    `signalsmith` no longer skips when python_stretch is not installed:
+    the real recording (tests/fixtures/recorded/python_stretch/) replays
+    the measured timeFactor<->length relationship instead, so this runs
+    (and would catch a reintroduced inversion) on any host, DTU or not.
     """
-    if quality == "signalsmith" and not _SIGNALSMITH_INSTALLED:
-        pytest.skip("python_stretch (the 'stretch' extra) is not installed on this host -- DTU-only install")
+    if quality == "signalsmith":
+        replay.install_python_stretch_replay(monkeypatch)
 
     x = _tone(220.0, seconds=1.0)
     y, stats = timepitch.time_stretch(x, SR, factor=factor, quality=quality)
@@ -161,48 +165,16 @@ def test_measured_duration_ratio_matches_requested_factor(quality, factor):
     assert stats["measured_factor"] == pytest.approx(measured_ratio, rel=1e-9)
 
 
-class _FakeSignalsmithStretch:
-    """Stands in for `python_stretch.Signalsmith.Stretch()`.
-
-    Encodes the REAL, measured behaviour reported in D4: Signalsmith's
-    `timeFactor` is the reciprocal of this module's `factor` convention, so
-    `out_len == round(in_len / timeFactor)`. Exercises the actual
-    `_stretch_signalsmith` code path (including its `1.0 / factor` fix) --
-    this is not a stand-in for the assertion, it is a stand-in for the
-    third-party library, so the fix itself is what gets tested.
+def test_signalsmith_inversion_fix_is_exercised_via_the_real_recorded_relationship(monkeypatch):
+    """Replays the REAL recorded python_stretch behaviour (RECORDING.md:
+    `timeFactor` is the reciprocal of this module's `factor` convention --
+    measured directly, six factors, `1.2 -> 0.8333` reproduced exactly),
+    exercising the actual `_stretch_signalsmith` code path (including its
+    `1.0 / factor` fix). If the inversion were reintroduced, this test
+    fails (measured ratio would be ~1/factor, not factor) even on a host
+    where python_stretch can never be installed.
     """
-
-    def __init__(self) -> None:
-        self.timeFactor = 1.0
-
-    def preset(self, channels: int, sr: int) -> None:
-        del sr
-        self._channels = channels
-
-    def process(self, audio: np.ndarray) -> np.ndarray:
-        in_len = audio.shape[1]
-        out_len = max(1, round(in_len / self.timeFactor))
-        return np.zeros((audio.shape[0], out_len), dtype=np.float32)
-
-
-def _install_fake_signalsmith(monkeypatch, stretch_cls: type) -> None:
-    fake_signalsmith_ns = types.SimpleNamespace(Stretch=stretch_cls)
-    fake_module = types.SimpleNamespace(Signalsmith=fake_signalsmith_ns)
-    monkeypatch.setitem(sys.modules, "python_stretch", fake_module)
-    monkeypatch.setattr(timepitch, "_signalsmith_available", lambda: True)
-
-
-def test_signalsmith_inversion_fix_is_exercised_without_the_real_package(monkeypatch):
-    """Mocked python_stretch, faithful to the measured D4 behaviour.
-
-    Does not require the real optional dependency: it fakes only the
-    third-party surface (`Signalsmith.Stretch`), and runs this module's own
-    `_stretch_signalsmith`, which is where the `1.0 / factor` fix lives. If
-    the inversion were reintroduced, this test fails (measured ratio would
-    be ~1/factor, not factor) even on a host where python_stretch can never
-    be installed.
-    """
-    _install_fake_signalsmith(monkeypatch, _FakeSignalsmithStretch)
+    replay.install_python_stretch_replay(monkeypatch)
 
     x = _tone(220.0, seconds=1.0)
     factor = 1.2
@@ -210,22 +182,72 @@ def test_signalsmith_inversion_fix_is_exercised_without_the_real_package(monkeyp
 
     assert stats["engine"] == "signalsmith"
     measured_ratio = y.shape[0] / x.shape[0]
-    print(f"\n[timepitch] fake signalsmith: requested factor={factor} measured ratio={measured_ratio:.4f}")
+    print(f"\n[timepitch] replayed signalsmith: requested factor={factor} measured ratio={measured_ratio:.4f}")
     assert measured_ratio == pytest.approx(factor, rel=0.02)
 
 
-class _BrokenSignalsmithStretch(_FakeSignalsmithStretch):
-    """A hypothetical FUTURE regression: ignores `timeFactor` entirely."""
-
-    def process(self, audio: np.ndarray) -> np.ndarray:
-        return np.zeros_like(audio)
-
-
-def test_ratio_guard_refuses_a_broken_engine_instead_of_returning_wrong_audio(monkeypatch):
+def test_ratio_guard_refuses_a_broken_engine_instead_of_returning_wrong_audio():
     """The guard itself: an engine that silently ignores `factor` must be
-    refused loudly, not shipped with a `measured_factor` nobody checked."""
-    _install_fake_signalsmith(monkeypatch, _BrokenSignalsmithStretch)
+    refused loudly, not shipped with a `measured_factor` nobody checked.
 
-    x = _tone(220.0, seconds=1.0)
+    `_assert_ratio_holds` is `aud`'s OWN pure guard function -- calling it
+    directly with a broken (engine, factor, n_in, n_out) combination tests
+    our guard, not any third-party behaviour, so no replay or fake of any
+    kind is needed here at all.
+    """
     with pytest.raises(RuntimeError, match="measured duration ratio"):
-        timepitch.time_stretch(x, SR, factor=1.2, quality="signalsmith")
+        timepitch._assert_ratio_holds(engine="signalsmith", factor=1.2, n_in=22050, n_out=22050)
+
+
+def test_signalsmith_replay_reproduces_the_recorded_byte_exact_audio_pair(monkeypatch):
+    """The strongest evidence available: replay python_stretch against the
+    EXACT recorded input array (not a freshly synthesised tone) and assert
+    the output is the exact recorded output array, sample for sample --
+    not just a matching length/ratio.
+    """
+    replay.install_python_stretch_replay(monkeypatch)
+    input_arr, expected_output = replay.load_stretch_audio_pair(time_factor=2.0)
+
+    y, stats = timepitch.time_stretch(input_arr, sr=22050, factor=0.5, quality="signalsmith")
+
+    assert stats["engine"] == "signalsmith"
+    assert y.shape[0] == expected_output.shape[0]
+    np.testing.assert_allclose(y, expected_output.astype(np.float64), atol=1e-6)
+
+
+def test_signalsmith_replay_reproduces_the_float32_time_factor_readback(monkeypatch):
+    """RECORDING.md: `timeFactor` reads back through float32, e.g. setting
+    0.8 reads back as 0.800000011920929, not the Python float exactly.
+    A replay tidier than this (storing the double precisely) would hide a
+    real precision detail a caller might depend on.
+    """
+    recording = replay.install_python_stretch_replay(monkeypatch)
+    del recording
+    import python_stretch as ps  # the installed replay module
+
+    stretch = ps.Signalsmith.Stretch()
+    stretch.preset(1, 22050)
+    stretch.timeFactor = 0.8
+    assert stretch.timeFactor == pytest.approx(0.800000011920929, abs=1e-15)
+    assert stretch.timeFactor != 0.8  # the exact float32 quirk, not a tolerant approximation
+
+
+def test_signalsmith_replay_reproduces_the_methods_not_attributes_quirk(monkeypatch):
+    """RECORDING.md: `inputLatency`/`outputLatency`/`blockSamples`/
+    `intervalSamples` are METHODS on the real object, not attributes --
+    `float(stretch.inputLatency)` raises TypeError on the real library
+    (naming nanobind's bound-method type; Python's own `float()` builtin
+    names whatever the real type is, so this replay's plain-Python method
+    raises the same TypeError naming Python's own method type instead).
+    The fact this raises TypeError at all -- rather than returning a float
+    -- is the faithfully-reproduced quirk: a replay that made these plain
+    floats would be tidier than reality, which is exactly the shape of
+    defect this harness exists to prevent.
+    """
+    replay.install_python_stretch_replay(monkeypatch)
+    import python_stretch as ps
+
+    stretch = ps.Signalsmith.Stretch()
+    stretch.preset(1, 22050)
+    with pytest.raises(TypeError, match="float\\(\\) argument must be a string or a real number"):
+        float(stretch.inputLatency)

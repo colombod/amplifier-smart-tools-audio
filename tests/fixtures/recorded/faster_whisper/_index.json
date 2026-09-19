@@ -1,0 +1,188 @@
+{
+  "recorded_at_utc": "2026-09-19T12:18:23.425093+00:00",
+  "faster_whisper_version": "1.2.1",
+  "ctranslate2_version": "4.8.2",
+  "model": "base",
+  "runs": [
+    {
+      "file": "nospeech_silence_16000__raw.json",
+      "source_wav": "nospeech_silence_16000.wav",
+      "path_mode": "raw",
+      "n_segments": 1,
+      "n_words": 1,
+      "degenerate_word_count": 0,
+      "last_word_end": 4.98,
+      "text": " You"
+    },
+    {
+      "file": "nospeech_tone_16000__raw.json",
+      "source_wav": "nospeech_tone_16000.wav",
+      "path_mode": "raw",
+      "n_segments": 0,
+      "n_words": 0,
+      "degenerate_word_count": 0,
+      "last_word_end": null,
+      "text": ""
+    },
+    {
+      "file": "speech_long_16000__raw.json",
+      "source_wav": "speech_long_16000.wav",
+      "path_mode": "raw",
+      "n_segments": 16,
+      "n_words": 168,
+      "degenerate_word_count": 0,
+      "last_word_end": 64.22,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, Urm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, Urm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, Urm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, Urm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    },
+    {
+      "file": "speech_long_16000__resampled_16k.json",
+      "source_wav": "speech_long_16000.wav",
+      "path_mode": "resampled_16k",
+      "n_segments": 16,
+      "n_words": 168,
+      "degenerate_word_count": 0,
+      "last_word_end": 64.22,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    },
+    {
+      "file": "speech_long_22050__raw.json",
+      "source_wav": "speech_long_22050.wav",
+      "path_mode": "raw",
+      "n_segments": 16,
+      "n_words": 168,
+      "degenerate_word_count": 0,
+      "last_word_end": 88.56,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, um, we can start recording."
+    },
+    {
+      "file": "speech_long_22050__resampled_16k.json",
+      "source_wav": "speech_long_22050.wav",
+      "path_mode": "resampled_16k",
+      "n_segments": 12,
+      "n_words": 168,
+      "degenerate_word_count": 0,
+      "last_word_end": 64.28,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording, so, um, the first thing we need to do is, ah, check the levels. And then, erm, we can start recording, so, um, the first thing we need to do is, ah, check the levels. And then, erm, we can start recording, so, um, the first thing we need to do is, ah, check the levels. And then, erm, we can start recording, so, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    },
+    {
+      "file": "speech_long_44100__raw.json",
+      "source_wav": "speech_long_44100.wav",
+      "path_mode": "raw",
+      "n_segments": 16,
+      "n_words": 67,
+      "degenerate_word_count": 5,
+      "last_word_end": 177.54,
+      "text": " Shun, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Shun, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Shun, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj, Er, Asakangranga Taka-Raj,"
+    },
+    {
+      "file": "speech_long_44100__resampled_16k.json",
+      "source_wav": "speech_long_44100.wav",
+      "path_mode": "resampled_16k",
+      "n_segments": 16,
+      "n_words": 168,
+      "degenerate_word_count": 0,
+      "last_word_end": 64.22,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording. So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    },
+    {
+      "file": "speech_long_48000__raw.json",
+      "source_wav": "speech_long_48000.wav",
+      "path_mode": "raw",
+      "n_segments": 4,
+      "n_words": 4,
+      "degenerate_word_count": 0,
+      "last_word_end": 193.4,
+      "text": " Hatsunoviz Anta Errakanski Hatsunoviz"
+    },
+    {
+      "file": "speech_long_48000__resampled_16k.json",
+      "source_wav": "speech_long_48000.wav",
+      "path_mode": "resampled_16k",
+      "n_segments": 9,
+      "n_words": 106,
+      "degenerate_word_count": 1,
+      "last_word_end": 64.26,
+      "text": " So, um, the first thing we need to do is, uh, check the levels, and then, Then, erm, we can start recording, so um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording, so um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording, so um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording, so um, the first thing we need to do is, uh, check the levels. And then, firm we can start recording."
+    },
+    {
+      "file": "speech_short_16000__raw.json",
+      "source_wav": "speech_short_16000.wav",
+      "path_mode": "raw",
+      "n_segments": 2,
+      "n_words": 21,
+      "degenerate_word_count": 0,
+      "last_word_end": 7.72,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    },
+    {
+      "file": "speech_short_16000__resampled_16k.json",
+      "source_wav": "speech_short_16000.wav",
+      "path_mode": "resampled_16k",
+      "n_segments": 2,
+      "n_words": 21,
+      "degenerate_word_count": 0,
+      "last_word_end": 7.72,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    },
+    {
+      "file": "speech_short_22050__raw.json",
+      "source_wav": "speech_short_22050.wav",
+      "path_mode": "raw",
+      "n_segments": 1,
+      "n_words": 20,
+      "degenerate_word_count": 0,
+      "last_word_end": 10.16,
+      "text": " So, um, the first thing we need to do is, uh, check the levels, and then, urm, we can start"
+    },
+    {
+      "file": "speech_short_22050__resampled_16k.json",
+      "source_wav": "speech_short_22050.wav",
+      "path_mode": "resampled_16k",
+      "n_segments": 2,
+      "n_words": 21,
+      "degenerate_word_count": 0,
+      "last_word_end": 7.72,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    },
+    {
+      "file": "speech_short_44100__raw.json",
+      "source_wav": "speech_short_44100.wav",
+      "path_mode": "raw",
+      "n_segments": 1,
+      "n_words": 17,
+      "degenerate_word_count": 3,
+      "last_word_end": 20.32,
+      "text": " Two, three, four, and one, and one, and one, and one, and one, and one, and one."
+    },
+    {
+      "file": "speech_short_44100__resampled_16k.json",
+      "source_wav": "speech_short_44100.wav",
+      "path_mode": "resampled_16k",
+      "n_segments": 2,
+      "n_words": 21,
+      "degenerate_word_count": 0,
+      "last_word_end": 7.72,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    },
+    {
+      "file": "speech_short_48000__raw.json",
+      "source_wav": "speech_short_48000.wav",
+      "path_mode": "raw",
+      "n_segments": 3,
+      "n_words": 27,
+      "degenerate_word_count": 4,
+      "last_word_end": 23.48,
+      "text": " Thym, u, at se s chang rana kappa ra, u, at se s chang rana kappa ra, And he, u, at se s chang rana kappa ra,"
+    },
+    {
+      "file": "speech_short_48000__resampled_16k.json",
+      "source_wav": "speech_short_48000.wav",
+      "path_mode": "resampled_16k",
+      "n_segments": 2,
+      "n_words": 21,
+      "degenerate_word_count": 0,
+      "last_word_end": 7.72,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    }
+  ]
+}
