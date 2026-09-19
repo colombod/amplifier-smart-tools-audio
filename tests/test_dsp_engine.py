@@ -94,9 +94,14 @@ def test_apply_plan_runs_eq_compress_loudness_limit_end_to_end_with_real_numbers
 
 
 def test_apply_plan_raises_a_clear_error_for_an_unimplemented_stage():
+    # A fabricated name, not any real stage: every stage contracts/plan.v1.md
+    # names (including deess/dereverb/eq_match/reverb/stretch/pitch) is
+    # implemented in this build's registry (see engine.py's module
+    # docstring), so this guards the dispatcher's honest-failure behavior
+    # itself rather than pinning it to one stage's implementation status.
     x = _noise(seconds=0.1)
-    stages = [_Stage("deess", {"amount": 6})]
-    with pytest.raises(ValueError, match="deess"):
+    stages = [_Stage("not_a_real_stage", {"amount": 6})]
+    with pytest.raises(ValueError, match="not yet implemented"):
         engine.apply_plan(x, SR, stages)
 
 

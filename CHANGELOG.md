@@ -9,6 +9,79 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-19
+
+The chain is complete. Every stage the manifest has claimed since 0.1.0 now renders: the six
+that were still refusing — `eq_match`, `deess`, `dereverb`, `reverb`, `stretch`, `pitch` —
+have real DSP behind them, written on numpy and scipy. Nothing in `STAGE_ORDER` raises
+`not_implemented` any more.
+
+### Added
+
+- **`eq_match` and `curve extract` / `curve apply`** — measure a reference recording's 1/3-octave
+  spectral profile, store it as NUMBERS (a stored curve replays with no access to the reference
+  file, the same rule the `eq` stage already follows), and apply the clamped difference as a
+  linear-phase FIR. Linear phase because this is a tone match on a finished programme and phase
+  smearing is the one thing you do not want here.
+- **`deess`** — a dynamic de-esser, not a static notch: the sibilant band is split out, detected
+  on its own, and gain-reduced only while sibilance is actually present.
+- **`dereverb`** — STFT-domain late-field estimation and subtraction, with a spectral floor and
+  time/frequency smoothing against musical noise.
+- **`reverb`** — a four-line feedback delay network with damping and pre-delay, plus convolution
+  against a user-supplied impulse response. Defaults are deliberately subtle: the manifest says
+  *controlled ambience*, and this is a mastering tool, not a plate.
+- **`stretch` and `pitch`** — a phase vocoder with identity phase locking, resampling for pitch.
+  `python_stretch` (Signalsmith, MIT) is used instead when the `stretch` extra is installed; its
+  absence is not an error, because the built-in tier genuinely works, and the stats say which
+  engine ran.
+
+### Fixed
+
+- Three stage builders wrote field names the plan contract does not use — `reverb` emitted
+  `amount`/`decay` against the contract's `mix`/`decay_s`/`predelay_ms`, `stretch` emitted
+  `factor` against `ratio`, and `deess`/`dereverb` emitted `amount`/`freq` against
+  `amount_db`/`freq_hz`. None had ever rendered, so none could have been caught by running the
+  tool; all now match the contract.
+
+### Verified
+
+Measured, not asserted:
+
+- **`eq_match`**: a dull source against a bright reference closed **98.5%** of the spectral
+  distance (13.558 dB RMS before, 0.202 dB after), monotonic in strength
+  (13.561 / 6.792 / 0.186 dB at 0.0 / 0.5 / 1.0), and the boost clamp held at 11.98 dB against a
+  12.0 dB limit on a band where the reference had nothing but noise floor.
+- **`deess`**: 9.5 dB measured reduction on a sibilant burst against 10 dB requested, while the
+  non-sibilant passage of the same signal moved **0.0007 dB** — that gap is the whole difference
+  between a de-esser and a shelf.
+- **`dereverb`**: against synthetic ground truth (a dry signal convolved with a 400 ms decaying
+  IR), the energy-envelope decay rate moved from −27.9 dB/s toward the dry reference's, to
+  −43.2 dB/s. Already-dry material changes by 1.9 dB at `amount_db=10` — recorded as a real
+  bounded limit, not hidden.
+- **`reverb`**: decay time rises monotonically with `room_size` (0.170 / 0.331 / 0.521 s at
+  0.15 / 0.50 / 0.90); damping drops the tail's spectral centroid from 10028 Hz to 239 Hz; peak
+  never exceeded 1.05 across a sweep of room size against mix.
+- **`stretch` / `pitch`**: stretching 2.0× gave a duration ratio of 2.0000 with **0.00 cents** of
+  pitch drift; +12 semitones doubled the measured fundamental exactly with the length unchanged.
+- **The whole chain in one shell command** — `detect silence | cut | stretch | pitch | dereverb |
+  deess | eq | eq-match | compress | saturate | reverb | loudness | limit | render` — ran all
+  thirteen stages in a single pass and landed at **−14.00 LUFS, −2.81 dBTP** against a −1.0
+  ceiling, each stage reporting its own measurements.
+- 197 tests pass (was 165). Conformance 16 PASS / 0 FAIL.
+
+### Known limits
+
+- **A failed `transient` snap drops zero-crossing alignment.** When no onset is found the point
+  falls back to `rule: "none"`, which per the contract is the one value that disables alignment —
+  so the click protection every other mode gets for free silently disappears. Separately,
+  `snap_failed` fires on every silence-region START by construction, since a region start is
+  where speech stopped and no onset can be there. Both are filed; neither is fixed here.
+- The `limit` stage still reports `max_gain_reduction_db: 0.0` on material that never reaches the
+  ceiling, and the true-peak assertions remain tolerance-blind — see the 0.3.1 notes.
+- The Signalsmith path in `stretch`/`pitch`, and `detect fillers`' live model call, have still
+  never been executed on any machine: installs on the development host are not permitted and both
+  need a throwaway container.
+
 ## [0.4.0] - 2026-09-19
 
 Detection and editing become real. `detect` finds things in a recording and emits a regions

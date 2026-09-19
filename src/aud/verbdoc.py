@@ -314,8 +314,8 @@ When to reach for it:
   bright, splashy sibilance.
 
 Parameters:
-  --amount FLOAT   Maximum reduction in dB, 0-24. Default 6.
-  --freq FLOAT     Center frequency of the sibilant band in Hz. Default 6000.
+  --amount FLOAT   Maximum reduction in dB, >= 0. Default 6.
+  --freq FLOAT     Center frequency of the sibilant band in Hz. Default 6500.
 
 Example:
   aud plan | aud deess --amount 8 --freq 7000 | aud render in.wav out.wav
@@ -325,17 +325,22 @@ dereverb -- repair stage: reduce room ambience
 
 What it does:
   Appends a de-reverb stage to the plan on stdin. At render time this
-  reduces the reverberant tail of a recording made in an untreated room.
+  estimates the reverberant tail of a recording made in an untreated room
+  and reduces it -- a moderate-improvement tool for a moderately live
+  room, not a heavy-reverb remover. Larger --amount values trade more
+  suppression for more risk of audible artifacts and damage to sustained,
+  non-reverberant material (see dsp/dereverb.py's module docstring).
 
 When to reach for it:
   "The room sounds boxy", recordings made in a live or reflective space
   that need to sound drier and closer.
 
 Parameters:
-  --amount FLOAT   Percentage of ambience reduction, 0-100. Default 50.
+  --amount FLOAT   Maximum reduction applied to the estimated reverberant
+                   component, in dB, >= 0. Default 6.
 
 Example:
-  aud plan | aud dereverb --amount 60 | aud render in.wav out.wav
+  aud plan | aud dereverb --amount 6 | aud render in.wav out.wav
 """,
     "eq": """\
 eq -- tone stage: parametric equalization
@@ -363,22 +368,32 @@ Example:
 eq-match -- tone stage: match a reference's tonal balance
 
 What it does:
-  Appends an EQ-match stage to the plan on stdin, using a spectral curve
-  previously produced by 'aud curve extract'. --mix controls how much of
-  the match is applied.
+  Appends an EQ-match stage to the plan on stdin: a spectral curve is
+  diffed against this file's own measured spectrum at render time, clamped
+  per band, and applied as a linear-phase FIR. The curve comes from either
+  a JSON file previously written by 'aud curve extract' (--curve), or a
+  reference file measured right now, at plan-build time (--reference) --
+  either way the plan stores plain numbers, never a file path, so it
+  replays identically with no access to the reference file later.
 
 When to reach for it:
   "Make this podcast match last week's episode", matching a new take to an
   established reference recording.
 
 Parameters:
-  --curve PATH   Path to a curve JSON file produced by 'aud curve extract'.
-                 Required.
-  --mix FLOAT    How much of the match to apply, 0.0-1.0. Default 1.0.
+  --curve PATH       Path to a curve JSON file produced by 'aud curve
+                     extract'. Exactly one of --curve/--reference required.
+  --reference PATH   A reference audio file, measured now. Exactly one of
+                     --curve/--reference required.
+  --strength FLOAT   How much of the match to apply, 0.0 (none, input
+                     unchanged) to 1.0 (full). Default 1.0.
+  --max-gain-db FLOAT  Clamp on the correction in either direction, per
+                     band, in dB. Default 12.0.
 
 Example:
   aud curve extract reference.wav ref_curve.json
-  aud plan | aud eq-match --curve ref_curve.json --mix 0.8 | aud render in.wav out.wav
+  aud plan | aud eq-match --curve ref_curve.json --strength 0.8 | aud render in.wav out.wav
+  aud plan | aud eq-match --reference reference.wav --strength 0.8 | aud render in.wav out.wav
 """,
     "curve": """\
 curve -- extract or apply a spectral curve
@@ -453,8 +468,9 @@ When to reach for it:
   A recording is too dry/close and needs a touch of room to sit naturally.
 
 Parameters:
-  --amount FLOAT   Wet amount, 0.0-1.0. Default 0.2.
-  --decay FLOAT    Decay time in seconds, > 0. Default 1.5.
+  --amount FLOAT     Wet amount, 0.0-1.0. Default 0.15.
+  --decay FLOAT      Decay time in seconds, > 0. Default 1.2.
+  --predelay FLOAT   Delay before the reverb tail begins, ms, >= 0. Default 0.
 
 Example:
   aud plan | aud reverb --amount 0.15 --decay 1.2 | aud render in.wav out.wav

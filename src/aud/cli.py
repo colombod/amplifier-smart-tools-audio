@@ -140,10 +140,10 @@ def _build_parser() -> _Parser:
 
     deess_parser = sub.add_parser("deess")
     deess_parser.add_argument("--amount", type=float, default=6.0)
-    deess_parser.add_argument("--freq", type=float, default=6000.0)
+    deess_parser.add_argument("--freq", type=float, default=6500.0)
 
     dereverb_parser = sub.add_parser("dereverb")
-    dereverb_parser.add_argument("--amount", type=float, default=50.0)
+    dereverb_parser.add_argument("--amount", type=float, default=6.0)
 
     eq_parser = sub.add_parser("eq")
     eq_parser.add_argument("--hpf", type=float, default=None)
@@ -151,8 +151,11 @@ def _build_parser() -> _Parser:
     eq_parser.add_argument("--peak", dest="peaks", type=_triple, action="append", default=None)
 
     eq_match_parser = sub.add_parser("eq-match")
-    eq_match_parser.add_argument("--curve", required=True)
-    eq_match_parser.add_argument("--mix", type=float, default=1.0)
+    eq_match_source = eq_match_parser.add_mutually_exclusive_group(required=True)
+    eq_match_source.add_argument("--curve", default=None)
+    eq_match_source.add_argument("--reference", default=None)
+    eq_match_parser.add_argument("--strength", type=float, default=1.0)
+    eq_match_parser.add_argument("--max-gain-db", dest="max_gain_db", type=float, default=12.0)
 
     compress_parser = sub.add_parser("compress")
     compress_parser.add_argument("--bands", type=_float_list, required=True)
@@ -163,8 +166,9 @@ def _build_parser() -> _Parser:
     saturate_parser.add_argument("--mix", type=float, default=0.25)
 
     reverb_parser = sub.add_parser("reverb")
-    reverb_parser.add_argument("--amount", type=float, default=0.2)
-    reverb_parser.add_argument("--decay", type=float, default=1.5)
+    reverb_parser.add_argument("--amount", type=float, default=0.15)
+    reverb_parser.add_argument("--decay", type=float, default=1.2)
+    reverb_parser.add_argument("--predelay", type=float, default=0.0)
 
     stretch_parser = sub.add_parser("stretch")
     stretch_parser.add_argument("--factor", type=float, default=1.0)
@@ -290,20 +294,26 @@ def _dispatch_stage(verb: str, plan: Any, args: argparse.Namespace) -> Any:
             crossfade_shape=args.crossfade_shape,
         )
     if verb == "deess":
-        return lib.deess(plan, amount=args.amount, freq=args.freq)
+        return lib.deess(plan, amount_db=args.amount, freq_hz=args.freq)
     if verb == "dereverb":
-        return lib.dereverb(plan, amount=args.amount)
+        return lib.dereverb(plan, amount_db=args.amount)
     if verb == "eq":
         return lib.eq(plan, hpf=args.hpf, lpf=args.lpf, peaks=args.peaks or [])
     if verb == "eq-match":
-        curve = lib.load_json_file(args.curve)
-        return lib.eq_match(plan, curve=curve, mix=args.mix)
+        curve = lib.load_json_file(args.curve) if args.curve else None
+        return lib.eq_match(
+            plan,
+            curve=curve,
+            reference_path=args.reference,
+            amount=args.strength,
+            max_gain_db=args.max_gain_db,
+        )
     if verb == "compress":
         return lib.compress(plan, bands=args.bands, ratio=args.ratio)
     if verb == "saturate":
         return lib.saturate(plan, drive=args.drive, mix=args.mix)
     if verb == "reverb":
-        return lib.reverb(plan, amount=args.amount, decay=args.decay)
+        return lib.reverb(plan, amount=args.amount, decay=args.decay, predelay_ms=args.predelay)
     if verb == "stretch":
         return lib.stretch(plan, factor=args.factor)
     if verb == "pitch":

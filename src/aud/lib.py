@@ -375,32 +375,48 @@ def strip_silence(
     return append(plan, "strip_silence", params)
 
 
-def deess(plan: Plan, amount: float = 6.0, freq: float = 6000.0) -> Plan:
-    """Repair stage: tame sibilance. `amount` in dB of reduction, `freq` in Hz."""
-    if not (0.0 <= amount <= 24.0):
+def deess(plan: Plan, amount_db: float = 6.0, freq_hz: float = 6500.0) -> Plan:
+    """Repair stage: tame sibilance.
+
+    `amount_db` is the maximum gain reduction in the sibilant band, in dB.
+    `freq_hz` is the centre of that band. Field names and defaults match
+    contracts/plan.v1.md's `deess` stage exactly.
+    """
+    if not math.isfinite(amount_db) or amount_db < 0.0:
         raise AudError(
             code="bad_param",
-            message=f"De-ess amount must be between 0 and 24 dB, got {amount}.",
-            remedy="Use an amount in that range, e.g. --amount 6.",
+            message=f"De-ess amount_db must be a finite number >= 0, got {amount_db!r}.",
+            remedy="Use a non-negative number of dB, e.g. --amount 6.",
         )
-    if freq <= 0:
+    if not math.isfinite(freq_hz) or freq_hz <= 0.0:
         raise AudError(
             code="bad_param",
-            message=f"De-ess frequency must be a positive number of Hz, got {freq}.",
-            remedy="Use a frequency above 0 Hz, e.g. --freq 6000.",
+            message=f"De-ess freq_hz must be a finite number > 0, got {freq_hz!r}.",
+            remedy="Use a frequency above 0 Hz, e.g. --freq 6500.",
         )
-    return append(plan, "deess", {"amount": amount, "freq": freq})
+    if freq_hz > _NYQUIST_44100:
+        raise AudError(
+            code="bad_param",
+            message=f"De-ess freq_hz {freq_hz} exceeds Nyquist at 44100 Hz ({_NYQUIST_44100} Hz).",
+            remedy=f"Keep freq_hz below {_NYQUIST_44100} Hz.",
+        )
+    return append(plan, "deess", {"amount_db": amount_db, "freq_hz": freq_hz})
 
 
-def dereverb(plan: Plan, amount: float = 50.0) -> Plan:
-    """Repair stage: reduce room ambience. `amount` as a percentage, 0-100."""
-    if not (0.0 <= amount <= 100.0):
+def dereverb(plan: Plan, amount_db: float = 6.0) -> Plan:
+    """Repair stage: reduce room ambience.
+
+    `amount_db` is the maximum reduction applied to the estimated
+    reverberant component, in dB -- matches contracts/plan.v1.md's
+    `dereverb` stage exactly.
+    """
+    if not math.isfinite(amount_db) or amount_db < 0.0:
         raise AudError(
             code="bad_param",
-            message=f"De-reverb amount must be between 0 and 100, got {amount}.",
-            remedy="Use a percentage between 0 and 100, e.g. --amount 50.",
+            message=f"De-reverb amount_db must be a finite number >= 0, got {amount_db!r}.",
+            remedy="Use a non-negative number of dB, e.g. --amount 6.",
         )
-    return append(plan, "dereverb", {"amount": amount})
+    return append(plan, "dereverb", {"amount_db": amount_db})
 
 
 def eq(
@@ -457,25 +473,109 @@ def eq(
     return append(plan, "eq", {"hpf": hpf, "lpf": lpf, "peaks": validated_peaks})
 
 
-def eq_match(plan: Plan, curve: dict, mix: float = 1.0) -> Plan:
+_EQ_MATCH_MIN_POINTS = 2
+
+
+def _normalize_eq_match_curve(curve: Any) -> list[list[float]]:
+    """Extract and validate a bare `[[freq_hz, gain_db], ...]` curve.
+
+    Accepts either the rich dict `curve_extract`/`spectrum_profile` produce
+    (a "curve" key holding the pairs, plus measurement metadata) or a bare
+    array of pairs -- the shape contracts/plan.v1.md's `eq_match.curve`
+    stage field actually stores, so a hand-written curve can be pasted
+    straight into `--curve` with no wrapper object needed, exactly as the
+    contract promises ("the output of one can be pasted into the other").
+    """
+    pairs = curve.get("curve") if isinstance(curve, dict) else curve
+    if not isinstance(pairs, list) or len(pairs) < _EQ_MATCH_MIN_POINTS:
+        raise AudError(
+            code="bad_param",
+            message=f"eq_match curve must have at least {_EQ_MATCH_MIN_POINTS} [freq_hz, gain_db] pairs.",
+            remedy="Pass a curve produced by 'aud curve extract' or 'aud eq-match --reference', "
+            "or a hand-written array of ascending [freq_hz, gain_db] pairs.",
+        )
+    normalized: list[list[float]] = []
+    previous_freq = float("-inf")
+    for point in pairs:
+        if (
+            not isinstance(point, (list, tuple))
+            or len(point) != 2
+            or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in point)
+        ):
+            raise AudError(
+                code="bad_param",
+                message=f"eq_match curve point {point!r} is not a finite [freq_hz, gain_db] pair.",
+                remedy="Each curve point must be two finite numbers: frequency in Hz, then gain in dB.",
+            )
+        freq_hz, gain_db = float(point[0]), float(point[1])
+        if freq_hz <= 0:
+            raise AudError(
+                code="bad_param",
+                message=f"eq_match curve frequency must be positive, got {freq_hz}.",
+                remedy="Use a frequency in Hz greater than 0.",
+            )
+        if freq_hz <= previous_freq:
+            raise AudError(
+                code="bad_param",
+                message=f"eq_match curve frequencies must be strictly ascending, got {freq_hz} after {previous_freq}.",
+                remedy="Sort curve points by ascending frequency with no repeats.",
+            )
+        previous_freq = freq_hz
+        normalized.append([freq_hz, gain_db])
+    return normalized
+
+
+def eq_match(
+    plan: Plan,
+    curve: dict | list | None = None,
+    reference_path: str | None = None,
+    amount: float = 1.0,
+    max_gain_db: float = 12.0,
+) -> Plan:
     """Tone stage: match this file's tonal balance to a reference curve.
 
-    `curve` is a spectral profile as produced by `curve_extract`. `mix` is
-    how much of the match to apply, 0.0 (none) to 1.0 (full).
+    Exactly one of `curve` (a curve produced by 'aud curve extract', or a
+    bare array of `[freq_hz, gain_db]` pairs) or `reference_path` (a
+    reference audio file, measured right now) must be given. Either way the
+    plan stores plain numbers, never a file path: contracts/plan.v1.md's
+    `eq_match.curve` is an array of measurements, so a saved plan replays
+    identically with no access to the reference file -- the same reasoning
+    `strip_silence` follows for a policy rather than positions.
+
+    `amount` is how much of the curve to apply, 0.0-1.0 (contract default
+    1.0); `max_gain_db` clamps any single point of the curve, in both
+    directions, at render time (contract default 12.0) -- see
+    contracts/plan.v1.md#eq_match.
     """
-    if not isinstance(curve, dict) or not curve:
+    if (curve is None) == (reference_path is None):
         raise AudError(
             code="bad_param",
-            message="EQ-match curve must be a non-empty object.",
-            remedy="Pass a curve produced by 'aud curve extract'.",
+            message="eq_match needs exactly one of 'curve' or 'reference_path'.",
+            remedy="Pass --curve <curve.json> or --reference <reference.wav>, not both and not neither.",
         )
-    if not (0.0 <= mix <= 1.0):
+    if not (0.0 <= amount <= 1.0):
         raise AudError(
             code="bad_param",
-            message=f"Mix must be between 0.0 and 1.0, got {mix}.",
-            remedy="Use a mix between 0 and 1, e.g. --mix 1.0.",
+            message=f"Amount must be between 0.0 and 1.0, got {amount}.",
+            remedy="Use an amount between 0 and 1, e.g. --strength 0.7.",
         )
-    return append(plan, "eq_match", {"curve": curve, "mix": mix})
+    if not math.isfinite(max_gain_db) or max_gain_db < 0.0:
+        raise AudError(
+            code="bad_param",
+            message=f"max_gain_db must be a finite number >= 0, got {max_gain_db!r}.",
+            remedy="Use a non-negative number of dB, e.g. --max-gain-db 12.",
+        )
+
+    if reference_path is not None:
+        try:
+            from aud.dsp import eqmatch, io
+        except ImportError as exc:
+            raise _not_implemented("eq_match", exc) from exc
+        samples, sample_rate = _read_audio(io, reference_path)
+        curve = eqmatch.spectrum_profile(samples, sample_rate)
+
+    curve_points = _normalize_eq_match_curve(curve)
+    return append(plan, "eq_match", {"curve": curve_points, "amount": amount, "max_gain_db": max_gain_db})
 
 
 # Nyquist frequency at the most common mastering sample rate. Crossovers are
@@ -571,32 +671,51 @@ def saturate(plan: Plan, drive: float = 1.0, mix: float = 0.25) -> Plan:
     return append(plan, "saturate", {"drive": drive, "mix": mix})
 
 
-def reverb(plan: Plan, amount: float = 0.2, decay: float = 1.5) -> Plan:
-    """Character stage: controlled ambience. `amount` in [0, 1], `decay` in seconds > 0."""
+def reverb(plan: Plan, amount: float = 0.15, decay: float = 1.2, predelay_ms: float = 0.0) -> Plan:
+    """Character stage: controlled ambience.
+
+    `amount` is the dry/wet mix, 0.0-1.0 (stored as the document's `mix`
+    field); `decay` is the target decay time in seconds, > 0 (stored as
+    `decay_s`); `predelay_ms` delays the onset of the reverb relative to
+    the dry signal, >= 0. `amount`/`decay` are this CLI/library's argument
+    names for `mix`/`decay_s` -- the same naming seam `compress`'s
+    `--bands` already documents (contracts/plan.v1.md's field names are
+    the contract; these argument names are not).
+    """
     if not (0.0 <= amount <= 1.0):
         raise AudError(
             code="bad_param",
             message=f"Reverb amount must be between 0.0 and 1.0, got {amount}.",
-            remedy="Use an amount between 0 and 1, e.g. --amount 0.2.",
+            remedy="Use an amount between 0 and 1, e.g. --amount 0.15.",
         )
-    if decay <= 0:
+    if not math.isfinite(decay) or decay <= 0:
         raise AudError(
             code="bad_param",
             message=f"Decay must be a positive number of seconds, got {decay}.",
-            remedy="Use a decay greater than 0, e.g. --decay 1.5.",
+            remedy="Use a decay greater than 0, e.g. --decay 1.2.",
         )
-    return append(plan, "reverb", {"amount": amount, "decay": decay})
+    if not math.isfinite(predelay_ms) or predelay_ms < 0:
+        raise AudError(
+            code="bad_param",
+            message=f"Pre-delay must be a non-negative number of milliseconds, got {predelay_ms}.",
+            remedy="Use a pre-delay of 0 or more, e.g. --predelay 0.",
+        )
+    return append(plan, "reverb", {"mix": amount, "decay_s": decay, "predelay_ms": predelay_ms})
 
 
 def stretch(plan: Plan, factor: float = 1.0) -> Plan:
-    """Retime a programme without changing its pitch. `factor` > 0 (1.0 = no change)."""
-    if factor <= 0:
+    """Retime a programme without changing its pitch. `factor` > 0 (1.0 = no change).
+
+    Stored as the document's `ratio` field (contracts/plan.v1.md); `factor`
+    is this CLI/library's argument name for it.
+    """
+    if not math.isfinite(factor) or factor <= 0:
         raise AudError(
             code="bad_param",
             message=f"Stretch factor must be positive, got {factor}.",
             remedy="Use a factor greater than 0, e.g. --factor 1.0 for no change.",
         )
-    return append(plan, "stretch", {"factor": factor})
+    return append(plan, "stretch", {"ratio": factor})
 
 
 def pitch(plan: Plan, semitones: float = 0.0) -> Plan:
@@ -735,6 +854,7 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
         raise _not_implemented("render", exc) from exc
     from aud.dsp.edit import CrossfadeExceedsGapError
     from aud.dsp.engine import MissingDspModuleError
+    from aud.dsp.eqmatch import CurveError
     from aud.plan import ordered
 
     samples, sample_rate = _read_audio(io, in_path)
@@ -763,6 +883,13 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
             code="crossfade_exceeds_gap",
             message=str(exc),
             remedy="Use a shorter crossfade_ms, or supply regions with more material around that join.",
+        ) from exc
+    except CurveError as exc:
+        raise AudError(
+            code="bad_param",
+            message=f"eq_match: {exc}",
+            remedy="Re-extract the curve from this render's own sample rate, or supply a curve whose "
+            "frequencies fit under this file's Nyquist frequency.",
         ) from exc
     output_subtype = config()["output_subtype"]["value"]
     io.write_audio(out_path, rendered, sample_rate, subtype=output_subtype)
@@ -871,6 +998,17 @@ def curve_apply(path: str, curve_path: str, out_path: str) -> dict:
         raise _not_implemented("curve_apply", exc) from exc
     curve = load_json_file(curve_path)
     samples, sample_rate = _read_audio(io, path)
-    matched = eqmatch.apply_curve(samples, sample_rate, curve)
+    try:
+        matched = eqmatch.apply_curve(samples, sample_rate, curve)
+    except eqmatch.CurveError as exc:
+        # dsp/ modules raise plain exceptions (AGENTS.md #8); this is the
+        # boundary where a malformed/incompatible curve becomes a
+        # user-facing bad_param instead of an unhandled internal_error.
+        raise AudError(
+            code="bad_param",
+            message=f"Could not apply curve '{curve_path}' to '{path}': {exc}",
+            remedy="Provide a curve JSON with at least 2 finite, strictly ascending [freq_hz, gain_db] "
+            "pairs, as produced by 'aud curve extract'.",
+        ) from exc
     io.write_audio(out_path, matched, sample_rate)
     return {"out_path": out_path}

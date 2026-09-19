@@ -5,11 +5,11 @@ function via a registry, and builds a report that is specific enough to be
 useful after a render: gain applied, gain reduction per band, true peak
 before and after, etc. -- not just "eq: done".
 
-Seven stages are implemented in this module: cut, strip_silence, eq,
-compress, saturate, loudness, limit. Six further stages (stretch, pitch,
-dereverb, deess, eq_match, reverb) are a separate, later milestone;
-`apply_plan` does not special-case their names -- ANY stage not in the
-registry raises `NotImplementedStageError` (a `ValueError` subclass), so
+Thirteen stages are implemented in this module: cut, strip_silence,
+dereverb, deess, eq, eq_match, compress, saturate, reverb, stretch, pitch,
+loudness, limit -- every stage the canonical order (contracts/plan.v1.md)
+names. `apply_plan` does not special-case stage names -- ANY stage not in
+the registry raises `NotImplementedStageError` (a `ValueError` subclass), so
 the caller always gets an honest "not implemented yet" rather than a
 silent no-op or a confusing KeyError. aud.lib maps that exception to a
 `not_implemented` AudError; it is not an internal aud bug.
@@ -22,7 +22,9 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from aud.dsp import dynamics, limiter, loudness, saturation
+from aud.dsp import deess as _deess
+from aud.dsp import dereverb as _dereverb
+from aud.dsp import dynamics, eqmatch, limiter, loudness, reverb, saturation, timepitch
 from aud.dsp import edit as _edit
 from aud.dsp import filters as _filters
 from aud.dsp import resolve as _resolve
@@ -169,6 +171,51 @@ def _peak_dbfs(x: np.ndarray) -> float:
     return 20.0 * math.log10(max(peak, _EPS))
 
 
+# The plan contract (contracts/plan.v1.md's "deess" stage) exposes a single
+# centre frequency, freq_hz -- not the two band edges dsp.deess.deess takes.
+# A one-octave-wide band centred on freq_hz (edges at freq/sqrt(2) and
+# freq*sqrt(2)) is a standard, defensible way to turn a centre frequency
+# into a band: it is symmetric in log-frequency (perceptually the natural
+# scale) and matches the width dsp/analysis.py already uses for its own
+# octave-band energy report.
+_DEESS_BAND_OCTAVE_RATIO = 2.0**0.5
+
+
+def _apply_deess(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
+    amount_db = params.get("amount_db", 6.0)
+    freq_hz = params.get("freq_hz", 6500.0)
+    nyquist = sr / 2.0
+
+    low = freq_hz / _DEESS_BAND_OCTAVE_RATIO
+    high = min(freq_hz * _DEESS_BAND_OCTAVE_RATIO, 0.999 * nyquist)
+
+    y, dsp_stats = _deess.deess(x, sr, amount_db=amount_db, band=(low, high))
+
+    return y, {
+        "amount_db": amount_db,
+        "freq_hz": freq_hz,
+        "band_low_hz": dsp_stats["band_low_hz"],
+        "band_high_hz": dsp_stats["band_high_hz"],
+        "max_gain_reduction_db": dsp_stats["max_gain_reduction_db"],
+        "avg_gain_reduction_db": dsp_stats["avg_gain_reduction_db"],
+        "frames_reduced_pct": dsp_stats["frames_reduced_pct"],
+    }
+
+
+def _apply_dereverb(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
+    amount_db = params.get("amount_db", 6.0)
+    y, dsp_stats = _dereverb.dereverb(x, sr, amount_db=amount_db)
+
+    return y, {
+        "amount_db": amount_db,
+        "tau_ms": dsp_stats["tau_ms"],
+        "guard_ms": dsp_stats["guard_ms"],
+        "max_gain_reduction_db": dsp_stats["max_gain_reduction_db"],
+        "avg_gain_reduction_db": dsp_stats["avg_gain_reduction_db"],
+        "bins_reduced_pct": dsp_stats["bins_reduced_pct"],
+    }
+
+
 def _apply_eq(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
     before = _peak_dbfs(x)
     y = x
@@ -202,6 +249,37 @@ def _apply_eq(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarra
         "peaks_applied": peaks_applied,
         "low_shelf_applied": low_shelf,
         "high_shelf_applied": high_shelf,
+        "sample_peak_dbfs_before": before,
+        "sample_peak_dbfs_after": _peak_dbfs(y),
+    }
+
+
+def _apply_eq_match(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
+    # Field names match contracts/plan.v1.md's "eq_match" stage exactly:
+    # `curve` is an array of [freq_hz, gain_db] pairs (measurements, never
+    # a file path -- see dsp/eqmatch.py's module docstring), `amount` is
+    # the 0.0-1.0 dial, `max_gain_db` is the single, symmetric clamp the
+    # contract documents. `dsp.eqmatch.apply_curve`'s own API is more
+    # general (separate max_boost_db/max_cut_db) for testability; the plan
+    # contract exposes only the symmetric case, so both are set from it.
+    before = _peak_dbfs(x)
+    curve = params["curve"]
+    amount = params.get("amount", 1.0)
+    max_gain_db = params.get("max_gain_db", 12.0)
+
+    y = eqmatch.apply_curve(
+        x,
+        sr,
+        {"curve": curve},
+        strength=amount,
+        max_boost_db=max_gain_db,
+        max_cut_db=max_gain_db,
+    )
+
+    return y, {
+        "amount": amount,
+        "max_gain_db": max_gain_db,
+        "curve_points": len(curve),
         "sample_peak_dbfs_before": before,
         "sample_peak_dbfs_after": _peak_dbfs(y),
     }
@@ -255,6 +333,64 @@ def _apply_saturate(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.
     }
 
 
+# The plan contract (contracts/plan.v1.md's "reverb" stage) exposes only
+# mix/decay_s/predelay_ms -- no room_size or damping knob. room_size is
+# derived from decay_s (see dsp/reverb.py's module docstring for why
+# room_size, not gain, is the FDN's decay-time control); damping is a
+# fixed, mastering-appropriate constant, not a caller-facing dial.
+_REVERB_MAX_DECAY_S = 4.0
+_REVERB_DAMPING = 0.35
+
+
+def _apply_reverb(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
+    before = _peak_dbfs(x)
+    mix = params.get("mix", 0.15)
+    decay_s = params.get("decay_s", 1.2)
+    predelay_ms = params.get("predelay_ms", 0.0)
+
+    room_size = float(np.clip(decay_s / _REVERB_MAX_DECAY_S, 0.02, 0.98))
+    y, dsp_stats = reverb.reverb(
+        x,
+        sr,
+        room_size=room_size,
+        damping=_REVERB_DAMPING,
+        wet=mix,
+        dry=1.0 - mix,
+        pre_delay_ms=predelay_ms,
+    )
+
+    return y, {
+        "mix": mix,
+        "decay_s": decay_s,
+        "predelay_ms": predelay_ms,
+        "room_size_derived": room_size,
+        "estimated_decay_s": dsp_stats["estimated_decay_s"],
+        "sample_peak_dbfs_before": before,
+        "sample_peak_dbfs_after": _peak_dbfs(y),
+    }
+
+
+def _apply_stretch(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
+    ratio = params.get("ratio", 1.0)
+    y, dsp_stats = timepitch.time_stretch(x, sr, ratio, quality="auto")
+    return y, {
+        "ratio": ratio,
+        "engine": dsp_stats["engine"],
+        "input_samples": dsp_stats["input_samples"],
+        "output_samples": dsp_stats["output_samples"],
+    }
+
+
+def _apply_pitch(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
+    semitones = params.get("semitones", 0.0)
+    y, dsp_stats = timepitch.pitch_shift(x, sr, semitones, quality="auto")
+    return y, {
+        "semitones": semitones,
+        "frequency_ratio": dsp_stats["frequency_ratio"],
+        "engine": dsp_stats["engine"],
+    }
+
+
 def _apply_loudness(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
     target_lufs = params["target_lufs"]
     before_lufs = loudness.integrated_lufs(x, sr)
@@ -287,9 +423,15 @@ def _apply_limit(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.nda
 _REGISTRY = {
     "cut": _apply_cut,
     "strip_silence": _apply_strip_silence,
+    "dereverb": _apply_dereverb,
+    "deess": _apply_deess,
     "eq": _apply_eq,
+    "eq_match": _apply_eq_match,
     "compress": _apply_compress,
     "saturate": _apply_saturate,
+    "reverb": _apply_reverb,
+    "stretch": _apply_stretch,
+    "pitch": _apply_pitch,
     "loudness": _apply_loudness,
     "limit": _apply_limit,
 }
