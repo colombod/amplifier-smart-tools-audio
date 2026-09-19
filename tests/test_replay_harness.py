@@ -42,6 +42,52 @@ def test_assert_matches_recorded_source_accepts_the_real_matching_wav() -> None:
     replay.assert_matches_recorded_source(recording, right_wav)  # must not raise
 
 
+def test_install_faster_whisper_replay_requires_a_source_argument(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`source` has no default -- a caller MUST say which source drives the
+    call, or declare `UNBOUND(...)` explicitly. This is the structural form
+    of the trap RECORDING.md warns about: a replay that never says what it
+    is bound to is testing nothing about correspondence to real audio.
+    """
+    with pytest.raises(TypeError):
+        replay.install_faster_whisper_replay(monkeypatch, "speech_short_16000__raw")  # type: ignore[call-arg]
+
+
+def test_install_faster_whisper_replay_verifies_the_sha256_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Passing a `Path` as `source` must be checked against the recording's
+    own provenance -- the wrong wav must fail loudly, not silently bind.
+    """
+    wrong_wav = replay.wav_path("speech_short_48000.wav")  # real file, just the wrong one
+    with pytest.raises(replay.RecordingNotFoundError):
+        replay.install_faster_whisper_replay(monkeypatch, "speech_short_16000__resampled_16k", source=wrong_wav)
+
+
+def test_install_faster_whisper_replay_accepts_the_real_matching_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    right_wav = replay.wav_path("speech_short_16000.wav")
+    replayed = replay.install_faster_whisper_replay(monkeypatch, "speech_short_16000__resampled_16k", source=right_wav)
+    assert replayed.source == right_wav
+
+
+def test_unbound_rejects_an_empty_reason() -> None:
+    """An exemption with no reason is a gap wearing the shape of a decision."""
+    with pytest.raises(ValueError, match="non-empty reason"):
+        replay.UNBOUND("")
+    with pytest.raises(ValueError, match="non-empty reason"):
+        replay.UNBOUND("   ")
+
+
+def test_install_faster_whisper_replay_accepts_an_explicit_unbound_declaration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`source=UNBOUND("reason")` is the visible, greppable opt-out -- no
+    sha256 check runs, and the reason travels with the installed replay.
+    """
+    unbound = replay.UNBOUND("this test does not drive the call with real audio at all")
+    replayed = replay.install_faster_whisper_replay(monkeypatch, "speech_short_16000__raw", source=unbound)
+    assert replayed.source is unbound
+    assert isinstance(replayed.source, replay.UnboundSource)
+    assert replayed.source.reason == "this test does not drive the call with real audio at all"
+
+
 def test_anthropic_urlopen_replay_fails_loudly_on_a_model_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
     """The request-shape check (model name) is meant to catch a caller
     reusing a recording with the wrong model -- prove it actually fires.

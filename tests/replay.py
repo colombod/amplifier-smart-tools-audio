@@ -19,6 +19,13 @@ in (attribute access, not dict access) -- and even there, RECORDING.md's
 documented quirks (float32 `timeFactor` read-back, `inputLatency` etc.
 being methods, not attributes) are reproduced deliberately, because a
 replay that is tidier than the real library is a fake again.
+
+`install_faster_whisper_replay`'s `source` parameter is REQUIRED, not
+optional: a replay is bound to its exact recorded input bytes (a `Path`,
+sha256-verified against the recording's provenance) or explicitly declared
+`UNBOUND("reason")`. See that function's docstring -- this is the
+structural form of the rule above "a replay asserting recorded output
+against *similar* audio is testing nothing".
 """
 
 from __future__ import annotations
@@ -98,6 +105,34 @@ def assert_matches_recorded_source(recording: dict[str, Any], wav_file: Path) ->
         )
 
 
+class UnboundSource:
+    """The explicit, greppable declaration that a replay install is NOT bound
+    to any driving-audio source.
+
+    Constructing this (via `UNBOUND(reason)`) is the visible admission that a
+    test is replaying a recorded ANSWER regardless of what audio -- if any --
+    actually drives the call. That is exactly the gap AGENTS.md SS3b and
+    RECORDING.md warn about ("the same speech at 16 kHz and at
+    48-kHz-resampled-to-16 kHz produced 168 vs 106 words"), so it must never
+    be the silent default. `reason` is mandatory and non-empty precisely so
+    `grep -n "UNBOUND(" tests/` finds every exemption together with why it
+    was taken, rather than an omission looking identical to a bound replay.
+    """
+
+    def __init__(self, reason: str) -> None:
+        if not reason or not reason.strip():
+            raise ValueError("UNBOUND(reason) requires a non-empty reason -- an exemption with no reason is a gap")
+        self.reason = reason
+
+    def __repr__(self) -> str:
+        return f"UnboundSource(reason={self.reason!r})"
+
+
+def UNBOUND(reason: str) -> UnboundSource:  # noqa: N802 -- reads as a keyword at call sites, e.g. source=UNBOUND(...)
+    """Declare, with a reason, that a replay install has no driving-audio source to bind to."""
+    return UnboundSource(reason)
+
+
 # ---------------------------------------------------------------------------
 # faster-whisper replay
 # ---------------------------------------------------------------------------
@@ -150,10 +185,11 @@ class FasterWhisperReplay:
     not prove": a replay is only as current as its last re-record.
     """
 
-    def __init__(self, recording: dict[str, Any], recording_name: str) -> None:
+    def __init__(self, recording: dict[str, Any], recording_name: str, source: Path | UnboundSource) -> None:
         self.recording = recording
         self.name = recording_name
         self.recorded_version = recording["provenance"]["faster_whisper_version"]
+        self.source = source
 
     def segments(self) -> list[types.SimpleNamespace]:
         return [_replay_segment(s) for s in self.recording["segments"]]
@@ -162,7 +198,9 @@ class FasterWhisperReplay:
         return _replay_info(self.recording["info"])
 
 
-def install_faster_whisper_replay(monkeypatch: Any, recording_name: str) -> FasterWhisperReplay:
+def install_faster_whisper_replay(
+    monkeypatch: Any, recording_name: str, *, source: Path | UnboundSource
+) -> FasterWhisperReplay:
     """Install a fake `faster_whisper` module that REPLAYS one recorded run.
 
     `WhisperModel(model_size).transcribe(audio, word_timestamps=True)`
@@ -171,13 +209,34 @@ def install_faster_whisper_replay(monkeypatch: Any, recording_name: str) -> Fast
     silence word, everything -- regardless of what `audio` it is actually
     handed. It does not (and structurally cannot) verify that the audio
     passed in matches what produced the recording: faster-whisper is never
-    actually run. `assert_matches_recorded_source` is the tool for binding
-    a replay to its real source bytes when a test needs that guarantee.
+    actually run.
 
-    Fails loudly via RecordingNotFoundError if `recording_name` was never captured.
+    `source` is REQUIRED and is the structural fix for the trap this
+    function used to allow: a replay asserting recorded output against
+    *similar* (not identical) audio tests nothing (RECORDING.md: the same
+    speech at 16 kHz vs 48-kHz-resampled-to-16-kHz produced 168 vs 106
+    words). Pass either:
+
+    - the `Path` to the exact wav that produced `recording_name` -- its
+      sha256 is verified against `recording["provenance"]["source_wav_sha256"]`
+      right here (via `assert_matches_recorded_source`), so a caller cannot
+      silently drift onto the wrong bytes; or
+    - `UNBOUND("reason")` -- an explicit, greppable declaration that this
+      particular test drives the call with audio that is NOT the recorded
+      source (e.g. the source wav was never shipped, or the test is
+      deliberately proving something that does not depend on the driving
+      audio), naming why in `reason`.
+
+    Fails loudly via RecordingNotFoundError if `recording_name` was never
+    captured, or if `source` is a `Path` that does not match the recording's
+    provenance.
     """
     recording = load_recording("faster_whisper", recording_name)
-    replay = FasterWhisperReplay(recording, recording_name)
+    if isinstance(source, UnboundSource):
+        pass  # explicit exemption already validated (non-empty reason) at construction
+    else:
+        assert_matches_recorded_source(recording, source)
+    replay = FasterWhisperReplay(recording, recording_name, source)
 
     class _ReplayWhisperModel:
         def __init__(self, model_size: str) -> None:
@@ -191,6 +250,7 @@ def install_faster_whisper_replay(monkeypatch: Any, recording_name: str) -> Fast
     replay_module.WhisperModel = _ReplayWhisperModel  # type: ignore[attr-defined]
     replay_module.__replay_recording__ = recording_name  # type: ignore[attr-defined]
     replay_module.__replay_recorded_version__ = replay.recorded_version  # type: ignore[attr-defined]
+    replay_module.__replay_source__ = source  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "faster_whisper", replay_module)
     return replay
 

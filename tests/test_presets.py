@@ -43,6 +43,33 @@ def _noise(seconds: float = 1.0, sr: int = SR, seed: int = 0) -> np.ndarray:
     return rng.normal(0.0, 0.1, size=(int(seconds * sr), 2))
 
 
+def _speech_like_with_real_noise_floor(seconds: float = 3.0, sr: int = SR, seed: int = 1) -> np.ndarray:
+    """Speech-shaped bursts over a continuous, real (not digital-silence) noise floor.
+
+    A real noise floor -- not zeros -- is the whole point: `expand`'s
+    threshold is relative to the *measured* floor
+    (`aud.dsp.detect.measure_noise_floor`), so a signal with no floor at all
+    (pure silence between bursts) would give the stage nothing honest to
+    measure against. The floor here sits around -42 dBFS RMS (a plausible
+    untreated-room level); the bursts sit tens of dB above it, the same
+    shape `tests/test_dsp_detect.py` uses for its own planted-gap tests.
+    """
+    rng = np.random.default_rng(seed)
+    n = int(seconds * sr)
+    t = np.arange(n) / sr
+    floor = 0.008 * rng.standard_normal((n, 2))  # ~ -42 dBFS RMS bed, both channels
+    burst_env = (np.sin(2 * np.pi * 0.6 * t) > 0.3).astype(np.float64)  # ~35% duty cycle
+    burst = 0.3 * np.sin(2 * np.pi * 220.0 * t)[:, None] * burst_env[:, None]
+    return floor + burst
+
+
+def _find_stage(report: dict, stage: str) -> dict:
+    for entry in report["stages"]:
+        if entry["stage"] == stage:
+            return entry
+    raise AssertionError(f"stage {stage!r} not found in render report: {[s['stage'] for s in report['stages']]}")
+
+
 # ---------------------------------------------------------------------------
 # aud.presets -- library level
 # ---------------------------------------------------------------------------
@@ -84,6 +111,59 @@ def test_build_preset_unknown_name_raises_unknown_preset() -> None:
     assert "not-a-real-preset" in exc_info.value.message
     for name in PRESET_NAMES:
         assert name in exc_info.value.remedy
+
+
+# ---------------------------------------------------------------------------
+# gate/expand: which presets use them, which deliberately don't, and the
+# real measured attenuation each one produces on material with a genuine
+# noise floor -- not just that the plan contains the stage name on paper.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["podcast", "voiceover"])
+def test_spoken_word_presets_include_a_quiet_end_repair_stage(name: str) -> None:
+    """podcast/voiceover must address room tone between phrases -- a cleanup
+    preset that leaves it alone ships a floor the chain's own compression
+    and loudness stages are about to lift (see the module docstring)."""
+    stage_names = [stage.stage for stage in build_preset(name).stages]
+    assert "expand" in stage_names, f"{name} must include a gate/expand stage; got {stage_names}"
+    assert "gate" not in stage_names  # this preset's documented choice is the gentler device
+
+
+@pytest.mark.parametrize("name", ["broadcast", "music-streaming"])
+def test_non_spoken_word_presets_deliberately_omit_gate_and_expand(name: str) -> None:
+    stage_names = [stage.stage for stage in build_preset(name).stages]
+    assert "gate" not in stage_names
+    assert "expand" not in stage_names
+
+
+@pytest.mark.parametrize("name", ["podcast", "voiceover"])
+def test_expand_measurably_attenuates_a_real_noise_floor_when_rendered(name: str) -> None:
+    """Not just a plan containing 'expand' on paper -- rendered against
+    material with a genuine (non-digital-silence) noise floor, the stage
+    must report real, non-zero attenuation. Prints the measured numbers
+    (max/avg attenuation, attenuated_pct, measured floor) for inspection.
+    """
+    x = _speech_like_with_real_noise_floor()
+    plan = build_preset(name)
+    _y, report = engine.apply_plan(x, SR, ordered(plan))
+    expand_report = _find_stage(report, "expand")
+    print(f"\n[preset:{name}] expand report: {expand_report}")
+    assert expand_report["max_attenuation_db"] < -3.0, (
+        f"{name}: expected a real, audible attenuation on a planted noise floor, got {expand_report}"
+    )
+    assert expand_report["attenuated_pct"] > 5.0, (
+        f"{name}: expected the quiet portions of the file to be measurably attenuated, got {expand_report}"
+    )
+    assert expand_report["noise_floor_dbfs"] < -20.0  # sane measured floor, not a degenerate reading
+
+
+@pytest.mark.parametrize("name", ["podcast", "voiceover"])
+def test_spoken_word_preset_descriptions_name_the_quiet_end_stage(name: str) -> None:
+    """The description is where a preset's choices are argued (like the
+    loudness target already is) -- gate/expand must be named there too."""
+    entries = {entry["name"]: entry["description"] for entry in list_presets()}
+    assert "expansion" in entries[name].lower() or "expand" in entries[name].lower()
 
 
 @pytest.mark.parametrize("name", PRESET_NAMES)

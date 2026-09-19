@@ -9,6 +9,80 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-19
+
+An installable skill, the two replay rules moved from prose into code, gate and expander
+finished, and the third instance of one bug — fixed by making a fourth structurally
+unwritable.
+
+### Added
+
+- **`skills/aud/SKILL.md`** — the file `npx skills add` installs. It is a POINTER, not a copy
+  of `--help`: it says loudly what the tool is for and the asks that should make you reach for
+  it, what each optional tier unlocks, and then sends the reader to `aud --help`,
+  `aud <verb> --help` and `aud check` for everything else. A test pins that structure.
+- **`podcast` and `voiceover` presets now include `expand`**, the gentler quiet-end device.
+  Rendered against material with a real −45.10 dBFS noise floor: **−4.60 dB** max attenuation
+  on `podcast`, **−3.93 dB** on `voiceover`, each over ~51% of the programme. `broadcast` and
+  `music-streaming` deliberately omit it, and the code says why — a music noise floor is often
+  intentional (room tone, a decaying reverb tail) and there is no "between phrases" to target.
+
+### Fixed
+
+- **The third instance of one bug, and the last one writable.** When `snap: "transient"` found
+  an onset but the zero-crossing refinement then failed, the code kept the raw candidate while
+  reporting `rule_applied: "transient"`, `snap_failed: false` — claiming the alignment floor
+  ran when it had not. 0.6.0 fixed this shape where the coarse search found nothing; the pass
+  before this one fixed it for `snap: "silence"`. Three instances means the SHAPE was the
+  defect, so all five zero-crossing call sites now route through one helper that is the only
+  place `_nearest_zero_crossing`'s `None` case is handled. A fourth instance cannot be written
+  without going through its honesty contract.
+- **An existing "happy path" test was quietly validating the same bug.** Fixing the above broke
+  `test_transient_snap_lands_before_the_onset_never_after` — its pre-onset material was a flat
+  near-zero constant that never crosses zero, so it had only ever passed *because* the silent
+  fallback succeeded. Its signal is corrected to exercise a genuine refinement.
+- **`snap: "silence"`** had the same latent shape and is fixed with it: a failed refinement now
+  reports `unaligned` and `snap_failed: true` instead of `silence` and `false`.
+- **A write failure said it was our bug.** A bad subtype or an unwritable destination reported
+  `internal_error` — telling the user to file a bug report against us for their full disk. Now
+  `audio_write_error` with an actionable remedy, verified against a provoked invalid subtype
+  and a permission-denied directory.
+
+### Changed
+
+- **The two replay rules are enforced, not documented.** `install_faster_whisper_replay` now
+  REQUIRES the caller to name the source it drives with and verifies the sha256 itself; a test
+  that replays only the recorded answer must say so through `replay.UNBOUND("reason")`, which
+  rejects a blank reason — so an exemption is a greppable decision rather than an omission.
+  And a new guard reads the RECORDINGS themselves and pins every awkward truth they carry: a
+  word with `start == end`, silence returning one hallucinated word while a tone returns zero
+  segments, the Signalsmith reciprocal, the float32 read-back, the attributes that are really
+  methods, and both Anthropic content shapes. If a future re-recording comes back clean, the
+  guard fails saying which coverage was lost instead of passing quietly.
+
+### Verified
+
+- **Model tier is now a pinned property, not an anecdote.** All four recorded Anthropic
+  responses replay through the real validator and plan builder: the sonnet-thinking response on
+  hissy material yields a chain containing `expand` and cites the noise-floor gap; the haiku
+  response on the *same* material does not; both clean-material responses correctly reach for
+  neither. A prompt change that breaks that reasoning now fails a test.
+- The silence-snap and transient-snap fixes were each verified in BOTH directions — stashed,
+  observed failing against the old code, restored, observed passing. A regression test never
+  seen to fail is not yet a regression test.
+- OpenAI, Google and Azure response parsing now has coverage, and all three already raise a
+  clean `provider_request_failed` rather than an opaque `KeyError` on a malformed response.
+- 382 tests pass, 0 skipped (was 330). Conformance 16 PASS / 0 FAIL.
+
+### Known limits
+
+- Those three non-Anthropic backend tests are written against each provider's **documented**
+  response shape, not a recorded live one. That is precisely the gap that let the Anthropic
+  `content[0]["text"]` defect ship, and only a real recorded call closes it.
+- Transient detection still produces a bounded number of spurious onsets on a pure sustained
+  tone. The docstring and `contracts/regions.v1.md` now state what it is and is not suited to
+  rather than leaving it as a shrug.
+
 ## [0.9.0] - 2026-09-19
 
 Every hand-written mock in the test suite is gone, replaced by replays of real recorded runs.

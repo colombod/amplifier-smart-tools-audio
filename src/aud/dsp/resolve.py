@@ -137,6 +137,48 @@ def _quietest_position(mono: np.ndarray, sr: int, lo_s: float, hi_s: float) -> f
     return best_center / sr
 
 
+def _align_to_zero_crossing(
+    mono: np.ndarray,
+    sr: int,
+    target_s: float,
+    lo_s: float,
+    hi_s: float,
+    *,
+    success_rule: str,
+    fail_reason: str,
+    success_snap_failed: bool = False,
+    success_reason: str | None = None,
+) -> tuple[float | None, str, bool, str | None]:
+    """Run the zero-crossing floor in [lo_s, hi_s] around `target_s` and
+    report the outcome honestly -- the ONE place in this module that
+    handles `_nearest_zero_crossing`'s `None` case.
+
+    Every rule below ends the same way: a bounded, provisional position
+    (the padded position itself for "zero_crossing", the quietest frame
+    for "silence", the lead-in point before an onset for "transient") run
+    through this same floor. If the floor finds nothing, the point is a
+    genuine alignment failure and must be reported as "unaligned" with
+    `snap_failed=True` -- never as whatever rule was requested, and never
+    with `snap_failed=False` while silently keeping the raw candidate.
+    That silent-fallback shape is the one bug this module has now grown
+    three separate instances of (0.6.0's coarse-miss case, "silence"'s
+    failed refinement, "transient"'s failed refinement): routing every
+    call site through this single function makes a fourth instance
+    structurally impossible -- there is no other place left to forget the
+    check.
+
+    Returns `(resolved_s, rule_applied, snap_failed, reason)`, with
+    `resolved_s is None` signalling failure -- the caller substitutes its
+    own `padded_s` (this function does not know it, and "unaligned"
+    always falls back to the raw padded position, never a partial
+    candidate).
+    """
+    found = _nearest_zero_crossing(mono, sr, target_s, lo_s, hi_s)
+    if found is None:
+        return None, "unaligned", True, fail_reason
+    return found, success_rule, success_snap_failed, success_reason
+
+
 def _resolve_one(
     mono: np.ndarray,
     sr: int,
@@ -188,17 +230,40 @@ def _resolve_one(
         return make(padded_s, "unaligned", True, reason)
 
     if snap == "zero_crossing":
-        found = _nearest_zero_crossing(mono, sr, padded_s, lo, hi)
-        if found is None:
-            return make(
-                padded_s, "unaligned", True, f"no zero crossing within {snap_window_ms} ms of the padded position"
-            )
-        return make(found, "zero_crossing", False, None)
+        resolved, rule, failed, reason = _align_to_zero_crossing(
+            mono,
+            sr,
+            padded_s,
+            lo,
+            hi,
+            success_rule="zero_crossing",
+            fail_reason=f"no zero crossing within {snap_window_ms} ms of the padded position",
+        )
+        return make(resolved if resolved is not None else padded_s, rule, failed, reason)
 
     if snap == "silence":
+        # "silence" always finds A coarse candidate -- there is always a
+        # quietest frame in a non-empty window -- so unlike "transient" it
+        # can never fail its own coarse step. But the floor underneath it
+        # (zero-crossing alignment, searched across the full [lo, hi]
+        # window) can still fail: if the whole window never changes sign
+        # (a DC-offset region, or a window entirely on one side of zero),
+        # there is nowhere in it that is actually safe to cut.
         candidate = _quietest_position(mono, sr, lo, hi)
-        refined = _nearest_zero_crossing(mono, sr, candidate, lo, hi)
-        return make(refined if refined is not None else candidate, "silence", False, None)
+        resolved, rule, failed, reason = _align_to_zero_crossing(
+            mono,
+            sr,
+            candidate,
+            lo,
+            hi,
+            success_rule="silence",
+            fail_reason=(
+                f"no zero crossing within {snap_window_ms} ms of the padded position -- the quietest "
+                "position found had none in its own search window either, so the floor under 'silence' "
+                "failed too"
+            ),
+        )
+        return make(resolved if resolved is not None else padded_s, rule, failed, reason)
 
     if snap == "transient":
         candidates = [onset for onset in onsets if lo <= onset <= hi]
@@ -211,9 +276,26 @@ def _resolve_one(
             # (contracts/plan.v1.md) is a promise about the FINAL resolved
             # position, not just the coarse step, so the refinement window
             # stops at the candidate rather than reusing the full [lo, hi]
-            # search window.
-            refined = _nearest_zero_crossing(mono, sr, candidate, lo, candidate)
-            return make(refined if refined is not None else candidate, "transient", False, None)
+            # search window. Widening the search past `candidate` on
+            # failure is not an option either: it could return a position
+            # at or after the onset, which is exactly what this rule
+            # exists to prevent. There is no floor under the floor, so a
+            # failed refinement here is a genuine alignment failure like
+            # every other one in this function.
+            resolved, rule, failed, reason = _align_to_zero_crossing(
+                mono,
+                sr,
+                candidate,
+                lo,
+                candidate,
+                success_rule="transient",
+                fail_reason=(
+                    f"an onset was found within {snap_window_ms} ms of the padded position, but no "
+                    "zero crossing exists in the lead-in window before it -- the floor under "
+                    "'transient' failed too"
+                ),
+            )
+            return make(resolved if resolved is not None else padded_s, rule, failed, reason)
 
         # No onset in the window. Zero crossing is the floor under every
         # rule, not a peer of them (contracts/plan.v1.md#snap): a failed
@@ -229,28 +311,34 @@ def _resolve_one(
         # to protect (the search window never extends past this region's
         # own end), so a miss there is the expected outcome, not a
         # failure. Either way the point still gets the same fallback
-        # alignment; only `snap_failed` differs.
+        # alignment; only `snap_failed` differs -- expressed here as which
+        # (snap_failed, reason) pair is handed to the shared helper for
+        # the success case.
         applies_here = boundary == "end"
         miss_reason = f"no onset within {snap_window_ms} ms of the padded position"
-        found = _nearest_zero_crossing(mono, sr, padded_s, lo, hi)
-        if found is None:
-            reason = (
-                miss_reason
-                if applies_here
-                else (
-                    f"{miss_reason}; not expected at a region's start boundary, "
-                    "and no zero crossing was available either"
-                )
-            )
-            return make(padded_s, "unaligned", True, reason)
         if applies_here:
-            return make(found, "zero_crossing_fallback", True, miss_reason)
-        return make(
-            found,
-            "zero_crossing_fallback",
-            False,
-            f"{miss_reason}; not expected at a region's start boundary, used zero_crossing instead",
+            success_snap_failed, success_reason = True, miss_reason
+            fail_reason = miss_reason
+        else:
+            success_snap_failed, success_reason = (
+                False,
+                f"{miss_reason}; not expected at a region's start boundary, used zero_crossing instead",
+            )
+            fail_reason = (
+                f"{miss_reason}; not expected at a region's start boundary, and no zero crossing was available either"
+            )
+        resolved, rule, failed, reason = _align_to_zero_crossing(
+            mono,
+            sr,
+            padded_s,
+            lo,
+            hi,
+            success_rule="zero_crossing_fallback",
+            success_snap_failed=success_snap_failed,
+            success_reason=success_reason,
+            fail_reason=fail_reason,
         )
+        return make(resolved if resolved is not None else padded_s, rule, failed, reason)
 
     raise ValueError(f"snap must be one of {_SNAP_MODES}, got {snap!r}")
 

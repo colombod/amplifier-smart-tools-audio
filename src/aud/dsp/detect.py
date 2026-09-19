@@ -209,6 +209,18 @@ def detect_transients(
         is normalised to (0, 1] within this call only (see
         contracts/regions.v1.md: comparable within one document, nowhere
         else).
+
+    Suited to real programme material: speech, music, foley, anything with
+    an actual noise floor and genuine onsets, where a real onset arrives as
+    a flux spike far larger than STFT bin-leakage jitter. NOT suited to a
+    continuous, perfectly sustained, unmodulated tone with no noise floor at
+    all -- there, bin-leakage drift alone can clear the adaptive threshold
+    and produce a handful of spurious onsets (measured: up to 3 on a 3-second
+    440 Hz sine at the default sensitivity; see
+    tests/test_dsp_detect.py::test_transients_do_not_swamp_a_realistic_steady_state_background).
+    This is a disclosed limit of a lightweight spectral-flux detector on
+    laboratory-tone input, not a promise of immunity to every input -- see
+    contracts/regions.v1.md's "Not promised".
     """
     mono = _mono_sum(x)
     if sensitivity <= 0:

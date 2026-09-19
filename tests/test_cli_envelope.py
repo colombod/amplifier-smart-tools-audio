@@ -7,6 +7,7 @@ behaves as documented, not just that the library functions it calls do.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -172,6 +173,57 @@ def test_unexpected_exception_is_wrapped_in_error_envelope_not_a_raw_traceback(t
     assert payload["error"]["remedy"]
     # Without --debug/AUD_DEBUG, the raw traceback is not dumped to stderr either.
     assert "Traceback" not in proc.stderr
+
+
+# --- write_audio failures: honest audio_write_error, not internal_error ---
+
+
+def test_invalid_output_subtype_is_an_audio_write_error_not_internal_error(tiny_wav: Path, tmp_path: Path) -> None:
+    """A bad `output_subtype` (here forced via AUD_OUTPUT_SUBTYPE) is a real,
+    provokable `io.write_audio` failure. Before this fix, nothing in
+    aud.lib caught the RuntimeError io.write_audio raises for it, so it
+    fell through to the CLI's `internal_error` catch-all -- telling the
+    caller to file a bug report about their own bad config value.
+    """
+    out_path = tmp_path / "out.wav"
+    env = dict(os.environ)
+    env["AUD_OUTPUT_SUBTYPE"] = "NOT_A_REAL_SUBTYPE"
+
+    plan_proc = _run(["plan"], env=env)
+    assert plan_proc.returncode == 0, plan_proc.stderr
+    proc = _run(["render", str(tiny_wav), str(out_path)], input_text=plan_proc.stdout, env=env)
+
+    assert proc.returncode != 0
+    payload = json.loads(proc.stdout)
+    assert set(payload) == {"error"}
+    assert payload["error"]["code"] == "audio_write_error"
+    assert payload["error"]["code"] != "internal_error"
+    assert "remedy" in payload["error"]
+    assert payload["error"]["remedy"]
+    assert "Traceback" not in proc.stderr
+
+
+def test_unwritable_destination_directory_is_an_audio_write_error(tiny_wav: Path, tmp_path: Path) -> None:
+    """A destination directory this process cannot write to -- provoked
+    directly with chmod, not simulated -- must map the same honest way.
+    """
+    readonly_dir = tmp_path / "readonly"
+    readonly_dir.mkdir(mode=0o555)
+    out_path = readonly_dir / "out.wav"
+    try:
+        plan_proc = _run(["plan"])
+        assert plan_proc.returncode == 0, plan_proc.stderr
+        proc = _run(["render", str(tiny_wav), str(out_path)], input_text=plan_proc.stdout)
+
+        assert proc.returncode != 0
+        payload = json.loads(proc.stdout)
+        assert set(payload) == {"error"}
+        assert payload["error"]["code"] == "audio_write_error"
+        assert payload["error"]["code"] != "internal_error"
+        assert "remedy" in payload["error"]
+        assert payload["error"]["remedy"]
+    finally:
+        readonly_dir.chmod(0o755)  # let tmp_path cleanup remove it
 
 
 def test_debug_flag_puts_the_real_traceback_on_stderr(tiny_wav: Path, tmp_path: Path) -> None:

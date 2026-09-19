@@ -423,8 +423,19 @@ def test_detect_fillers_full_document_survives_the_real_degenerate_word(monkeypa
     here is a placeholder of the right duration/rate -- it drives the call,
     it is not claimed to be the recorded bytes. What is replayed verbatim
     is faster-whisper's real recorded ANSWER, degenerate word included.
+    `source=replay.UNBOUND(...)` makes that gap an explicit, greppable
+    declaration rather than a silent omission.
     """
-    replay.install_faster_whisper_replay(monkeypatch, "speech_long_48000__resampled_16k")
+    replay.install_faster_whisper_replay(
+        monkeypatch,
+        "speech_long_48000__resampled_16k",
+        source=replay.UNBOUND(
+            "the recorded source wav for speech_long_48000 was never shipped (RECORDING.md, "
+            "to keep the fixture directory small); the array driving this call is a zeros "
+            "placeholder of the right duration/rate, not a claim of matching the recorded "
+            "bytes -- only the replayed ANSWER (the real degenerate word) is under test here"
+        ),
+    )
 
     duration_s = 64.563812
     x = np.zeros(int(duration_s * 48000))
@@ -447,26 +458,24 @@ def test_detect_fillers_is_sample_rate_independent_on_two_real_recordings() -> N
     exact same spoken content (RECORDING.md's "_index.json": both
     resampled_16k paths report 2 segments / 21 words / last word end 7.72s,
     identically). Each replay is bound to its own recorded source's exact
-    bytes via `assert_matches_recorded_source` -- this is deliberately NOT
-    testing "similar audio produces the recorded output" (the one trap
-    RECORDING.md warns against), it is testing that two *different*, each
-    individually real and verified, (audio, recording) pairs agree once
-    resampled to 16 kHz.
+    bytes -- `install_faster_whisper_replay`'s required `source=` parameter
+    verifies the sha256 itself now -- this is deliberately NOT testing
+    "similar audio produces the recorded output" (the one trap RECORDING.md
+    warns against), it is testing that two *different*, each individually
+    real and verified, (audio, recording) pairs agree once resampled to
+    16 kHz.
     """
     results: dict[int, list[dict]] = {}
     for sr, recording_name, wav_name in (
         (16000, "speech_short_16000__resampled_16k", "speech_short_16000.wav"),
         (48000, "speech_short_48000__resampled_16k", "speech_short_48000.wav"),
     ):
-        recording = replay.load_recording("faster_whisper", recording_name)
         wav_file = replay.wav_path(wav_name)
-        replay.assert_matches_recorded_source(recording, wav_file)
-
         samples, sample_rate = dsp_io.read_audio(wav_file)
         assert sample_rate == sr
 
         with pytest.MonkeyPatch.context() as monkeypatch:
-            replay.install_faster_whisper_replay(monkeypatch, recording_name)
+            replay.install_faster_whisper_replay(monkeypatch, recording_name, source=wav_file)
             regions, _detection = dsp_speech.detect_fillers(samples, sample_rate)
         results[sr] = regions
 

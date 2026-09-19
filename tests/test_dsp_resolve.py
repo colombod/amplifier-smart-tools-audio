@@ -93,11 +93,17 @@ def test_silence_snap_moves_the_point_into_a_planted_quiet_gap():
 def test_transient_snap_lands_before_the_onset_never_after():
     sr = SR
     seconds = 1.2
-    x = np.full(int(seconds * sr), 1e-5)
     onset_s = 0.50
     onset_i = int(onset_s * sr)
-    tail = _tone(seconds, freq=440.0, sr=sr, amplitude=0.7)[: x.shape[0] - onset_i]
-    x[onset_i:] = tail
+    # Quiet tone before the onset (real zero crossings, so the
+    # zero-crossing floor in the lead-in window has something to find)
+    # jumping to a loud tone at the onset (the "transient" being snapped
+    # to). A flat near-silent lead-in here would never cross zero and
+    # this "happy path" test would -- as it once did -- pass only because
+    # a failed refinement silently kept the raw candidate.
+    quiet = _tone(seconds, freq=440.0, sr=sr, amplitude=0.01)[:onset_i]
+    loud = _tone(seconds, freq=440.0, sr=sr, amplitude=0.7)[onset_i:]
+    x = np.concatenate([quiet, loud])
 
     nominal_s = 0.52  # deliberately placed AFTER the onset
     region = [{"start_s": nominal_s, "end_s": 0.9}]
@@ -147,6 +153,42 @@ def test_snap_with_no_candidate_in_window_keeps_nominal_and_reports_failure():
     assert start_point.rule_applied == "unaligned"
     assert start_point.resolved_s == start_point.padded_s == nominal_s
     assert start_point.reason is not None
+
+
+def test_silence_snap_with_no_zero_crossing_anywhere_reports_failure_honestly():
+    """The latent counterpart to test_snap_with_no_candidate_in_window_...:
+    a constant DC-offset window has a well-defined "quietest position"
+    (every frame has identical RMS, so the coarse search always succeeds)
+    but genuinely never changes sign, so the zero-crossing floor underneath
+    it must fail too. Before the fix, this branch kept the raw, unaligned
+    candidate while still reporting rule_applied="silence" and
+    snap_failed=False -- exactly the "silently did nothing" defect
+    contracts/plan.v1.md#snap warns is worse than a refusal.
+    """
+    sr = SR
+    x = np.full(int(1.0 * sr), 0.3)  # constant positive DC offset: never crosses zero
+    nominal_s = 0.5
+    region = [{"start_s": nominal_s, "end_s": 0.9}]
+
+    points, dropped = resolve_points(
+        x,
+        sr,
+        region,
+        pad_out_ms=0.0,
+        pad_in_ms=0.0,
+        snap="silence",
+        snap_window_ms=20.0,
+    )
+
+    assert dropped == []
+    start_point = points[0]
+    print(f"\n[resolve] silence-no-zero-crossing: {start_point}")
+    assert start_point.rule_applied == "unaligned"
+    assert start_point.rule_applied != "silence"  # the floor did NOT actually run -- must not claim it did
+    assert start_point.snap_failed is True
+    assert start_point.resolved_s == start_point.padded_s == nominal_s
+    assert start_point.reason is not None
+    assert "silence" in start_point.reason
 
 
 def test_transient_snap_at_end_boundary_fails_honestly_when_no_onset_is_in_window():
@@ -209,6 +251,52 @@ def test_transient_snap_at_start_boundary_with_no_onset_is_not_counted_as_a_fail
     # The floor still ran: the resolved position is a real zero crossing,
     # not the raw (unaligned) padded position.
     assert start_point.resolved_s != start_point.padded_s
+
+
+def test_transient_snap_with_onset_found_but_no_zero_crossing_before_it_reports_failure_honestly():
+    """The third instance of the same bug, one level deeper than the two
+    already fixed: the coarse step here does NOT fail -- an onset is
+    genuinely found within the window -- but the zero-crossing floor
+    underneath it, searched only in [lo, candidate] so the final position
+    can never land on or past the onset (contracts/plan.v1.md#snap), never
+    changes sign. Here that's because the material immediately before the
+    onset is a constant DC offset -- it never crosses zero. Before the
+    fix, this branch kept the raw (un-refined) candidate while still
+    reporting rule_applied="transient" and snap_failed=False -- the same
+    "silently did nothing" defect already fixed for the coarse-miss case
+    (0.6.0) and for "silence" (the pass just before this one).
+    """
+    sr = SR
+    onset_s = 0.5
+    onset_i = int(onset_s * sr)
+    x = np.full(int(1.0 * sr), 0.3)  # DC offset everywhere: never crosses zero
+    tail = _tone(1.0, freq=220.0, sr=sr, amplitude=0.7)[: x.shape[0] - onset_i]
+    x[onset_i:] = tail  # only the material AFTER the onset ever crosses zero
+
+    nominal_s = onset_s
+    region = [{"start_s": nominal_s, "end_s": 0.9}]
+
+    points, dropped = resolve_points(
+        x,
+        sr,
+        region,
+        pad_out_ms=0.0,
+        pad_in_ms=0.0,
+        snap="transient",
+        snap_window_ms=20.0,
+        onsets=[onset_s],
+    )
+
+    assert dropped == []
+    start_point = points[0]
+    print(f"\n[resolve] transient-onset-found-refine-fails: {start_point}")
+    assert start_point.rule_applied == "unaligned"
+    assert start_point.rule_applied != "transient"  # the floor did NOT actually run -- must not claim it did
+    assert start_point.snap_failed is True
+    assert start_point.resolved_s == start_point.padded_s == nominal_s
+    assert start_point.reason is not None
+    assert "onset" in start_point.reason
+    assert "transient" in start_point.reason
 
 
 def test_snap_never_crosses_into_a_neighbouring_region():

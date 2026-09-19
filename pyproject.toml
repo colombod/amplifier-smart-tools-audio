@@ -1,6 +1,6 @@
 [project]
 name = "aud"
-version = "0.9.0"
+version = "0.10.0"
 description = "Master and clean up audio: analyse a file, find what is in it (onsets, silences, filler words), then run it through a mastering chain -- cut, strip silence, de-ess, de-verb, EQ, EQ-match to a reference, multiband compression, saturation, controlled reverb, loudness and true-peak limiting. Chainable: every verb appends to a mastering plan and one render applies the whole chain"
 readme = "README.md"
 license = "MIT"

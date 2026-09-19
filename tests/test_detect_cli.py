@@ -184,13 +184,22 @@ def test_detect_fillers_cli_default_vocabulary_is_speechs_filler_words(
     Proved end-to-end through the REAL `dsp.speech.detect_fillers`, with
     only faster-whisper itself replayed (a real recorded transcription,
     tests/replay.py) -- not by monkeypatching `lib.detect_fillers` and
-    inventing its return value. `tiny_wav` drives the call; the recording
-    replayed does not depend on what audio it is handed (see
-    `replay.install_faster_whisper_replay`), so this is free to use any
-    real wav and still proves the CLI -> lib -> dsp.speech vocabulary
-    wiring for real.
+    inventing its return value. `tiny_wav` drives the call, which is NOT
+    the wav that produced `speech_short_16000__raw` -- declared explicitly
+    via `source=replay.UNBOUND(...)` below, because this test only proves
+    CLI -> lib -> dsp.speech vocabulary wiring, not correspondence between
+    the replayed transcript and `tiny_wav`'s content.
     """
-    replay.install_faster_whisper_replay(monkeypatch, "speech_short_16000__raw")
+    replay.install_faster_whisper_replay(
+        monkeypatch,
+        "speech_short_16000__raw",
+        source=replay.UNBOUND(
+            "this test drives the call with `tiny_wav` (an arbitrary DSP fixture), not the "
+            "recorded speech_short_16000 wav -- it proves the CLI's default vocabulary is wired "
+            "through to dsp.speech.FILLER_WORDS, not that the replayed transcript corresponds to "
+            "this audio"
+        ),
+    )
 
     parser = _build_parser()
     args: argparse.Namespace = parser.parse_args(["detect", "fillers", str(tiny_wav)])

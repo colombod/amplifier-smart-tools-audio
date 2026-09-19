@@ -1139,6 +1139,32 @@ def _read_audio(io_module: Any, path: str) -> tuple[Any, int]:
         ) from exc
 
 
+def _write_audio(io_module: Any, path: str, x: Any, sr: int, subtype: str) -> None:
+    """Write audio, mapping io's write failure to a user-facing AudError.
+
+    `io.write_audio` raises a plain `RuntimeError` for any failure `sf.write`
+    itself reports -- a subtype invalid for this container, a destination
+    the process cannot write to, a full disk. None of those is an aud bug
+    (see AudError's docstring), but until this wrapper existed nothing in
+    `aud.lib` caught it, so it fell straight through to the CLI's
+    `internal_error` catch-all -- telling a caller with a full disk to file
+    a bug report about it. `audio_write_error` names the real, external
+    cause and gives an actionable remedy instead.
+    """
+    try:
+        io_module.write_audio(path, x, sr, subtype=subtype)
+    except RuntimeError as exc:
+        raise AudError(
+            code="audio_write_error",
+            message=str(exc),
+            remedy=(
+                f"Check that '{path}' is on a writable filesystem with free space, and that "
+                f"'{subtype}' is a subtype libsndfile can write for this container "
+                "(e.g. PCM_16, PCM_24, FLOAT)."
+            ),
+        ) from exc
+
+
 def read_text_file(path: str) -> str:
     """Read a text file, mapping I/O failures to an AudError.
 
@@ -1237,7 +1263,7 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
             "frequencies fit under this file's Nyquist frequency.",
         ) from exc
     output_subtype = config()["output_subtype"]["value"]
-    io.write_audio(out_path, rendered, sample_rate, subtype=output_subtype)
+    _write_audio(io, out_path, rendered, sample_rate, output_subtype)
     return {"out_path": out_path, "report": report}
 
 
@@ -1484,5 +1510,5 @@ def curve_apply(path: str, curve_path: str, out_path: str) -> dict:
             remedy="Provide a curve JSON with at least 2 finite, strictly ascending [freq_hz, gain_db] "
             "pairs, as produced by 'aud curve extract'.",
         ) from exc
-    io.write_audio(out_path, matched, sample_rate)
+    _write_audio(io, out_path, matched, sample_rate, "PCM_24")
     return {"out_path": out_path}
