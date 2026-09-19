@@ -26,6 +26,14 @@ PLAN_FORMAT = 1
 # after it. And every measurement downstream is a measurement of a duration: loudness targeted
 # over material that is later removed describes a file that does not exist.
 #
+# `gate`/`expand` sit at the FRONT of the repair group, before `dereverb`/`deess`, and -- more
+# importantly -- before `compress`. Compression lifts the noise floor it is handed: it raises
+# quiet material toward its threshold along with everything else, which is backwards for a stage
+# whose entire job is to remove what is quiet. Gating after compression would be gating a noise
+# floor the chain itself had already raised. dereverb/deess are narrowband, surgical repairs that
+# do not materially change the overall noise floor, so gate/expand precede them too -- the
+# surgical repairs then work on material whose dead air is already under control.
+#
 # This list is the executable form of contracts/plan.v1.md's canonical order. If they disagree,
 # one of them is lying to a caller.
 STAGE_ORDER: list[str] = [
@@ -33,6 +41,8 @@ STAGE_ORDER: list[str] = [
     "strip_silence",
     "stretch",
     "pitch",
+    "gate",
+    "expand",
     "dereverb",
     "deess",
     "eq",

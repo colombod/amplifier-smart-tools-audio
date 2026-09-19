@@ -29,6 +29,8 @@ __all__ = ["ALLOWED_STAGES", "advise"]
 # not decisions a loudness/spectral report has any basis to make. Out of
 # scope for advise by design, not oversight -- see SMART_TOOL.md.
 ALLOWED_STAGES: tuple[str, ...] = (
+    "gate",
+    "expand",
     "deess",
     "dereverb",
     "eq",

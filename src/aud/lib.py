@@ -182,6 +182,30 @@ def skill() -> str:
     return render_skill()
 
 
+def preset_list() -> list[dict[str, str]]:
+    """Every named mastering preset, with a one-line description each.
+
+    Presets are documented, real-destination chains, built through the same
+    stage builders (`eq`, `compress`, `deess`, `saturate`, `loudness`,
+    `limit`) every other verb uses -- see aud.presets for the definitions
+    and the reasoning behind each preset's numbers.
+    """
+    from aud.presets import list_presets
+
+    return list_presets()
+
+
+def preset_show(name: str) -> Plan:
+    """Build and return the named preset's plan document, ready to render.
+
+    Raises:
+        AudError: code "unknown_preset" if `name` is not a known preset.
+    """
+    from aud.presets import build_preset
+
+    return build_preset(name)
+
+
 # ---------------------------------------------------------------------------
 # Stage builders -- validate parameters and append to a plan. No DSP here.
 # ---------------------------------------------------------------------------
@@ -375,6 +399,198 @@ def strip_silence(
     return append(plan, "strip_silence", params)
 
 
+_GATE_EXPAND_TIME_FIELDS = ("attack_ms", "hold_ms", "release_ms", "lookahead_ms")
+
+
+def _validate_gate_expand_common(
+    *,
+    attack_ms: float,
+    hold_ms: float,
+    release_ms: float,
+    lookahead_ms: float,
+    sidechain_hpf_hz: float | None,
+    crossovers_hz: list[float] | None,
+) -> list[float]:
+    """Shared validation for `gate` and `expand`'s common parameter set.
+
+    Mirrors `_validate_edit_point_params`'s shape: one shared helper for two
+    stages that take an (almost) identical surface, so the constraints stay
+    identical between them by construction rather than by discipline.
+    """
+    for name, value in zip(_GATE_EXPAND_TIME_FIELDS, (attack_ms, hold_ms, release_ms, lookahead_ms), strict=True):
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0.0:
+            raise AudError(
+                code="bad_param",
+                message=f"{name} must be a finite number >= 0, got {value!r}.",
+                remedy=f"Use a non-negative number of milliseconds for {name}.",
+            )
+    if sidechain_hpf_hz is not None and (not math.isfinite(sidechain_hpf_hz) or sidechain_hpf_hz <= 0.0):
+        raise AudError(
+            code="bad_param",
+            message=f"sidechain_hpf_hz must be null or a finite number > 0, got {sidechain_hpf_hz!r}.",
+            remedy="Use a positive frequency in Hz, e.g. --sidechain-hpf 80, or omit it to disable the sidechain filter.",
+        )
+    crossovers = list(crossovers_hz) if crossovers_hz else []
+    if crossovers:
+        if any(f <= 0 for f in crossovers):
+            raise AudError(
+                code="bad_param",
+                message=f"Crossover frequencies must be positive Hz values, got {crossovers!r}.",
+                remedy="Use positive Hz values, e.g. --bands 200,4000.",
+            )
+        if list(crossovers) != sorted(crossovers) or len(set(crossovers)) != len(crossovers):
+            raise AudError(
+                code="bad_param",
+                message=f"Crossover frequencies must be strictly ascending, got {crossovers!r}.",
+                remedy="Order them low to high with no repeats, e.g. --bands 200,4000.",
+            )
+        if max(crossovers) > _NYQUIST_44100:
+            raise AudError(
+                code="bad_param",
+                message=f"Crossover {max(crossovers)} Hz exceeds Nyquist at 44100 Hz ({_NYQUIST_44100} Hz).",
+                remedy=f"Keep every crossover below {_NYQUIST_44100} Hz.",
+            )
+    return [float(f) for f in crossovers]
+
+
+def gate(
+    plan: Plan,
+    *,
+    threshold_above_floor_db: float = 12.0,
+    threshold_db: float | None = None,
+    range_db: float = 20.0,
+    attack_ms: float = 2.0,
+    hold_ms: float = 50.0,
+    release_ms: float = 150.0,
+    lookahead_ms: float = 3.0,
+    sidechain_hpf_hz: float | None = 80.0,
+    crossovers_hz: list[float] | None = None,
+) -> Plan:
+    """Repair stage: hard noise gate -- below threshold, duck by `range_db`.
+
+    `threshold_above_floor_db` is the primary control (dB above this file's
+    own measured noise floor, the same convention `strip_silence` and
+    'aud detect silence' use); `threshold_db` is an absolute dBFS escape
+    hatch for a caller that already knows one. `range_db` is a duck, not a
+    kill -- see `aud.dsp.gate`'s module docstring for why depth is a
+    parameter rather than silence. `hold_ms` is what prevents the gate
+    chattering open and closed on material that hovers at the threshold.
+    """
+    if not math.isfinite(threshold_above_floor_db) or threshold_above_floor_db < 0.0:
+        raise AudError(
+            code="bad_param",
+            message=f"threshold_above_floor_db must be a finite number >= 0, got {threshold_above_floor_db!r}.",
+            remedy="Use a non-negative number of dB above the measured noise floor, e.g. --threshold 12.",
+        )
+    if threshold_db is not None and not math.isfinite(threshold_db):
+        raise AudError(
+            code="bad_param",
+            message=f"threshold_db must be null or a finite number, got {threshold_db!r}.",
+            remedy="Use a finite dBFS value, e.g. --threshold-abs -40, or omit it to use threshold_above_floor_db.",
+        )
+    if not math.isfinite(range_db) or range_db < 0.0:
+        raise AudError(
+            code="bad_param",
+            message=f"range_db must be a finite number >= 0, got {range_db!r}.",
+            remedy="Use a non-negative number of dB, e.g. --range 20.",
+        )
+    crossovers = _validate_gate_expand_common(
+        attack_ms=attack_ms,
+        hold_ms=hold_ms,
+        release_ms=release_ms,
+        lookahead_ms=lookahead_ms,
+        sidechain_hpf_hz=sidechain_hpf_hz,
+        crossovers_hz=crossovers_hz,
+    )
+    return append(
+        plan,
+        "gate",
+        {
+            "threshold_above_floor_db": threshold_above_floor_db,
+            "threshold_db": threshold_db,
+            "range_db": range_db,
+            "attack_ms": attack_ms,
+            "hold_ms": hold_ms,
+            "release_ms": release_ms,
+            "lookahead_ms": lookahead_ms,
+            "sidechain_hpf_hz": sidechain_hpf_hz,
+            "crossovers_hz": crossovers,
+        },
+    )
+
+
+def expand(
+    plan: Plan,
+    *,
+    threshold_above_floor_db: float = 6.0,
+    threshold_db: float | None = None,
+    ratio: float = 2.0,
+    knee_db: float = 6.0,
+    attack_ms: float = 5.0,
+    hold_ms: float = 50.0,
+    release_ms: float = 150.0,
+    lookahead_ms: float = 3.0,
+    sidechain_hpf_hz: float | None = 80.0,
+    crossovers_hz: list[float] | None = None,
+) -> Plan:
+    """Repair stage: soft-knee downward expander -- the gentle counterpart to `gate`.
+
+    Usually the right first tool for voice material: below threshold, output
+    moves `ratio` dB for every 1 dB the input drops, blended in over
+    `knee_db` around the threshold, rather than `gate`'s hard step. See
+    `aud.dsp.gate`'s module docstring for the shared topology.
+    """
+    if not math.isfinite(threshold_above_floor_db) or threshold_above_floor_db < 0.0:
+        raise AudError(
+            code="bad_param",
+            message=f"threshold_above_floor_db must be a finite number >= 0, got {threshold_above_floor_db!r}.",
+            remedy="Use a non-negative number of dB above the measured noise floor, e.g. --threshold 6.",
+        )
+    if threshold_db is not None and not math.isfinite(threshold_db):
+        raise AudError(
+            code="bad_param",
+            message=f"threshold_db must be null or a finite number, got {threshold_db!r}.",
+            remedy="Use a finite dBFS value, e.g. --threshold-abs -40, or omit it to use threshold_above_floor_db.",
+        )
+    if not math.isfinite(ratio) or ratio < 1.0:
+        raise AudError(
+            code="bad_param",
+            message=f"ratio must be a finite number >= 1.0, got {ratio!r}.",
+            remedy="Use a ratio of 1.0 (no expansion) or greater, e.g. --ratio 2.0. Below 1.0 is upward "
+            "expansion, a different device, and is not supported here.",
+        )
+    if not math.isfinite(knee_db) or knee_db < 0.0:
+        raise AudError(
+            code="bad_param",
+            message=f"knee_db must be a finite number >= 0, got {knee_db!r}.",
+            remedy="Use a non-negative number of dB, e.g. --knee 6.",
+        )
+    crossovers = _validate_gate_expand_common(
+        attack_ms=attack_ms,
+        hold_ms=hold_ms,
+        release_ms=release_ms,
+        lookahead_ms=lookahead_ms,
+        sidechain_hpf_hz=sidechain_hpf_hz,
+        crossovers_hz=crossovers_hz,
+    )
+    return append(
+        plan,
+        "expand",
+        {
+            "threshold_above_floor_db": threshold_above_floor_db,
+            "threshold_db": threshold_db,
+            "ratio": ratio,
+            "knee_db": knee_db,
+            "attack_ms": attack_ms,
+            "hold_ms": hold_ms,
+            "release_ms": release_ms,
+            "lookahead_ms": lookahead_ms,
+            "sidechain_hpf_hz": sidechain_hpf_hz,
+            "crossovers_hz": crossovers,
+        },
+    )
+
+
 def deess(plan: Plan, amount_db: float = 6.0, freq_hz: float = 6500.0) -> Plan:
     """Repair stage: tame sibilance.
 
@@ -419,16 +635,26 @@ def dereverb(plan: Plan, amount_db: float = 6.0) -> Plan:
     return append(plan, "dereverb", {"amount_db": amount_db})
 
 
+_EQ_SHELF_TYPES = ("low", "high")
+
+
 def eq(
     plan: Plan,
     hpf: float | None = None,
     lpf: float | None = None,
     peaks: list[tuple[float, float, float]] | None = None,
+    shelves: list[tuple[str, float, float, float]] | None = None,
 ) -> Plan:
     """Tone stage: parametric EQ.
 
-    `hpf`/`lpf` are high-pass/low-pass corner frequencies in Hz. Each entry
-    in `peaks` is a (freq_hz, gain_db, q) triple; q must be > 0.
+    `hpf`/`lpf` are high-pass/low-pass corner frequencies in Hz -- stored as
+    contracts/plan.v1.md's `hpf_hz`/`lpf_hz`, its documented names for this
+    stage's high-pass/low-pass corners. Each entry in `peaks` is a
+    (freq_hz, gain_db, q) triple, stored as the contract's `{freq_hz,
+    gain_db, q}` objects. Each entry in `shelves` is a (type, freq_hz,
+    gain_db, q) 4-tuple -- `type` is "low" or "high" -- stored as the
+    contract's `{type, freq_hz, gain_db, q}` objects. `q` must be > 0 for
+    both peaks and shelves.
     """
     if hpf is not None and hpf <= 0:
         raise AudError(
@@ -448,7 +674,7 @@ def eq(
             message=f"High-pass frequency {hpf} Hz must be below low-pass frequency {lpf} Hz.",
             remedy="Choose hpf < lpf, e.g. --hpf 40 --lpf 18000.",
         )
-    validated_peaks: list[list[float]] = []
+    validated_peaks: list[dict[str, float]] = []
     for peak in peaks or []:
         if len(peak) != 3:
             raise AudError(
@@ -469,8 +695,49 @@ def eq(
                 message=f"EQ peak Q must be positive, got {q}.",
                 remedy="Use a Q greater than 0, e.g. --peak 3200,-2.5,1.4.",
             )
-        validated_peaks.append([float(peak_freq), float(gain_db), float(q)])
-    return append(plan, "eq", {"hpf": hpf, "lpf": lpf, "peaks": validated_peaks})
+        validated_peaks.append({"freq_hz": float(peak_freq), "gain_db": float(gain_db), "q": float(q)})
+
+    validated_shelves: list[dict[str, Any]] = []
+    for shelf in shelves or []:
+        if len(shelf) != 4:
+            raise AudError(
+                code="bad_param",
+                message=f"EQ shelf {shelf!r} is not a (type, freq_hz, gain_db, q) 4-tuple.",
+                remedy="Use type,freq,gain_db,q, e.g. --shelf low,80,3.0,0.7.",
+            )
+        shelf_type, shelf_freq, shelf_gain_db, shelf_q = shelf
+        if shelf_type not in _EQ_SHELF_TYPES:
+            raise AudError(
+                code="bad_param",
+                message=f"EQ shelf type must be one of {_EQ_SHELF_TYPES}, got {shelf_type!r}.",
+                remedy="Use 'low' or 'high', e.g. --shelf low,80,3.0,0.7.",
+            )
+        if shelf_freq <= 0:
+            raise AudError(
+                code="bad_param",
+                message=f"EQ shelf frequency must be positive, got {shelf_freq}.",
+                remedy="Use a frequency in Hz greater than 0, e.g. --shelf low,80,3.0,0.7.",
+            )
+        if shelf_q <= 0:
+            raise AudError(
+                code="bad_param",
+                message=f"EQ shelf Q must be positive, got {shelf_q}.",
+                remedy="Use a Q greater than 0, e.g. --shelf low,80,3.0,0.7.",
+            )
+        validated_shelves.append(
+            {
+                "type": shelf_type,
+                "freq_hz": float(shelf_freq),
+                "gain_db": float(shelf_gain_db),
+                "q": float(shelf_q),
+            }
+        )
+
+    return append(
+        plan,
+        "eq",
+        {"hpf_hz": hpf, "lpf_hz": lpf, "peaks": validated_peaks, "shelves": validated_shelves},
+    )
 
 
 _EQ_MATCH_MIN_POINTS = 2
@@ -633,11 +900,11 @@ def compress(plan: Plan, bands: list[float], ratio: float = 2.5) -> Plan:
             message=f"Crossover {max(bands)} Hz exceeds Nyquist at 44100 Hz ({_NYQUIST_44100} Hz).",
             remedy=f"Keep every crossover below {_NYQUIST_44100} Hz.",
         )
-    if ratio <= 0:
+    if not math.isfinite(ratio) or ratio < 1.0:
         raise AudError(
             code="bad_param",
-            message=f"Ratio must be positive, got {ratio}.",
-            remedy="Use a ratio greater than 0, e.g. --ratio 2.5.",
+            message=f"Ratio must be a finite number >= 1.0, got {ratio}.",
+            remedy="Use a ratio of 1.0 or greater; 1.0 means no compression in that band, e.g. --ratio 2.5.",
         )
     crossovers_hz = [float(band) for band in bands]
     band_settings = [
@@ -655,12 +922,19 @@ def compress(plan: Plan, bands: list[float], ratio: float = 2.5) -> Plan:
 
 
 def saturate(plan: Plan, drive: float = 1.0, mix: float = 0.25) -> Plan:
-    """Character stage: harmonic saturation. `drive` > 0, `mix` in [0, 1]."""
-    if drive <= 0:
+    """Character stage: harmonic saturation. `drive` >= 0, `mix` in [0, 1].
+
+    contracts/plan.v1.md's `saturate.drive` constraint is `>= 0` (0.0
+    disables the shaping entirely); this CLI/library default of 0.25 for
+    `mix` is a convenience -- always written explicitly into the plan, so
+    it does not depend on (and does not change) the document's own default
+    of 1.0 for an omitted `mix` field.
+    """
+    if not math.isfinite(drive) or drive < 0.0:
         raise AudError(
             code="bad_param",
-            message=f"Drive must be positive, got {drive}.",
-            remedy="Use a drive greater than 0, e.g. --drive 1.5.",
+            message=f"Drive must be a finite number >= 0, got {drive}.",
+            remedy="Use a drive of 0 or greater, e.g. --drive 1.5. 0 disables the saturator's shaping.",
         )
     if not (0.0 <= mix <= 1.0):
         raise AudError(
@@ -730,18 +1004,30 @@ def pitch(plan: Plan, semitones: float = 0.0) -> Plan:
 
 
 def loudness(plan: Plan, target_lufs: float = -14.0) -> Plan:
-    """Set the loudness stage's target. `target_lufs` in [-60, 0]."""
-    if not (-60.0 <= target_lufs <= 0.0):
+    """Set the loudness stage's target.
+
+    `target_lufs` must be a finite number < 0.0 (contracts/plan.v1.md's
+    `loudness.target_lufs` constraint exactly -- no lower bound is
+    documented, so none is enforced here beyond finiteness).
+    """
+    if not math.isfinite(target_lufs) or target_lufs >= 0.0:
         raise AudError(
             code="bad_param",
-            message=f"Target loudness must be between -60 and 0 LUFS, got {target_lufs}.",
-            remedy="Use a target in that range, e.g. --target -14.",
+            message=f"Target loudness must be a finite number < 0 LUFS, got {target_lufs}.",
+            remedy="Use a negative target in LUFS, e.g. --target -14.",
         )
     return append(plan, "loudness", {"target_lufs": target_lufs})
 
 
 def limit(plan: Plan, ceiling_dbtp: float = -1.0) -> Plan:
-    """Set the true-peak brickwall ceiling. `ceiling_dbtp` must not exceed 0.0."""
+    """Set the true-peak brickwall ceiling. `ceiling_dbtp` must not exceed 0.0.
+
+    This CLI/library shorthand only exposes `ceiling_dbtp`; contracts/plan.v1.md
+    also documents `lookahead_ms` (default 5.0), `release_ms` (default 50.0)
+    and `oversample` (one of 1/2/4/8, default 4) for this stage -- a plan
+    document written by hand may set them directly, and the render engine
+    applies the contract's own defaults for any of them left unset.
+    """
     if ceiling_dbtp > 0.0:
         raise AudError(
             code="bad_param",

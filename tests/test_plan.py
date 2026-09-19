@@ -50,6 +50,8 @@ def test_stage_order_is_the_canonical_mastering_chain() -> None:
         "strip_silence",
         "stretch",
         "pitch",
+        "gate",
+        "expand",
         "dereverb",
         "deess",
         "eq",

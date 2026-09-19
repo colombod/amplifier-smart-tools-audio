@@ -38,11 +38,10 @@ def test_apply_plan_runs_eq_compress_loudness_limit_end_to_end_with_real_numbers
         _Stage(
             "eq",
             {
-                "hpf": 40.0,
-                "lpf": None,
-                "peaks": [[3000.0, -2.0, 1.4]],
-                "low_shelf": None,
-                "high_shelf": [12000.0, 2.0, 0.7],
+                "hpf_hz": 40.0,
+                "lpf_hz": None,
+                "peaks": [{"freq_hz": 3000.0, "gain_db": -2.0, "q": 1.4}],
+                "shelves": [{"type": "high", "freq_hz": 12000.0, "gain_db": 2.0, "q": 0.7}],
             },
         ),
         _Stage(
@@ -70,6 +69,8 @@ def test_apply_plan_runs_eq_compress_loudness_limit_end_to_end_with_real_numbers
     print(f"\n[engine] eq: {eq_report}")
     assert eq_report["hpf_hz"] == 40.0
     assert len(eq_report["peaks_applied"]) == 1
+    assert len(eq_report["shelves_applied"]) == 1
+    assert eq_report["shelves_applied"][0]["type"] == "high"
     assert isinstance(eq_report["sample_peak_dbfs_before"], float)
     assert isinstance(eq_report["sample_peak_dbfs_after"], float)
 

@@ -33,7 +33,7 @@ from pathlib import Path
 
 import pytest
 
-from aud.cli import PLAN_OUTPUT_VERBS, REGIONS_OUTPUT_VERBS, registered_verbs
+from aud.cli import registered_verbs
 from aud.verbdoc import VERB_DOCS
 
 # Placeholder filenames verbdoc.py's prose uses, e.g. "in.wav", "out.wav",
@@ -183,16 +183,18 @@ def test_documented_example_parses_and_returns_a_clean_envelope(
             f"'aud {command}' is presented as correct usage in the verb's own "
             f"--help, but was rejected as a usage error: {error!r}"
         )
-    elif verb in PLAN_OUTPUT_VERBS:
-        # 'plan' and every stage verb print the plan document itself, raw
-        # and unwrapped, on success -- see cli.py's module docstring.
-        assert isinstance(payload, dict)
-        assert "stages" in payload
-    elif verb in REGIONS_OUTPUT_VERBS:
-        # 'detect' prints a regions document itself, raw and unwrapped, on
-        # success -- see contracts/regions.v1.md and cli.py's module docstring.
-        assert isinstance(payload, dict)
-        assert "regions" in payload
     else:
+        # 'plan' and every stage verb print the plan document itself, raw
+        # and unwrapped, on success (cli.py's module docstring); 'detect'
+        # prints a regions document the same way (contracts/regions.v1.md);
+        # everything else gets the normal {"result": ...} envelope. This is
+        # a shape check rather than a `verb in PLAN_OUTPUT_VERBS` lookup
+        # because `preset` documents TWO examples with two different
+        # output shapes ('--list' is a wrapped result, 'show NAME' is a
+        # raw plan) -- a single verb name does not determine a single
+        # output shape here the way it does for every other verb.
         assert isinstance(payload, dict)
-        assert "result" in payload
+        assert "stages" in payload or "regions" in payload or "result" in payload, (
+            f"'aud {command}' succeeded but its payload has none of the expected shapes "
+            f"(stages/regions/result): {payload!r}"
+        )

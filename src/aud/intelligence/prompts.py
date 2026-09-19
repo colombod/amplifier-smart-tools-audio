@@ -21,17 +21,28 @@ _STAGE_REFERENCE = """\
 Available stages and their exact JSON parameter shapes -- only these eight;
 no others exist for this decision:
 
+  gate      {"threshold_above_floor_db": float >= 0, "range_db": float >= 0,
+             "hold_ms": float >= 0}
+  expand    {"threshold_above_floor_db": float >= 0, "ratio": float >= 1.0,
+             "knee_db": float >= 0}
   deess     {"amount_db": float >= 0, "freq_hz": float > 0}
   dereverb  {"amount_db": float >= 0}
   eq        {"hpf": float > 0 or null, "lpf": float > 0 or null,
              "peaks": [[freq_hz, gain_db, q], ...] or null}
   compress  {"bands": [ascending crossover Hz, at least one],
-             "ratio": float > 0}
-  saturate  {"drive": float > 0, "mix": float in [0, 1]}
+             "ratio": float >= 1.0}
+  saturate  {"drive": float >= 0, "mix": float in [0, 1]}
   reverb    {"amount": float in [0, 1], "decay": float > 0,
              "predelay_ms": float >= 0}
-  loudness  {"target_lufs": float in [-60, 0]}
+  loudness  {"target_lufs": float < 0}
   limit     {"ceiling_dbtp": float <= 0.0}
+
+`gate` and `expand` work on the QUIET end and are the right answer to an
+audible noise floor between phrases. `expand` is gentler and usually correct
+for a voice; `gate` is for harder cases. Both take their threshold RELATIVE
+to the measured noise floor, so read `noise_floor_dbfs` from the report --
+a larger `threshold_above_floor_db` gates more aggressively. Neither belongs
+in a chain whose noise floor is already low; say so rather than adding one.
 """
 
 
@@ -62,7 +73,16 @@ def system_prompt() -> str:
         "reaches the requested target and ceiling, unless the measurements "
         "say it is already there.\n"
         "- If a stage would do nothing useful for this file, leave it out "
-        "entirely rather than including it with a null-ish/no-op parameter."
+        "entirely rather than including it with a null-ish/no-op parameter.\n"
+        "- CHECK THE NOISE FLOOR BEFORE ANYTHING ELSE, because every later "
+        "stage makes it worse: compression and loudness both LIFT a noise "
+        "floor, so hiss or room tone that was tolerable in the source is "
+        "audible in the master. Compare 'noise_floor_dbfs' against "
+        "'integrated_lufs'. Roughly 40 dB or more of separation is a clean "
+        "recording -- do not gate it. Under about 25 dB is an audible floor "
+        "that the chain is about to amplify: reach for 'expand' (gentler, "
+        "usually right for a voice) or 'gate' (harder cases), and cite the "
+        "two numbers and their difference in your reason."
     )
 
 

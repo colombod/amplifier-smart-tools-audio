@@ -301,6 +301,112 @@ Worked example -- trim the pauses without chopping the start of a word:
   onset lies within 60 ms of where the blade would land, move it to just
   before that onset rather than through it.
 """,
+    "gate": """\
+gate -- repair stage: hard noise gate
+
+What it does:
+  Appends a gate stage to the plan on stdin. At render time, whenever the
+  signal drops below --threshold it is ducked by --range dB; at or above
+  threshold it is untouched. Unlike a static effect this only engages where
+  the file is actually quiet.
+
+When to reach for it:
+  Room tone between phrases, mic hiss, HVAC rumble, a breath in the wrong
+  place -- material that should be well below the programme, not merely
+  attenuated a little. For a gentler, proportional treatment (usually the
+  better first choice for voice), reach for 'aud expand' instead.
+
+The threshold is relative, on purpose:
+  --threshold is dB ABOVE this file's MEASURED noise floor, not an absolute
+  dBFS level -- see 'aud detect --help' for why a fixed number is wrong for
+  every recording but the one it was tuned on. --threshold-abs is an
+  absolute dBFS escape hatch for a caller that already knows one; when
+  given, it overrides --threshold entirely.
+
+Why --range, not silence:
+  A gate that slams to digital black is more noticeable than the noise it
+  removed. --range is a duck (default 20 dB), not a kill; 0 dB disables
+  the stage, a very large value approaches a hard mute.
+
+Why --hold matters:
+  Material hovering right at the threshold will open and close many times
+  a second without it (chatter) -- the single most recognisable way a gate
+  sounds broken. --hold keeps the gate held open for that long after it was
+  last triggered, before --release is allowed to start closing it.
+
+Multiband, and a sidechain highpass:
+  --bands splits into Linkwitz-Riley bands (ascending crossover
+  frequencies) and gates each independently, for the same reason
+  'aud compress' does: full-band, a signal loud in one band and at the
+  noise floor in another either gates the wrong thing or nothing at all.
+  --sidechain-hpf (default 80 Hz) highpasses only the LEVEL DETECTOR, not
+  the signal itself, so low-frequency rumble cannot hold the gate open for
+  content that, once the rumble is filtered out, is not actually there.
+
+Parameters:
+  --threshold FLOAT       dB above the measured noise floor. Default 12.0.
+  --threshold-abs FLOAT   Absolute dBFS threshold; overrides --threshold
+                          when given. Default: unset.
+  --range FLOAT           Maximum attenuation below threshold, dB, >= 0.
+                          Default 20.0.
+  --attack FLOAT          Time to open once triggered, ms, >= 0. Default 2.0.
+  --hold FLOAT            Minimum time held open before release may begin,
+                          ms, >= 0. Default 50.0.
+  --release FLOAT         Time to close once hold expires, ms, >= 0.
+                          Default 150.0.
+  --lookahead FLOAT       How far ahead the detector looks so an onset
+                          survives, ms, >= 0. Default 3.0.
+  --sidechain-hpf FLOAT   Highpass corner for the level detector only, Hz.
+                          Default 80.0.
+  --bands F1,F2,...       Ascending crossover frequencies, Hz. Default: full-band.
+
+Example:
+  aud plan | aud gate --threshold 12 --range 20 | aud render in.wav out.wav
+""",
+    "expand": """\
+expand -- repair stage: soft-knee downward expander
+
+What it does:
+  Appends an expand stage to the plan on stdin. At render time, material
+  below --threshold is attenuated proportionally: output moves --ratio dB
+  for every 1 dB the input drops, blended in over --knee dB around the
+  threshold -- gentler than 'aud gate''s hard step, and usually the better
+  first choice for voice material.
+
+When to reach for it:
+  Taming background noise and room tone without a hard on/off character.
+  Reach for 'aud gate' instead when a harder, more decisive cut is wanted.
+
+Parameters shared with 'aud gate':
+  --threshold, --threshold-abs, --attack, --hold, --release, --lookahead,
+  --sidechain-hpf, --bands all mean exactly what they mean there -- see
+  'aud gate --help' for the full explanation of the relative threshold,
+  why --hold prevents chatter, multiband splitting and the sidechain
+  highpass.
+
+Parameters:
+  --threshold FLOAT       dB above the measured noise floor. Default 6.0.
+  --threshold-abs FLOAT   Absolute dBFS threshold; overrides --threshold
+                          when given. Default: unset.
+  --ratio FLOAT           Expansion ratio, >= 1.0. 1.0 is no expansion; 2.0
+                          means output moves 2 dB per 1 dB input drop below
+                          threshold. Default 2.0.
+  --knee FLOAT            Soft-knee width around the threshold, dB, >= 0.
+                          Default 6.0.
+  --attack FLOAT          Time to open once triggered, ms, >= 0. Default 5.0.
+  --hold FLOAT            Minimum time held open before release may begin,
+                          ms, >= 0. Default 50.0.
+  --release FLOAT         Time to move toward the target once hold expires,
+                          ms, >= 0. Default 150.0.
+  --lookahead FLOAT       How far ahead the detector looks so an onset
+                          survives, ms, >= 0. Default 3.0.
+  --sidechain-hpf FLOAT   Highpass corner for the level detector only, Hz.
+                          Default 80.0.
+  --bands F1,F2,...       Ascending crossover frequencies, Hz. Default: full-band.
+
+Example:
+  aud plan | aud expand --threshold 6 --ratio 2 | aud render in.wav out.wav
+""",
     "deess": """\
 deess -- repair stage: tame harsh sibilance
 
@@ -347,22 +453,27 @@ eq -- tone stage: parametric equalization
 
 What it does:
   Appends a parametric EQ stage to the plan on stdin: an optional
-  high-pass corner, an optional low-pass corner, and any number of peaking
-  bands (repeat --peak for each one).
+  high-pass corner, an optional low-pass corner, any number of peaking
+  bands (repeat --peak for each one), and any number of shelving bands
+  (repeat --shelf for each one).
 
 When to reach for it:
-  "Tighten the low end" (--hpf), "roll off the hiss" (--lpf), or correcting
-  a specific frequency problem with a peaking band.
+  "Tighten the low end" (--hpf), "roll off the hiss" (--lpf), correcting a
+  specific frequency problem with a peaking band, or a broad tonal tilt
+  with a shelf (--shelf).
 
 Parameters:
-  --hpf FLOAT           High-pass corner frequency in Hz. Must be > 0, and
-                        below --lpf if both are given.
-  --lpf FLOAT           Low-pass corner frequency in Hz. Must be > 0.
-  --peak FREQ,GAIN,Q    A peaking band as freq_hz,gain_db,q. Q must be > 0.
-                        Repeatable.
+  --hpf FLOAT              High-pass corner frequency in Hz. Must be > 0,
+                           and below --lpf if both are given.
+  --lpf FLOAT              Low-pass corner frequency in Hz. Must be > 0.
+  --peak FREQ,GAIN,Q       A peaking band as freq_hz,gain_db,q. Q must be
+                           > 0. Repeatable.
+  --shelf TYPE,FREQ,GAIN,Q A shelving band as type,freq_hz,gain_db,q.
+                           TYPE is 'low' or 'high'; Q must be > 0.
+                           Repeatable.
 
 Example:
-  aud plan | aud eq --hpf 40 --peak 3200,-2.5,1.4 --peak 120,1.5,0.8 | aud render in.wav out.wav
+  aud plan | aud eq --hpf 40 --peak 3200,-2.5,1.4 --shelf low,80,3.0,0.7 | aud render in.wav out.wav
 """,
     "eq-match": """\
 eq-match -- tone stage: match a reference's tonal balance
@@ -434,7 +545,8 @@ When to reach for it:
 
 Parameters:
   --bands F1,F2,...   Ascending crossover frequencies in Hz. Required.
-  --ratio FLOAT       Compression ratio per band, > 0. Default 2.5.
+  --ratio FLOAT       Compression ratio per band, >= 1.0 (1.0 is no
+                      compression in that band). Default 2.5.
 
 Example:
   aud plan | aud compress --bands 120,900,5500 --ratio 2.5 | aud render in.wav out.wav
@@ -451,7 +563,8 @@ When to reach for it:
   thin or sterile.
 
 Parameters:
-  --drive FLOAT   Saturation drive, > 0. Higher is more distortion. Default 1.0.
+  --drive FLOAT   Saturation drive, >= 0. Higher is more distortion; 0
+                  disables the shaping. Default 1.0.
   --mix FLOAT     Wet/dry blend, 0.0-1.0. Default 0.25.
 
 Example:
@@ -519,7 +632,7 @@ When to reach for it:
   each other".
 
 Parameters:
-  --target FLOAT   Target integrated loudness in LUFS, -60 to 0. Default -14.0.
+  --target FLOAT   Target integrated loudness in LUFS, must be < 0. Default -14.0.
 
 Example:
   aud plan | aud loudness --target -14 | aud limit --ceiling -1.0 | aud render in.wav out.wav
@@ -537,6 +650,11 @@ When to reach for it:
 
 Parameters:
   --ceiling FLOAT   True-peak ceiling in dBTP, must be <= 0.0. Default -1.0.
+
+  Advanced (plan-document only, not exposed as CLI flags -- see
+  contracts/plan.v1.md#limit): lookahead_ms (default 5.0), release_ms
+  (default 50.0), oversample (one of 1/2/4/8, default 4). A hand-written
+  plan may set these directly.
 
 Example:
   aud plan | aud loudness --target -14 | aud limit --ceiling -1.0 | aud render in.wav out.wav
@@ -585,26 +703,33 @@ Example:
 preset -- named chains for common destinations
 
 What it does:
-  Named, pre-built mastering chains for common destinations (e.g. podcast
-  hosting, streaming platforms) that would otherwise be built by hand with
-  plan/deess/eq/compress/loudness/limit.
+  Named, pre-built mastering chains for common destinations (podcast
+  hosting, music streaming, broadcast, voiceover) that would otherwise be
+  built by hand with plan/eq/compress/deess/saturate/loudness/limit. Every
+  preset is built through those same stage builders, so it is validated
+  exactly like a hand-built chain -- there is no separate, preset-only
+  parameter path.
 
-    preset --list       List the available preset names.
-    preset show NAME    Print the named preset's chain (a plan document).
+    preset --list       List the available preset names, each with a
+                        one-line description naming the loudness
+                        convention it targets.
+    preset show NAME    Print the named preset's chain, as a plan
+                        document, raw on stdout -- unwrapped, like every
+                        stage verb, so it pipes straight into 'render'.
 
-Status:
-  Not yet built in this release: the flags above parse, and the verb
-  returns {"error": {"code": "not_implemented", ...}}. Every deterministic
-  verb a preset would chain together already works standalone; use them
-  directly until presets land.
+When to reach for it:
+  "Master this for podcast hosting" or "get this ready for streaming"
+  without hand-assembling the chain and picking numbers yourself.
 
 Parameters:
-  --list          List the available preset names.
-  show NAME       Print the named preset's chain.
+  --list          List the available preset names and descriptions.
+  show NAME       Print the named preset's chain. NAME is one of the
+                  names 'preset --list' reports (e.g. 'podcast',
+                  'music-streaming', 'broadcast', 'voiceover').
 
 Example:
-  aud preset --list                                  # (planned)
-  aud preset show podcast | aud render in.wav out.wav # (planned)
+  aud preset --list
+  aud preset show podcast | aud render in.wav out.wav
 """,
     "check": """\
 check -- report what this host has installed and can reach

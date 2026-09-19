@@ -124,10 +124,19 @@ class AnthropicBackend:
             "content-type": "application/json",
         }
         data = _post_json("https://api.anthropic.com/v1/messages", headers, body, provider=self.provider)
+        # `content` is a LIST OF BLOCKS and the text is not always first. A
+        # reasoning-capable model returns a `thinking` block ahead of it, so
+        # `content[0]["text"]` raises KeyError and every such model looks like
+        # a malformed response. Found by calling claude-sonnet-5 for real --
+        # no fake backend could have surfaced it. Take the first text block.
         try:
-            return data["content"][0]["text"]
-        except (KeyError, IndexError, TypeError) as exc:
+            blocks = data["content"]
+            for block in blocks:
+                if block.get("type") == "text" and isinstance(block.get("text"), str):
+                    return block["text"]
+        except (KeyError, TypeError) as exc:
             raise _bad_shape(self.provider, data) from exc
+        raise _bad_shape(self.provider, data)
 
 
 class OpenAIBackend:

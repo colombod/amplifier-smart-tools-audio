@@ -5,14 +5,15 @@ function via a registry, and builds a report that is specific enough to be
 useful after a render: gain applied, gain reduction per band, true peak
 before and after, etc. -- not just "eq: done".
 
-Thirteen stages are implemented in this module: cut, strip_silence,
-dereverb, deess, eq, eq_match, compress, saturate, reverb, stretch, pitch,
-loudness, limit -- every stage the canonical order (contracts/plan.v1.md)
-names. `apply_plan` does not special-case stage names -- ANY stage not in
-the registry raises `NotImplementedStageError` (a `ValueError` subclass), so
-the caller always gets an honest "not implemented yet" rather than a
-silent no-op or a confusing KeyError. aud.lib maps that exception to a
-`not_implemented` AudError; it is not an internal aud bug.
+Fifteen stages are implemented in this module: cut, strip_silence, gate,
+expand, dereverb, deess, eq, eq_match, compress, saturate, reverb, stretch,
+pitch, loudness, limit -- every stage the canonical order
+(contracts/plan.v1.md) names. `apply_plan` does not special-case stage
+names -- ANY stage not in the registry raises `NotImplementedStageError` (a
+`ValueError` subclass), so the caller always gets an honest "not
+implemented yet" rather than a silent no-op or a confusing KeyError.
+aud.lib maps that exception to a `not_implemented` AudError; it is not an
+internal aud bug.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from aud.dsp import dereverb as _dereverb
 from aud.dsp import dynamics, eqmatch, limiter, loudness, reverb, saturation, timepitch
 from aud.dsp import edit as _edit
 from aud.dsp import filters as _filters
+from aud.dsp import gate as _gate
 from aud.dsp import resolve as _resolve
 from aud.schemas import NotImplementedStageError
 
@@ -202,6 +204,41 @@ def _apply_deess(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.nda
     }
 
 
+def _apply_gate(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
+    y, stats = _gate.gate(
+        x,
+        sr,
+        threshold_above_floor_db=params.get("threshold_above_floor_db", 12.0),
+        threshold_db=params.get("threshold_db"),
+        range_db=params.get("range_db", 20.0),
+        attack_ms=params.get("attack_ms", 2.0),
+        hold_ms=params.get("hold_ms", 50.0),
+        release_ms=params.get("release_ms", 150.0),
+        crossovers_hz=params.get("crossovers_hz") or None,
+        lookahead_ms=params.get("lookahead_ms", 3.0),
+        sidechain_hpf_hz=params.get("sidechain_hpf_hz", 80.0),
+    )
+    return y, stats
+
+
+def _apply_expand(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
+    y, stats = _gate.expand(
+        x,
+        sr,
+        threshold_above_floor_db=params.get("threshold_above_floor_db", 6.0),
+        threshold_db=params.get("threshold_db"),
+        ratio=params.get("ratio", 2.0),
+        knee_db=params.get("knee_db", 6.0),
+        attack_ms=params.get("attack_ms", 5.0),
+        hold_ms=params.get("hold_ms", 50.0),
+        release_ms=params.get("release_ms", 150.0),
+        crossovers_hz=params.get("crossovers_hz") or None,
+        lookahead_ms=params.get("lookahead_ms", 3.0),
+        sidechain_hpf_hz=params.get("sidechain_hpf_hz", 80.0),
+    )
+    return y, stats
+
+
 def _apply_dereverb(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
     amount_db = params.get("amount_db", 6.0)
     y, dsp_stats = _dereverb.dereverb(x, sr, amount_db=amount_db)
@@ -217,38 +254,43 @@ def _apply_dereverb(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.
 
 
 def _apply_eq(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
+    # Field names match contracts/plan.v1.md's "eq" stage exactly: hpf_hz/
+    # lpf_hz for the two corners, peaks/shelves as arrays of objects
+    # ({"freq_hz", "gain_db", "q"} and {"type", "freq_hz", "gain_db", "q"}
+    # respectively) -- not the raw triples/singular low_shelf/high_shelf
+    # keys this handler used to read, which no hand-written,
+    # contract-conformant plan could ever produce.
     before = _peak_dbfs(x)
     y = x
     peaks_applied = []
 
-    hpf = params.get("hpf")
-    if hpf:
-        y = _filters.apply_sos(y, _filters.highpass(sr, hpf))
+    hpf_hz = params.get("hpf_hz")
+    if hpf_hz:
+        y = _filters.apply_sos(y, _filters.highpass(sr, hpf_hz))
 
-    lpf = params.get("lpf")
-    if lpf:
-        y = _filters.apply_sos(y, _filters.lowpass(sr, lpf))
+    lpf_hz = params.get("lpf_hz")
+    if lpf_hz:
+        y = _filters.apply_sos(y, _filters.lowpass(sr, lpf_hz))
 
-    for f, gain_db, q in params.get("peaks") or []:
+    for peak in params.get("peaks") or []:
+        f, gain_db, q = peak["freq_hz"], peak["gain_db"], peak["q"]
         y = _filters.apply_sos(y, _filters.peaking(sr, f, gain_db, q))
-        peaks_applied.append({"f": f, "gain_db": gain_db, "q": q})
+        peaks_applied.append({"freq_hz": f, "gain_db": gain_db, "q": q})
 
-    low_shelf = params.get("low_shelf")
-    if low_shelf:
-        f, gain_db, q = low_shelf
-        y = _filters.apply_sos(y, _filters.low_shelf(sr, f, gain_db, q))
-
-    high_shelf = params.get("high_shelf")
-    if high_shelf:
-        f, gain_db, q = high_shelf
-        y = _filters.apply_sos(y, _filters.high_shelf(sr, f, gain_db, q))
+    shelves_applied = []
+    for shelf in params.get("shelves") or []:
+        shelf_type, f, gain_db, q = shelf["type"], shelf["freq_hz"], shelf["gain_db"], shelf["q"]
+        if shelf_type == "low":
+            y = _filters.apply_sos(y, _filters.low_shelf(sr, f, gain_db, q))
+        else:
+            y = _filters.apply_sos(y, _filters.high_shelf(sr, f, gain_db, q))
+        shelves_applied.append({"type": shelf_type, "freq_hz": f, "gain_db": gain_db, "q": q})
 
     return y, {
-        "hpf_hz": hpf,
-        "lpf_hz": lpf,
+        "hpf_hz": hpf_hz,
+        "lpf_hz": lpf_hz,
         "peaks_applied": peaks_applied,
-        "low_shelf_applied": low_shelf,
-        "high_shelf_applied": high_shelf,
+        "shelves_applied": shelves_applied,
         "sample_peak_dbfs_before": before,
         "sample_peak_dbfs_after": _peak_dbfs(y),
     }
@@ -285,15 +327,43 @@ def _apply_eq_match(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.
     }
 
 
+# Per-field defaults for a "compress" band object, matching
+# contracts/plan.v1.md's documented band defaults exactly. `dynamics.
+# BandParams`'s own dataclass defaults (threshold_db=-18.0, attack_ms=10.0,
+# release_ms=120.0, ...) are tuned for that module's own tests, not this
+# contract -- so a hand-written plan band that omits a field must not
+# silently pick up dynamics.py's defaults instead of the ones
+# contracts/plan.v1.md promises. Merged under any band dict before
+# `BandParams` is constructed; a band dict's own explicit values win.
+_COMPRESS_BAND_DEFAULTS: dict[str, float] = {
+    "threshold_db": -24.0,
+    "ratio": 2.0,
+    "attack_ms": 20.0,
+    "release_ms": 180.0,
+    "knee_db": 6.0,
+    "makeup_db": 0.0,
+}
+
+
 def _apply_compress(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
     before = _peak_dbfs(x)
     # Field names match contracts/plan.v1.md's "compress" stage exactly:
     # crossover frequencies under crossovers_hz, per-band settings under
     # bands (one entry per len(crossovers_hz) + 1 band).
     crossovers_hz = list(params["crossovers_hz"])
-    bands = [dynamics.BandParams(**band) for band in params["bands"]]
+    bands = [dynamics.BandParams(**{**_COMPRESS_BAND_DEFAULTS, **band}) for band in params["bands"]]
 
-    y, stats = dynamics.multiband_compress(x, sr, crossovers_hz, bands)
+    if crossovers_hz:
+        y, stats = dynamics.multiband_compress(x, sr, crossovers_hz, bands)
+    else:
+        # contracts/plan.v1.md: "N crossovers produce N + 1 bands; [] is
+        # single-band" -- a hand-written plan may legitimately render with
+        # zero crossovers. crossover.split() itself refuses an empty list
+        # (it always needs at least one frequency to split at), so the
+        # genuinely single-band case is compressed directly rather than
+        # routed through the splitter/recombiner.
+        band_y, band_stats = dynamics.compress(x, sr, bands[0])
+        y, stats = band_y, {"bands": [band_stats]}
 
     band_reports = []
     for i, (band_params, band_stats) in enumerate(zip(bands, stats["bands"], strict=True)):
@@ -406,9 +476,16 @@ def _apply_loudness(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.
 
 
 def _apply_limit(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
+    # Defaults match contracts/plan.v1.md's "limit" stage exactly for any
+    # field a hand-written plan omits: ceiling_dbtp -1.0, lookahead_ms 5.0,
+    # release_ms 50.0, oversample 4. release_ms previously defaulted to
+    # 100.0 here (dsp.limiter.brickwall's own default, tuned independently
+    # of this contract) and oversample was never read at all -- a plan
+    # naming a non-default oversample was silently ignored.
     ceiling_dbtp = params.get("ceiling_dbtp", -1.0)
     lookahead_ms = params.get("lookahead_ms", 5.0)
-    release_ms = params.get("release_ms", 100.0)
+    release_ms = params.get("release_ms", 50.0)
+    oversample = params.get("oversample", 4)
 
     y, stats = limiter.brickwall(
         x,
@@ -416,6 +493,7 @@ def _apply_limit(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.nda
         ceiling_dbtp=ceiling_dbtp,
         lookahead_ms=lookahead_ms,
         release_ms=release_ms,
+        oversample=oversample,
     )
     return y, stats
 
@@ -423,6 +501,8 @@ def _apply_limit(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.nda
 _REGISTRY = {
     "cut": _apply_cut,
     "strip_silence": _apply_strip_silence,
+    "gate": _apply_gate,
+    "expand": _apply_expand,
     "dereverb": _apply_dereverb,
     "deess": _apply_deess,
     "eq": _apply_eq,

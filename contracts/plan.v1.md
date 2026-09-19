@@ -59,13 +59,29 @@ Each element of `stages` is an object with **exactly two** keys:
 
 ```json
 ["cut", "strip_silence",
- "stretch", "pitch", "dereverb", "deess", "eq", "eq_match",
+ "stretch", "pitch", "gate", "expand", "dereverb", "deess", "eq", "eq_match",
  "compress", "saturate", "reverb", "loudness", "limit"]
 ```
 
 `render` applies stages in this order regardless of the order they appear in `stages`. The array
 order records how the plan was assembled; it does not control processing. The render report
 states the order actually applied.
+
+### Why `gate`/`expand` sit ahead of `compress`, not after it
+
+`gate` and `expand` remove or reduce what is quiet; `compress` (multiband dynamics) raises what
+is quiet toward its threshold along with everything else it processes. Placed after `compress`,
+a gate would be gating a noise floor the chain itself had already lifted \u2014 the two stages would
+be fighting each other on the exact material each one is defined by. Placed before it, `compress`
+receives a programme whose dead air is already under control, which is the only order in which
+neither stage undoes the other's work.
+
+`dereverb`/`deess` are narrowband, surgical repairs (an estimated reverb tail, a sibilant band)
+that do not materially change the overall noise floor, so their relative position to
+`gate`/`expand` is not load-bearing the way the position relative to `compress` is. They sit
+immediately after `gate`/`expand` so that repair work happens once, together, ahead of tone and
+dynamics \u2014 continuing the same principle that puts editing ahead of everything: process the
+timeline/level problems before stages that measure or shape what's left of them.
 
 ### Why editing is first
 
@@ -393,6 +409,40 @@ approximate.
 |---|---|---|---|
 | `semitones` | float | `0.0` | `-24.0 ≤ x ≤ 24.0`. Positive is up. |
 
+### `gate`
+
+Hard noise gate: below threshold, attenuate by a fixed `range_db`; at or above it, unchanged.
+
+| Param | Type | Default | Constraint |
+|---|---|---|---|
+| `threshold_above_floor_db` | float | `12.0` | `≥ 0`. Primary threshold control: dB above this file's own measured noise floor — the same convention `strip_silence` and the `detect silence` stage use. |
+| `threshold_db` | float or null | `null` | Absolute dBFS escape hatch. When set, overrides `threshold_above_floor_db` entirely. |
+| `range_db` | float | `20.0` | `≥ 0`. Maximum attenuation below threshold, in dB. Not silence — a duck. `0.0` disables the stage. |
+| `attack_ms` | float | `2.0` | `≥ 0`. Time to open (move toward 0 dB) once triggered. |
+| `hold_ms` | float | `50.0` | `≥ 0`. Minimum time the gate stays open after last being triggered, before release may begin closing it. This is what prevents chatter on material that hovers at the threshold. |
+| `release_ms` | float | `150.0` | `≥ 0`. Time to close (move toward `-range_db`) once hold expires. |
+| `lookahead_ms` | float | `3.0` | `≥ 0`. How far ahead the detector looks so a fast onset's attack survives. |
+| `sidechain_hpf_hz` | float or null | `80.0` | `> 0`, or `null` to disable. Highpass corner applied to the LEVEL DETECTOR only — the signal itself is unaffected — so low-frequency rumble cannot hold the gate open. |
+| `crossovers_hz` | array of float | `[]` | Strictly ascending, all `> 0` and below Nyquist. `N` crossovers produce `N + 1` independently-gated bands; `[]` is full-band, the same convention `compress` uses. |
+
+### `expand`
+
+Soft-knee downward expander — the gentle counterpart to `gate`: below threshold, attenuate
+proportionally rather than by a fixed amount.
+
+| Param | Type | Default | Constraint |
+|---|---|---|---|
+| `threshold_above_floor_db` | float | `6.0` | `≥ 0`. Same convention as `gate`'s. |
+| `threshold_db` | float or null | `null` | Absolute dBFS escape hatch; overrides `threshold_above_floor_db` when set. |
+| `ratio` | float | `2.0` | `≥ 1.0`. `1.0` is no expansion; `2.0` means output moves 2 dB for every 1 dB the input drops below threshold. Below `1.0` is upward expansion, a different device, and is rejected. |
+| `knee_db` | float | `6.0` | `≥ 0`. Width of the soft knee centred on the threshold. |
+| `attack_ms` | float | `5.0` | `≥ 0`. Time to open once triggered. |
+| `hold_ms` | float | `50.0` | `≥ 0`. Same purpose as `gate`'s. |
+| `release_ms` | float | `150.0` | `≥ 0`. Time to move toward the target reduction once hold expires. |
+| `lookahead_ms` | float | `3.0` | `≥ 0`. Same purpose as `gate`'s. |
+| `sidechain_hpf_hz` | float or null | `80.0` | `> 0`, or `null` to disable. Same purpose as `gate`'s. |
+| `crossovers_hz` | array of float | `[]` | Same convention as `gate`'s / `compress`'s. |
+
 ### `dereverb`
 
 | Param | Type | Default | Constraint |
@@ -495,7 +545,7 @@ Within `plan_format: 1`, a caller may rely on all of this:
 1. **The three top-level fields** — `plan_format`, `created_with`, `stages` — with those names,
    those types, and those meanings.
 2. **The stage entry shape**: exactly `stage` and `params`.
-3. **The canonical stage names** and the thirteen-element order above. Names do not get renamed
+3. **The canonical stage names** and the fifteen-element order above. Names do not get renamed
    within format 1, and the **relative order of stage names already in the format does not
    change** within it.
 4. **Every parameter name, type, unit and default documented here.** A default may not change
@@ -621,3 +671,19 @@ it has behaviour, and any rename of its params is `plan_format: 2`.
 
 `cut` keeps `crossfade_ms` under its own name and its own default of `10.0`. Nothing that a
 released `aud` implements changed spelling or value.
+
+### On the record: why `gate`/`expand` did not move the integer either
+
+Two new stage names, inserted in the middle of the canonical order rather than at the front —
+worth applying the contract's own test explicitly, since the general rule ("reordering existing
+names is breaking") is a proxy for it, not the thing itself.
+
+- No plan written before this release can contain `gate` or `expand` — an unknown stage name is
+  rejected, so such a document was never producible.
+- The relative order of every pre-existing name is untouched: `pitch` still precedes `dereverb`,
+  `dereverb` still precedes `deess`, and so on through `limit`. `gate`/`expand` occupy a gap
+  between two names that were already adjacent; no existing pair had anything inserted between
+  it and a *different* existing pair moved to compensate.
+- Therefore every stored format-1 plan sorts into exactly the sequence it sorted into before, and
+  renders identically. Only a plan containing the two new names is affected, and no such plan
+  existed until this release.

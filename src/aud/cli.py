@@ -30,6 +30,8 @@ from aud.verbdoc import VERB_DOCS
 STAGE_VERB_NAMES = (
     "cut",
     "strip-silence",
+    "gate",
+    "expand",
     "deess",
     "dereverb",
     "eq",
@@ -62,7 +64,8 @@ REGIONS_OUTPUT_VERBS = frozenset({"detect"})
 # surface is still registered (explicitly, where they take arguments) so that a
 # caller writing the eventual command gets `not_implemented` -- an answer about
 # the capability -- rather than a usage error about a flag that will exist.
-_NOT_YET_BUILT = frozenset({"preset"})
+# Empty today: `preset` (the last entry here) is now implemented.
+_NOT_YET_BUILT: frozenset[str] = frozenset()
 
 
 class _UsageError(Exception):
@@ -87,6 +90,18 @@ def _triple(text: str) -> tuple[float, float, float]:
     except ValueError as exc:
         raise argparse.ArgumentTypeError(f"expected three numbers, got {text!r}") from exc
     return (freq, gain_db, q)
+
+
+def _shelf_quad(text: str) -> tuple[str, float, float, float]:
+    parts = text.split(",")
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError(f"expected type,freq_hz,gain_db,q (e.g. low,80,3.0,0.7), got {text!r}")
+    shelf_type = parts[0].strip()
+    try:
+        freq, gain_db, q = (float(part) for part in parts[1:])
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected type,freq,gain,q with three numbers, got {text!r}") from exc
+    return (shelf_type, freq, gain_db, q)
 
 
 def _float_list(text: str) -> list[float]:
@@ -142,6 +157,31 @@ def _build_parser() -> _Parser:
     plan_parser = sub.add_parser("plan")
     plan_parser.add_argument("--from", dest="from_file", default=None)
 
+    gate_parser = sub.add_parser("gate")
+    # --threshold is dB ABOVE the file's measured noise floor -- the same
+    # convention 'aud detect silence' uses, not an absolute dBFS value.
+    gate_parser.add_argument("--threshold", type=float, default=12.0)
+    gate_parser.add_argument("--threshold-abs", dest="threshold_abs", type=float, default=None)
+    gate_parser.add_argument("--range", type=float, default=20.0)
+    gate_parser.add_argument("--attack", type=float, default=2.0)
+    gate_parser.add_argument("--hold", type=float, default=50.0)
+    gate_parser.add_argument("--release", type=float, default=150.0)
+    gate_parser.add_argument("--lookahead", type=float, default=3.0)
+    gate_parser.add_argument("--sidechain-hpf", dest="sidechain_hpf", type=float, default=80.0)
+    gate_parser.add_argument("--bands", dest="crossovers", type=_float_list, default=None)
+
+    expand_parser = sub.add_parser("expand")
+    expand_parser.add_argument("--threshold", type=float, default=6.0)
+    expand_parser.add_argument("--threshold-abs", dest="threshold_abs", type=float, default=None)
+    expand_parser.add_argument("--ratio", type=float, default=2.0)
+    expand_parser.add_argument("--knee", type=float, default=6.0)
+    expand_parser.add_argument("--attack", type=float, default=5.0)
+    expand_parser.add_argument("--hold", type=float, default=50.0)
+    expand_parser.add_argument("--release", type=float, default=150.0)
+    expand_parser.add_argument("--lookahead", type=float, default=3.0)
+    expand_parser.add_argument("--sidechain-hpf", dest="sidechain_hpf", type=float, default=80.0)
+    expand_parser.add_argument("--bands", dest="crossovers", type=_float_list, default=None)
+
     deess_parser = sub.add_parser("deess")
     deess_parser.add_argument("--amount", type=float, default=6.0)
     deess_parser.add_argument("--freq", type=float, default=6500.0)
@@ -153,6 +193,7 @@ def _build_parser() -> _Parser:
     eq_parser.add_argument("--hpf", type=float, default=None)
     eq_parser.add_argument("--lpf", type=float, default=None)
     eq_parser.add_argument("--peak", dest="peaks", type=_triple, action="append", default=None)
+    eq_parser.add_argument("--shelf", dest="shelves", type=_shelf_quad, action="append", default=None)
 
     eq_match_parser = sub.add_parser("eq-match")
     eq_match_source = eq_match_parser.add_mutually_exclusive_group(required=True)
@@ -304,12 +345,39 @@ def _dispatch_stage(verb: str, plan: Any, args: argparse.Namespace) -> Any:
             crossfade_ms=args.crossfade,
             crossfade_shape=args.crossfade_shape,
         )
+    if verb == "gate":
+        return lib.gate(
+            plan,
+            threshold_above_floor_db=args.threshold,
+            threshold_db=args.threshold_abs,
+            range_db=args.range,
+            attack_ms=args.attack,
+            hold_ms=args.hold,
+            release_ms=args.release,
+            lookahead_ms=args.lookahead,
+            sidechain_hpf_hz=args.sidechain_hpf,
+            crossovers_hz=args.crossovers,
+        )
+    if verb == "expand":
+        return lib.expand(
+            plan,
+            threshold_above_floor_db=args.threshold,
+            threshold_db=args.threshold_abs,
+            ratio=args.ratio,
+            knee_db=args.knee,
+            attack_ms=args.attack,
+            hold_ms=args.hold,
+            release_ms=args.release,
+            lookahead_ms=args.lookahead,
+            sidechain_hpf_hz=args.sidechain_hpf,
+            crossovers_hz=args.crossovers,
+        )
     if verb == "deess":
         return lib.deess(plan, amount_db=args.amount, freq_hz=args.freq)
     if verb == "dereverb":
         return lib.dereverb(plan, amount_db=args.amount)
     if verb == "eq":
-        return lib.eq(plan, hpf=args.hpf, lpf=args.lpf, peaks=args.peaks or [])
+        return lib.eq(plan, hpf=args.hpf, lpf=args.lpf, peaks=args.peaks or [], shelves=args.shelves or [])
     if verb == "eq-match":
         curve = lib.load_json_file(args.curve) if args.curve else None
         return lib.eq_match(
@@ -419,6 +487,16 @@ def _dispatch(verb: str, args: argparse.Namespace, stdin_text: str | None) -> An
             model=args.model,
             dry_run=args.dry_run,
         )
+    if verb == "preset":
+        if args.list:
+            return lib.preset_list()
+        if args.preset_action == "show":
+            return lib.preset_show(args.name)
+        raise AudError(
+            code="usage_error",
+            message="preset needs either --list or a 'show NAME' subcommand.",
+            remedy="Run 'aud preset --list' to see names, or 'aud preset show NAME' to print one.",
+        )
     if verb in _NOT_YET_BUILT:
         raise AudError(
             code="not_implemented",
@@ -514,7 +592,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    if verb in PLAN_OUTPUT_VERBS:
+    # 'preset show NAME' prints a plan document raw, exactly like every
+    # other stage verb; 'preset --list' prints a normal wrapped result --
+    # the same verb name, two different output shapes depending on the
+    # subaction actually taken, so this cannot be a static per-verb set
+    # membership check the way every other verb's output shape is.
+    if verb in PLAN_OUTPUT_VERBS or (verb == "preset" and getattr(args, "preset_action", None) == "show"):
         print(write_plan(outcome))
     elif verb in REGIONS_OUTPUT_VERBS:
         print(write_regions(outcome))

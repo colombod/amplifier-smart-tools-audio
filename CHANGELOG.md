@@ -9,6 +9,91 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-19
+
+The quiet end of dynamics, presets, and the contract finally matching the code. Plus two
+defects that only a live provider call could have found.
+
+### Added
+
+- **`gate` and `expand`** — the other half of dynamics. The chain could pull loud material
+  down and had nothing for the quiet end, which for cleanup work is usually the stage that
+  matters most: room tone between phrases, mic hiss, air conditioning. `gate` is hard
+  (attenuate by `range_db` below the threshold — a duck, not a kill, because a gate that slams
+  to digital black sounds worse than one that ducks 20 dB); `expand` is gentle (a downward
+  ratio, usually the right tool for a voice). Both are multiband via the existing
+  Linkwitz-Riley split, both take their threshold RELATIVE to the measured noise floor, both
+  have lookahead so a phrase's onset survives, and both sidechain off a high-passed copy so
+  rumble cannot hold them open. They sit with the repair stages, BEFORE compression: gating
+  after compression is backwards, because the compressor has already lifted the floor the gate
+  exists to remove.
+- **`aud preset --list` and `aud preset show <name>`** — `podcast` (−16 LUFS, Apple Podcasts),
+  `music-streaming` (−14, the Spotify/Apple/YouTube convention), `broadcast` (−23, EBU R128)
+  and `voiceover`. Each emits a plan document, so `aud preset show podcast | aud render in.wav
+  out.wav` is one command. Every preset is built through the same `aud.lib` stage builders as
+  everything else — a preset that hardcoded a params dict would be a fourth source of truth.
+- **`shelves` are reachable.** The contract promised them and the engine applied them, but no
+  CLI or builder path existed — a documented capability nobody could call.
+
+### Fixed
+
+- **The contract and the code now agree.** Eleven divergences, every one resolved by moving the
+  CODE to the published document: `eq` stored `hpf`/`lpf` and raw peak triples where the
+  contract says `hpf_hz`/`lpf_hz` and `{freq_hz, gain_db, q}` objects; `compress.ratio` accepted
+  values below 1.0 (upward compression, a different device); per-band defaults came from a
+  dataclass rather than the contract; a contract-conformant single-band plan
+  (`crossovers_hz: []`) CRASHED at render; `limit.oversample` was documented, defaulted, and
+  silently never read. CLI flag spellings stay short (`--hpf`) because the contract explicitly
+  does not promise them — flags are ergonomics, the document is the interface.
+- **A reasoning-capable model was unusable.** The Anthropic backend read `content[0]["text"]`,
+  but `content` is a list of BLOCKS and a thinking model returns a `thinking` block first — so
+  every such model came back as "response did not have the expected shape". Now takes the first
+  text block.
+- **The advisor could not reach the new stages**, and would not have weighed them if it could:
+  `gate`/`expand` were absent from its whitelist and vocabulary, and nothing told it that
+  compression and loudness LIFT a noise floor, so hiss tolerable in the source is audible in
+  the master. Both fixed.
+
+### Verified
+
+Gate and expander, measured:
+
+- **Chatter**: an envelope crossing the threshold at 20 Hz for 2 s opened the gate **79 times
+  with `hold_ms=0` and once with `hold_ms=100`**. That is the single most recognisable way a
+  gate sounds broken, and `open_count` now ships in the stats so a caller can see it.
+- **Onset survival**: a sharp onset after silence measured −1.94 dB in its first 5 ms;
+  with 15 ms lookahead the output was **−1.98 dB (0.04 dB lost)**, with no lookahead
+  **−21.94 dB (20 dB lost)** — the attack simply clipped off.
+- **Floor-relative threshold**: the same material 20 dB quieter measured a floor 20.00 dB lower
+  and gated **the identical 28.39%** of the programme. A fixed dBFS threshold fails that.
+- **Multiband isolation**: a loud 150 Hz tone under a quiet 6 kHz tone, split at 1 kHz — low
+  band 0.0% attenuated, high band 99.98% at −18.0 dB.
+- **Sidechain**: 40 Hz rumble held the gate open (0.00 dB of gating) until an 80 Hz sidechain
+  high-pass was engaged, after which the gap closed by **19.99 dB**.
+
+The advisor, run LIVE against Anthropic, both directions:
+
+- Hissy material (floor −30.5 dBFS against −13.06 LUFS, 17.4 dB separation) → it chose
+  `expand`, citing *"only ~17.4 dB separation (well under the 25 dB clean threshold), so the
+  quiet passages need gentle downward expansion before loudness/limiting amplify that floor"*.
+- Clean material (52.8 dB separation) → no gate, no expander. The negative case matters as much
+  as the positive one: a gate on clean material is damage.
+- All four presets rendered to their stated targets: −16.00, −14.00, −23.00, −16.00 LUFS, ceiling met in every case.
+- A plan hand-written using ONLY the contract's own field names now renders. That was the
+  property that was broken, and it is asserted directly.
+- 282 tests pass (was 233). Conformance 16 PASS / 0 FAIL.
+
+### Known limits
+
+- **Model tier changes the answer.** On the hissy file the default (`claude-haiku-4-5`) did not
+  reach for the gate even with the noise-floor rule in the prompt; `claude-sonnet-5` did, and
+  cited the right numbers. The prompt was not the problem. A cheap default produces cheaper
+  mastering decisions, and `--model` is how you buy a better one.
+- Only Anthropic has been exercised live. OpenAI, Gemini and Azure OpenAI are still
+  reviewed-but-uncalled — and the block-parsing defect just fixed is exactly the kind of thing
+  waiting in them.
+- Presets do not yet use `gate`/`expand`.
+
 ## [0.6.1] - 2026-09-19
 
 The first live provider call `aud` has ever made, and the two defects it found immediately.
