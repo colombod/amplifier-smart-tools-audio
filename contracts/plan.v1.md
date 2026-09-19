@@ -129,10 +129,33 @@ Remove an explicit list of regions from the programme. The list is normally pipe
 | Param | Type | Default | Constraint |
 |---|---|---|---|
 | `regions` | array of object | required | Each: `{"start_s": float ≥ 0, "end_s": float > start_s}`. Ascending by `start_s` and non-overlapping. May be `[]`, which renders unchanged. |
+| `filler_tail_pad_ms` | float | `200.0` if the piped-in document's `kind` was `"filler"`, else `0.0` | `≥ 0`, finite. Extends every region's stored `end_s` by this many ms (clamped at build time to not cross into the next region) before it is written into `regions` above. Recorded here for transparency/reproducibility; not itself replayed at render time. |
 
 **Plus the whole edit-point resolution set** — `pad_out_ms`, `pad_in_ms`, `snap`,
 `snap_window_ms`, `fade_out_ms`, `fade_in_ms`, `crossfade_ms`, `crossfade_shape` — defined in
 full under [Edit-point resolution](#edit-point-resolution-shared-by-cut-and-strip_silence).
+
+#### Why `filler_tail_pad_ms` exists, and why it is not padding
+
+`aud detect fillers` (faster-whisper) reports a filler word's END timestamp systematically
+175-200 ms **early** — it closes the word before the vowel actually decays. Measured against
+exact ground truth: "um" truth `0.599-0.938s`, returned `0.600-0.740s` (end error -198.4 ms);
+"uh" truth `2.765-3.154s`, returned `2.800-2.980s` (end error -174.2 ms). Start timestamps are
+accurate to within tens of milliseconds; the bias is specific to the end boundary.
+
+Left uncompensated, `cut` removes exactly the reported (too-short) span and an audible remnant
+of the filler survives on playback — "um" becomes "hmm" rather than disappearing.
+
+**This is deliberately not done via `pad_out_ms`/`pad_in_ms`.** [Padding](#padding) can only ever
+*shrink* what is removed — "a control that could also remove more would not be safe to reach
+for" is the whole point of that design, and reusing it here would invert it. Compensating a
+recogniser's known-early boundary needs the opposite: an *extension* past the reported position.
+So `filler_tail_pad_ms` instead extends the raw `end_s` of each region, per region, at the one
+point `cut` still knows the document's `kind` — before padding/snap ever run — and does not
+change `pad_out_ms`/`pad_in_ms`'s defaults or shrink-only meaning for `cut` in general, or for any
+other kind of region (`silence` regions, or a hand-authored literal position, are unaffected: the
+default is `0.0` unless the document's `kind` is `"filler"`). A caller that knows better can
+always override it, including with `0.0` to disable it entirely.
 
 `start_s` and `end_s` are offsets into the **source** file's timeline, which is why `cut` is
 first in canonical order. A plan containing a `cut` stage is bound to the file its regions were

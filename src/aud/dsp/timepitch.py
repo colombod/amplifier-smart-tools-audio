@@ -53,6 +53,41 @@ __all__ = ["pitch_shift", "time_stretch"]
 _QUALITY_MODES = ("auto", "phase_vocoder", "signalsmith")
 Quality = Literal["auto", "phase_vocoder", "signalsmith"]
 
+# Relative tolerance for "did the engine actually produce the requested
+# duration ratio". 2% is generous next to the only legitimate source of
+# error -- rounding `target_len = round(n_in * factor)` to a whole sample,
+# which is at most 0.5 sample out of n_in and is therefore a small fraction
+# of a percent for any real recording -- while being far tighter than the
+# ~17-45% error a reciprocal/inverted factor bug produces (measured: a
+# requested 1.2 came back as 0.8333, a 44% relative error). See
+# `_assert_ratio_holds`'s docstring for why this check exists at all.
+_STRETCH_RATIO_RELATIVE_TOLERANCE = 0.02
+
+
+def _assert_ratio_holds(*, engine: str, factor: float, n_in: int, n_out: int) -> None:
+    """Refuse to return audio whose measured length disagrees with `factor`.
+
+    `time_stretch` already computes `measured_factor` for its stats -- but a
+    stat that is computed, reported, and never checked is an alarm nobody
+    wired up (this is exactly how the Signalsmith engine's inverted
+    `timeFactor` shipped: it self-reported `measured_factor: 0.833` right
+    next to `requested_factor: 1.2` and nothing compared them). This check
+    runs for BOTH engines, unconditionally, so any future engine-convention
+    mismatch fails loudly here instead of shipping a file that is silently
+    the wrong length.
+    """
+    if n_in <= 0:
+        return
+    measured = n_out / n_in
+    if not math.isclose(measured, factor, rel_tol=_STRETCH_RATIO_RELATIVE_TOLERANCE):
+        raise RuntimeError(
+            f"time_stretch (engine={engine!r}) was asked for factor={factor!r} but produced a "
+            f"measured duration ratio of {measured:.4f} (input_samples={n_in}, output_samples={n_out}) "
+            f"-- outside the {_STRETCH_RATIO_RELATIVE_TOLERANCE:.0%} tolerance. This is an engine "
+            f"correctness bug, not a bad parameter: refusing to return audio of the wrong length "
+            f"rather than reporting a measured_factor nobody checked."
+        )
+
 
 def _signalsmith_available() -> bool:
     return importlib.util.find_spec("python_stretch") is not None
@@ -203,7 +238,18 @@ def _stretch_signalsmith(x2: np.ndarray, sr: int, factor: float) -> np.ndarray:
     audio = np.ascontiguousarray(x2.T, dtype=np.float32)  # (channels, samples), per documented API
     stretch = ps.Signalsmith.Stretch()
     stretch.preset(n_channels, sr)
-    stretch.timeFactor = float(factor)
+    # CONVENTION MISMATCH, do not "fix" this back: this module's `factor` is
+    # output_duration / input_duration (factor > 1 lengthens -- see
+    # `time_stretch`'s docstring). Signalsmith Stretch's own `timeFactor` is
+    # measured to be the RECIPROCAL of that: setting `timeFactor = factor`
+    # directly produces output/input == 1/factor (measured: factor=1.2 in ->
+    # out/in=0.8333, i.e. the programme got SHORTER when asked to lengthen).
+    # Inverting it here is what makes this module's contract hold for both
+    # engines. `_assert_ratio_holds` below re-derives the measured ratio from
+    # the actual output length and refuses to return silently-wrong audio if
+    # this ever drifts again (e.g. a future python_stretch release changing
+    # the convention back).
+    stretch.timeFactor = 1.0 / float(factor)
     processed = stretch.process(audio)
     return np.asarray(processed, dtype=np.float64).T
 
@@ -245,7 +291,11 @@ def time_stretch(x: np.ndarray, sr: int, factor: float, *, quality: Quality = "a
     Raises:
         ValueError: factor is not a finite number > 0, or quality is not
             one of the three modes above.
-        RuntimeError: quality="signalsmith" but python_stretch is absent.
+        RuntimeError: quality="signalsmith" but python_stretch is absent, or
+            an engine's actual output length disagrees with `factor` by more
+            than `_STRETCH_RATIO_RELATIVE_TOLERANCE` (see
+            `_assert_ratio_holds`) -- an engine correctness bug, checked on
+            every call, on both engines.
     """
     if not math.isfinite(factor) or factor <= 0:
         raise ValueError(f"factor must be a finite number > 0, got {factor!r}")
@@ -261,6 +311,8 @@ def time_stretch(x: np.ndarray, sr: int, factor: float, *, quality: Quality = "a
     else:
         channels = [_phase_vocoder_stretch_mono(x2[:, c], factor) for c in range(x2.shape[1])]
         y2 = np.stack(channels, axis=1)
+
+    _assert_ratio_holds(engine=engine, factor=factor, n_in=n_in, n_out=int(y2.shape[0]))
 
     stats: dict[str, Any] = {
         "engine": engine,

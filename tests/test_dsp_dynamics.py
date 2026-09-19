@@ -113,3 +113,74 @@ def test_multiband_compress_rejects_mismatched_band_and_crossover_counts():
     bands = [dynamics.BandParams()]  # needs 3, only gave 1
     with pytest.raises(ValueError, match=r"2|1"):
         dynamics.multiband_compress(x, SR, crossovers, bands)
+
+
+# --- Bounded per-band arithmetic: makes host-to-host DSP drift visible -----
+#
+# test_multiband_only_reduces_the_band_that_is_actually_loud (above) only
+# checks "some meaningful reduction happened in the loud band, and the quiet
+# bands were barely touched" -- a bound wide enough that a materially
+# different crossover or smoothing implementation could still pass. This
+# test pins the *measured* per-band reduction to a tight, stated tolerance
+# around a value calibrated by running this exact deterministic signal
+# through this exact reference implementation (see agent report): a fast
+# (4 kHz) carrier inside a slow (attack=10ms/release=120ms) envelope
+# follower does not settle to the naive instantaneous-peak formula
+# (threshold -18 + (level -6 - -18)/ratio 2 - level -6 == -6.0 dB) -- the
+# one-pole smoothing only partially tracks a carrier many times faster than
+# its own time constants, and that gap is itself part of what a drifting
+# implementation could change without anything here noticing.
+
+_MB_TONE_LEVEL_DBFS = -6.0
+_MB_TONE_FREQ_HZ = 4000.0  # sits inside band 2: (2000 Hz, 8000 Hz)
+_MB_CROSSOVERS_HZ = [200.0, 2000.0, 8000.0]
+
+# Measured on this host, bit-exact across 3 runs (see agent report) -- this
+# is the reference implementation's actual settled value, not the naive
+# instantaneous-peak formula's -6.0 dB.
+_MB_EXPECTED_MAX_REDUCTION_DB = -4.941244279194672
+_MB_EXPECTED_AVG_REDUCTION_DB = -4.846086639403051
+_MB_REDUCTION_TOLERANCE_DB = 0.3
+# Wide enough to tolerate libm/BLAS-level float differences across hosts,
+# tight enough that a real behavioural change (a different smoothing
+# constant, a crossover slope change) trips it -- the same true-peak defect
+# this test guards against moved the limiter's reading by ~1 dB host to host.
+_MB_QUIET_BAND_TOLERANCE_DB = 0.1
+# Bands 0/1/3 measure exactly 0.0 dB reduction here -- a 4 kHz tone is >20 dB
+# down (LR4, 24 dB/octave) in each of them, safely below the knee -- so any
+# nonzero reading is crossover leakage, not float noise.
+
+
+def test_multiband_gain_reduction_matches_a_measured_tolerance_per_band():
+    """Pin the loud band's reduction to a tight, stated tolerance (not just
+    "less than -1 dB") and the quiet bands to near-zero, so a change in
+    crossover or smoothing behaviour that shifts the numbers is caught --
+    which `test_multiband_only_reduces_the_band_that_is_actually_loud`'s
+    wide bound cannot do.
+    """
+    seconds = 1.0
+    n = int(seconds * SR)
+    t = np.arange(n) / SR
+    tone = (10 ** (_MB_TONE_LEVEL_DBFS / 20.0)) * np.sin(2 * np.pi * _MB_TONE_FREQ_HZ * t)
+    x = np.stack([tone, tone], axis=1)
+
+    bands = [dynamics.BandParams() for _ in range(4)]  # defaults: threshold=-18, ratio=2, knee=6
+    _y, stats = dynamics.multiband_compress(x, SR, _MB_CROSSOVERS_HZ, bands)
+
+    max_reductions = [b["max_gain_reduction_db"] for b in stats["bands"]]
+    avg_reductions = [b["avg_gain_reduction_db"] for b in stats["bands"]]
+    print(f"\n[dynamics] per-band max reduction (dB): {max_reductions}")
+    print(f"[dynamics] per-band avg reduction (dB): {avg_reductions}")
+
+    assert abs(max_reductions[2] - _MB_EXPECTED_MAX_REDUCTION_DB) < _MB_REDUCTION_TOLERANCE_DB, (
+        f"band 2 max reduction {max_reductions[2]:.4f} dB drifted from the measured baseline "
+        f"{_MB_EXPECTED_MAX_REDUCTION_DB:.4f} dB by more than {_MB_REDUCTION_TOLERANCE_DB} dB"
+    )
+    assert abs(avg_reductions[2] - _MB_EXPECTED_AVG_REDUCTION_DB) < _MB_REDUCTION_TOLERANCE_DB, (
+        f"band 2 avg reduction {avg_reductions[2]:.4f} dB drifted from the measured baseline "
+        f"{_MB_EXPECTED_AVG_REDUCTION_DB:.4f} dB by more than {_MB_REDUCTION_TOLERANCE_DB} dB"
+    )
+    for i in (0, 1, 3):
+        assert abs(max_reductions[i]) < _MB_QUIET_BAND_TOLERANCE_DB, (
+            f"band {i} should show no threshold crossing at all for a 4 kHz tone, got {max_reductions[i]} dB"
+        )

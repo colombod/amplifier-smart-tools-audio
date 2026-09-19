@@ -161,6 +161,16 @@ Padding only ever shrinks a cut:
   sounds clipped. 'cut' defaults both to 0: the regions are a list you
   measured and mean literally, so widening them unasked would surprise.
 
+--filler-tail-pad is the one exception, and it EXTENDS, not shrinks:
+  'aud detect fillers' reports a filler word's END timestamp 175-200 ms
+  too EARLY (it closes the word before the vowel decays), so cutting the
+  literal reported span leaves an audible remnant ("um" -> "hmm"). When
+  the piped-in document's kind is "filler", each region's end is extended
+  by 200 ms by default before padding/snap ever run -- not via --pad-out/
+  --pad-in, which cannot extend a cut by design (see above). Any other
+  kind of document is unaffected. Pass --filler-tail-pad explicitly
+  (0 disables it) to override the default.
+
 Why equal power is the default crossfade shape:
   Two uncorrelated signals sum in POWER, not amplitude. Under a linear
   crossfade both sides sit at gain 0.5 in the middle, so the sum is half
@@ -203,6 +213,10 @@ Parameters:
   --fade-in FLOAT         As above, incoming side, ms. Default 0.
   --crossfade FLOAT       Crossfade at each join, ms. Default 10.
   --crossfade-shape SHAPE equal_power | linear. Default equal_power.
+  --filler-tail-pad FLOAT Extend each region's end past a filler
+                          recogniser's known-early boundary, ms. Default:
+                          200 if the piped-in document's kind is "filler",
+                          else 0. 0 disables it.
 
 What the render report tells you:
   Per edit point: the nominal position, where it resolved to, how far it

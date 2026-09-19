@@ -30,9 +30,11 @@ module.
 
 from __future__ import annotations
 
+from fractions import Fraction
 from typing import Any, Protocol
 
 import numpy as np
+from scipy import signal
 
 from aud.schemas import AudError
 
@@ -40,9 +42,44 @@ __all__ = ["FILLER_WORDS", "detect_fillers", "is_available"]
 
 # The default filler vocabulary. Lowercase; matching is case-insensitive
 # (see `_normalize_word`). A caller may replace this entirely via `words=`.
+# This is the ONLY place this vocabulary is defined -- `cli.py`'s `--words`
+# defaults to `None` precisely so this list, not a second copy of it, is
+# what actually runs when a caller does not pass their own (see D3 in the
+# lane report: a second hard-coded copy in the CLI is what let "um" --
+# arguably the single most common English filler -- go undetectable by
+# default, because the CLI's copy always won and never contained it).
 FILLER_WORDS: tuple[str, ...] = ("um", "umm", "uh", "erm", "ehm", "ah", "er")
 
 _MODEL_SIZE_DEFAULT = "base"
+
+# faster-whisper's ndarray input path has no sample-rate parameter: it
+# always assumes the array it is handed is already 16 kHz mono PCM. Handing
+# it audio at any other rate does not fail -- it silently mis-times every
+# word, because every sample is treated as 1/16000 s regardless of the
+# rate it was actually captured at (see D1 in the lane report: measured
+# ~1.37x timestamp drift on a 22.05 kHz file, scaling to ~3x at 48 kHz).
+_WHISPER_SR = 16000
+
+
+def _resample_to_whisper_rate(mono: np.ndarray, sr: int) -> np.ndarray:
+    """Resample a mono float array to the 16 kHz rate faster-whisper assumes.
+
+    Pure and faster-whisper-free -- exercised directly in tests without the
+    real dependency installed. Uses the same `scipy.signal.resample_poly`
+    polyphase approach the rest of the DSP stack uses for rate conversion
+    (see `aud.dsp.reverb`/`aud.dsp.timepitch`), with the ratio reduced to
+    small integers via `Fraction` so `resample_poly` does not choke on a
+    huge up/down pair for an oddball rate.
+
+    A no-op when `sr` is already 16000 -- returns `mono` unchanged (not a
+    copy), matching `resample_poly`'s behaviour of being expensive to call
+    for nothing.
+    """
+    if sr == _WHISPER_SR:
+        return mono
+    frac = Fraction(_WHISPER_SR, sr).limit_denominator(2000)
+    return signal.resample_poly(mono, up=frac.numerator, down=frac.denominator)
+
 
 # The exact command contracts/regions.v1.md and this module's error remedy
 # point a caller at -- kept in sync with the `speech` extra declared in
@@ -92,7 +129,7 @@ def _words_to_regions(
     words: list[Any],
     vocabulary: tuple[str, ...],
     min_pause_ms: float,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], int]:
     """Turn a sequence of word timings into filler-word and hesitation regions.
 
     Pure and faster-whisper-free: `words` need only expose `.start`,
@@ -103,11 +140,24 @@ def _words_to_regions(
     and non-overlapping: a hesitation region only ever spans the gap
     strictly between the end of one word and the start of the next, and a
     filler-word region only ever spans one recognised word's own timing.
+
+    Returns:
+        `(regions, degenerate_dropped)`. faster-whisper can emit a word
+        with `start == end` (observed in production -- see D2 in the lane
+        report). A filler region needs `end_s > start_s`
+        (contracts/regions.v1.md); building one for a zero-duration word
+        would fail `new_regions` validation, and because that validation
+        is whole-document, would take every other correctly-timed word in
+        the file down with it. This function instead drops just that
+        word's region -- never fabricating a width for it -- and counts
+        how many it dropped, so the caller can report the count honestly
+        (`detection.degenerate_words_dropped`) rather than hiding it.
     """
     min_pause_s = min_pause_ms / 1000.0
     vocabulary_set = frozenset(vocabulary)
     regions: list[dict[str, Any]] = []
     prev_end: float | None = None
+    degenerate_dropped = 0
 
     for w in words:
         start_s = float(w.start)
@@ -117,13 +167,16 @@ def _words_to_regions(
 
         text = _normalize_word(getattr(w, "word", "") or "")
         if text in vocabulary_set:
-            confidence = float(getattr(w, "probability", 1.0))
-            confidence = min(max(confidence, 0.0), 1.0)
-            regions.append({"start_s": start_s, "end_s": end_s, "text": text, "confidence": confidence})
+            if end_s <= start_s:
+                degenerate_dropped += 1
+            else:
+                confidence = float(getattr(w, "probability", 1.0))
+                confidence = min(max(confidence, 0.0), 1.0)
+                regions.append({"start_s": start_s, "end_s": end_s, "text": text, "confidence": confidence})
 
         prev_end = end_s
 
-    return regions
+    return regions, degenerate_dropped
 
 
 def detect_fillers(
@@ -141,8 +194,10 @@ def detect_fillers(
     between recognised words.
 
     Args:
-        x: Array of shape (n_samples,) or (n_samples, n_channels).
-        sr: Sample rate in Hz.
+        x: Array of shape (n_samples,) or (n_samples, n_channels), at
+            `sr`'s rate -- any rate is accepted; see the resampling note
+            below.
+        sr: The true sample rate of `x`, in Hz.
         words: The filler vocabulary to search for. Defaults to
             `FILLER_WORDS`.
         min_pause_ms: Gaps between words at least this long are reported as
@@ -153,20 +208,28 @@ def detect_fillers(
         `(regions, detection)`: `regions` is a list of dicts shaped for
         `aud.core.regions.new_regions(kind="filler", ...)`; `detection` is
         that call's `detection` argument (`words`, `min_pause_ms`,
-        `engine`, `model`).
+        `engine`, `model`, `degenerate_words_dropped`).
 
     Raises:
         AudError: code `speech_extra_missing` if faster-whisper is not
             installed. Never falls back to an energy-only guess -- see
             contracts/regions.v1.md#producing-a-regions-document.
 
+    Resampling: faster-whisper's ndarray input path has no sample-rate
+    parameter of its own -- it always assumes 16 kHz mono PCM, so `x` is
+    resampled to that rate (`_resample_to_whisper_rate`) before it is
+    handed to the model. Without this, every timestamp faster-whisper
+    returns is wrong by the ratio `sr / 16000`, and those positions feed
+    straight into `cut` -- see D1 in the lane report.
+
     Verification status: the faster-whisper call path below (model load,
     `transcribe`, iterating `segments`/`.words`) is written against its
     documented API but has not been exercised against a real installation
-    in this environment -- installs are DTU-only here. `_words_to_regions`,
-    the parsing logic that turns word timings into regions, is fully
-    tested against a fake transcript object; only the live model call is
-    unverified.
+    in this environment -- installs are DTU-only here. `_resample_to_whisper_rate`
+    and `_words_to_regions`, the pure logic around that call, are fully
+    tested (including a fake-`faster_whisper`-module test that proves
+    resampling happens before the model ever sees the audio); only the
+    live model call itself is unverified.
     """
     try:
         from faster_whisper import WhisperModel
@@ -178,6 +241,11 @@ def detect_fillers(
     mono = np.asarray(x, dtype=np.float64)
     if mono.ndim == 2:
         mono = np.mean(mono, axis=1)
+    # faster-whisper's ndarray path always assumes 16 kHz; resample to that
+    # rate here so the timestamps it returns are already real seconds, no
+    # matter what rate `sr` actually is (see `_resample_to_whisper_rate`
+    # and D1 in the lane report).
+    mono = _resample_to_whisper_rate(mono, sr)
     audio = mono.astype("float32")
 
     model = WhisperModel(model_size)
@@ -188,11 +256,18 @@ def detect_fillers(
         segment_words = getattr(segment, "words", None) or []
         all_words.extend(segment_words)
 
-    regions = _words_to_regions(all_words, vocabulary, min_pause_ms)
+    regions, degenerate_dropped = _words_to_regions(all_words, vocabulary, min_pause_ms)
     detection = {
         "words": list(vocabulary),
         "min_pause_ms": float(min_pause_ms),
         "engine": "faster-whisper",
         "model": model_size,
+        # Optional (contracts/regions.v1.md: additive detection keys stay
+        # compatible within regions_format 1) -- how many words this run
+        # dropped because faster-whisper reported them with start == end
+        # (see `_words_to_regions`). Always emitted by this build so the
+        # caller never has to guess whether zero means "none dropped" or
+        # "this build doesn't report it".
+        "degenerate_words_dropped": degenerate_dropped,
     }
     return regions, detection

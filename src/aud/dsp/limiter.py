@@ -29,9 +29,22 @@ from __future__ import annotations
 import numpy as np
 from scipy import ndimage, signal
 
-__all__ = ["brickwall", "true_peak_dbtp"]
+__all__ = ["CEILING_TOLERANCE_DB", "brickwall", "true_peak_dbtp"]
 
 _EPS = 1e-12
+
+# The one place this tolerance is defined. `true_peak_dbtp` is an
+# oversampled ESTIMATE of the true peak (polyphase FIR reconstruction plus
+# floating-point ripple), not an exact quantity, so a render that settles
+# within this many dB of the ceiling has met it in every practical sense.
+# `aud.lib.verify`'s `ceiling_ok` imports this constant rather than
+# hard-coding its own -- previously it used a zero-tolerance `<=`, which
+# could report a correctly-limited render as a *failure* the moment it
+# landed inside this module's own tolerance band (D6, lane report). Two
+# independently-written boundary checks on the same measured quantity must
+# agree, or "the limiter says it met the ceiling" and "verify says it
+# didn't" become two different, contradictory answers to one question.
+CEILING_TOLERANCE_DB = 0.05
 
 
 def true_peak_dbtp(x: np.ndarray, sr: int, oversample: int = 4) -> float:
@@ -155,10 +168,12 @@ def brickwall(
 
     output_tp = true_peak_dbtp(y, sr, oversample=oversample)
     max_gain_reduction_db = 20.0 * np.log10(max(float(np.min(smoothed)), _EPS))
-    # Small numerical tolerance: a limiter that lands within 0.05 dB of the
-    # ceiling due to floating-point/oversampling-filter ripple has met it in
-    # every practical sense; anything beyond that is reported honestly as not met.
-    ceiling_met = bool(output_tp <= ceiling_dbtp + 0.05)
+    # Small numerical tolerance: a limiter that lands within CEILING_TOLERANCE_DB
+    # of the ceiling due to floating-point/oversampling-filter ripple has met it
+    # in every practical sense; anything beyond that is reported honestly as not
+    # met. See CEILING_TOLERANCE_DB's own docstring for why `aud.lib.verify`
+    # must use this exact same constant rather than its own.
+    ceiling_met = bool(output_tp <= ceiling_dbtp + CEILING_TOLERANCE_DB)
 
     stats = {
         "input_true_peak_dbtp": input_tp,

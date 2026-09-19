@@ -175,12 +175,18 @@ A filler word — "umm", "uh", "ehm" — or a hesitation long enough to be treat
 | `min_pause_ms` | float | Pauses at least this long were reported as hesitations. |
 | `engine` | string | The recognition backend, e.g. `"faster-whisper"`. |
 | `model` | string | The model identifier that backend was run with. |
+| `degenerate_words_dropped` | integer, optional | How many recognised words the backend reported with `start == end` (a zero-duration word), and were therefore dropped rather than turned into an invalid `end_s > start_s` region. `0` if none were. **Optional**: a document from a build predating this field will not have it; a reader must not require it. |
 
 `engine` and `model` are recorded because a filler document is the one kind whose contents
 depend on a model, and a reader deserves to know which one. This is a **local** recogniser, not
 an AI provider: `detect fillers` needs no credential and makes no network call at run time. It
 needs the `speech` extra installed, and refuses by name when it is absent — see
 [Producing a regions document](#producing-a-regions-document).
+
+A word-timing backend occasionally reports a word with no duration at all. Rather than let one
+such word invalidate the *entire* document (every other, correctly-timed, filler word in the
+file would be lost with it), that word is dropped and counted in `degenerate_words_dropped`
+instead — see [Additive, compatible change](#versioning).
 
 ## Positions are bound to one file
 

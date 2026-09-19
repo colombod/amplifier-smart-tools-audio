@@ -213,6 +213,26 @@ def preset_show(name: str) -> Plan:
 _SNAP_MODES = ("zero_crossing", "silence", "transient", "none")
 _CROSSFADE_SHAPES = ("equal_power", "linear")
 
+# `aud detect fillers` (faster-whisper) reports a filler word's END timestamp
+# systematically 175-200 ms EARLY -- it closes the word before the vowel
+# actually decays. Measured against exact ground truth (two filler words,
+# forced-aligned): "um" truth 0.599-0.938s, returned 0.600-0.740s (end error
+# -198.4 ms); "uh" truth 2.765-3.154s, returned 2.800-2.980s (end error
+# -174.2 ms). Start timestamps are accurate (+0.8ms, +34.9ms). Left
+# uncompensated, `cut` removes exactly the reported (too-short) span and an
+# audible remnant of the filler survives ("um" -> "hmm").
+#
+# This is deliberately NOT implemented via `pad_out_ms`/`pad_in_ms`: per
+# contracts/plan.v1.md#padding, padding can only ever SHRINK what is
+# removed -- "a control that could also remove more would not be safe to
+# reach for" -- and this defect needs the opposite, an EXTENSION past a
+# recogniser's known-early boundary. So `_FILLER_TAIL_PAD_MS` instead
+# extends the raw `end_s` of each region, per-region, at the one point
+# `cut` still knows the document's `kind` (see `cut`'s body) -- before
+# padding/snap ever see it, and without changing `pad_out_ms`/`pad_in_ms`'s
+# defaults or shrink-only semantics for any other kind of region.
+_FILLER_TAIL_PAD_MS = 200.0
+
 
 def _validate_edit_point_params(
     *,
@@ -275,6 +295,7 @@ def cut(
     fade_in_ms: float = 0.0,
     crossfade_ms: float = 10.0,
     crossfade_shape: str = "equal_power",
+    filler_tail_pad_ms: float | None = None,
 ) -> Plan:
     """Editing stage: remove an explicit list of regions from the programme.
 
@@ -287,6 +308,17 @@ def cut(
     `cut` is handed positions a caller measured and means literally, so its
     padding defaults to none -- widening someone's stated edit unasked would
     be a surprise (see contracts/plan.v1.md#padding).
+
+    `filler_tail_pad_ms` compensates a specific, measured recogniser bias
+    instead: when the piped-in document has `kind == "filler"`, each
+    region's `end_s` is extended by this many ms (clamped so it never
+    crosses into the next region) before edit-point resolution ever sees
+    it, because `aud detect fillers`' word-end timestamps are systematically
+    ~175-200 ms early (see the module-level `_FILLER_TAIL_PAD_MS` comment
+    for the measurement). Left at its default (`None`), the extension is
+    `_FILLER_TAIL_PAD_MS` for a `kind == "filler"` document and `0.0` for
+    any other kind -- `cut`'s general padding defaults are unchanged either
+    way. Pass an explicit value (`0.0` disables it) to override.
     """
     _validate_edit_point_params(
         pad_out_ms=pad_out_ms,
@@ -298,6 +330,13 @@ def cut(
         crossfade_ms=crossfade_ms,
         crossfade_shape=crossfade_shape,
     )
+    if filler_tail_pad_ms is not None and (not math.isfinite(filler_tail_pad_ms) or filler_tail_pad_ms < 0.0):
+        raise AudError(
+            code="bad_param",
+            message=f"filler_tail_pad_ms must be null or a finite number >= 0, got {filler_tail_pad_ms!r}.",
+            remedy="Use a non-negative number of milliseconds, e.g. --filler-tail-pad 200, or omit it to use "
+            "the kind-aware default.",
+        )
     try:
         from aud.core.regions import read_regions
     except ImportError as exc:
@@ -313,7 +352,26 @@ def cut(
             "--snap transient elsewhere.",
         )
 
-    regions = [{"start_s": float(region.start_s), "end_s": float(region.end_s)} for region in doc.regions]
+    if filler_tail_pad_ms is not None:
+        tail_pad_ms = filler_tail_pad_ms
+    elif doc.kind == "filler":
+        tail_pad_ms = _FILLER_TAIL_PAD_MS
+    else:
+        tail_pad_ms = 0.0
+
+    n_regions = len(doc.regions)
+    regions = []
+    for i, region in enumerate(doc.regions):
+        end_s = float(region.end_s)
+        if tail_pad_ms > 0.0:
+            # Never let the compensation eat into the next region -- there is
+            # no signal length known yet at build time (that clamp already
+            # happens at render time, in resolve_points), but this region's
+            # neighbour IS known here.
+            limit = float(doc.regions[i + 1].start_s) if i + 1 < n_regions else math.inf
+            end_s = min(end_s + tail_pad_ms / 1000.0, limit)
+        regions.append({"start_s": float(region.start_s), "end_s": end_s})
+
     params = {
         "regions": regions,
         "pad_out_ms": pad_out_ms,
@@ -324,6 +382,7 @@ def cut(
         "fade_in_ms": fade_in_ms,
         "crossfade_ms": crossfade_ms,
         "crossfade_shape": crossfade_shape,
+        "filler_tail_pad_ms": tail_pad_ms,
     }
     return append(plan, "cut", params)
 
@@ -1183,11 +1242,23 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
 
 
 def verify(path: str, target_lufs: float | None = None, ceiling_dbtp: float | None = None) -> dict:
-    """Measure a render against the loudness/ceiling it was asked for."""
+    """Measure a render against the loudness/ceiling it was asked for.
+
+    `ceiling_ok` uses `aud.dsp.limiter.CEILING_TOLERANCE_DB` -- the exact
+    same numerical tolerance `limiter.brickwall`'s own `ceiling_met` uses --
+    rather than a zero-tolerance `<=`. `true_peak_dbtp` is an oversampled
+    ESTIMATE, not an exact quantity, and a limiter working exactly as
+    designed can settle right at that tolerance boundary; a stricter check
+    here would report a correctly-limited render as a verification failure
+    (D6, lane report). Both checks importing one constant is what keeps
+    them from silently drifting apart again.
+    """
     try:
         from aud.dsp import analysis, io
     except ImportError as exc:
         raise _not_implemented("verify", exc) from exc
+    from aud.dsp.limiter import CEILING_TOLERANCE_DB
+
     samples, sample_rate = _read_audio(io, path)
     measured = analysis.analyze(samples, sample_rate)
     result: dict[str, Any] = {"measured": measured}
@@ -1198,7 +1269,7 @@ def verify(path: str, target_lufs: float | None = None, ceiling_dbtp: float | No
     if ceiling_dbtp is not None:
         result["ceiling_dbtp"] = ceiling_dbtp
         measured_ceiling = measured.get("true_peak_dbtp")
-        result["ceiling_ok"] = measured_ceiling is not None and measured_ceiling <= ceiling_dbtp
+        result["ceiling_ok"] = measured_ceiling is not None and measured_ceiling <= ceiling_dbtp + CEILING_TOLERANCE_DB
     return result
 
 

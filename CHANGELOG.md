@@ -9,6 +9,68 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-19
+
+Five defects, every one found by running the tool for real in a throwaway container against
+real synthesised speech, and every one invisible to a test suite of 284 passing tests. Nothing
+here was caught by reading code.
+
+### Fixed
+
+- **`detect fillers` ignored the sample rate.** `speech.detect_fillers` accepted `sr` and never
+  used it; faster-whisper assumes 16 kHz for array input. Identical audio gave a filler at
+  2.800–2.980 s at 16 kHz and at **3.840–4.060 s at 22.05 kHz** — a measured 1.3714 stretch
+  against the expected 1.3781. At 44.1 kHz every timestamp would be 2.76× out, at 48 kHz 3×,
+  and those positions feed straight into `cut`, so the tool would have cut the wrong part of
+  the file. Now resampled to 16 kHz before transcription; verified to preserve real duration
+  exactly at 16 k, 22.05 k, 44.1 k and 48 kHz.
+- **One zero-duration word destroyed the entire document.** faster-whisper can emit a word with
+  `start == end`; the parser passed it through and validation then rejected the WHOLE regions
+  document, losing every other correct detection with it. Seen live in **3 runs out of 5** on a
+  58-second file. Degenerate words are now dropped at the parser and COUNTED in the document's
+  `detection` block, so the caller can see it happened.
+- **The CLI's default vocabulary could not find "um".** Two filler-word lists existed — the
+  library's and a second hard-coded string in the CLI — and the CLI's always won. `um`, the
+  commonest English filler and one this tool's own manifest advertises, was not in it. Measured
+  cost on identical audio: **1 of 3 fillers found with defaults, 2 of 3 with the library's
+  list.** There is now one list, and a test asserts the CLI's effective default IS that list.
+- **`--factor` was inverted on the Signalsmith engine.** `--factor 1.2` produced `out/in =
+  0.8333` — 7.287 s of speech became 6.072 s when asked to lengthen. Signalsmith's `timeFactor`
+  is the reciprocal of ours. Worst of all it is selected AUTOMATICALLY when the `stretch` extra
+  is present, so installing an optional quality tier silently reversed the meaning of the flag,
+  and the stats reported `measured_factor: 0.833` beside the requested `1.2` with nothing
+  comparing them. Fixed, and the measured ratio is now CHECKED against the request on both
+  engines — a stat that is computed, reported and never checked is an alarm nobody wired up.
+- **Cutting a filler left an audible remnant.** Whisper closes a word 175–200 ms before the
+  vowel stops (measured: `um` truth 0.599–0.938 s, returned 0.600–0.740 s). `cut` took that
+  literally, so transcribing the output showed *"So, um,"* had become *"So, hmm,"* rather than
+  disappearing. Filler regions now carry a kind-aware `filler_tail_pad_ms` (200 ms, justified
+  by that measurement) which the caller can override. `pad_out_ms` was deliberately NOT
+  repurposed: the contract promises padding can only ever shrink a cut, and inverting that for
+  every other caller to fix this would have been the wrong trade.
+- **Two ceiling checks disagreed.** `lib.verify()` used a zero-tolerance comparison while
+  `limiter.brickwall` used a documented 0.05 dB one, so a limiter working exactly as designed
+  could be reported as failing. The tolerance is now defined once and imported by both.
+
+### Verified
+
+- 315 tests pass (was 284). Conformance 16 PASS / 0 FAIL.
+- The container run that found all of this also confirmed what works: the parser DID survive
+  contact with real faster-whisper objects, `aud[speech,stretch]` installs in 16.6 s with no
+  compiler and no credential, and the full `detect fillers | cut --snap transient | render`
+  chain ran end to end on real speech with the removed durations reconciling exactly
+  (7.286625 s → 7.097313 s, the 10 ms difference being one crossfade).
+- Filler detection cost, so it can be budgeted: a 142 MiB model, ~15 s first-run download,
+  ~1.2 s fixed cost per invocation, and roughly 1.6–5× realtime on CPU.
+
+### Known limits
+
+- **Three tests skip on a machine without the `stretch` extra**, and they are the ones covering
+  the Signalsmith engine. The inversion fix is proven against a mock built from the measured
+  behaviour of the real library, not against the library itself. That gap is named in the skip
+  reason rather than hidden, and closing it needs a container.
+- Only Anthropic has been exercised live among the four model backends.
+
 ## [0.7.0] - 2026-09-19
 
 The quiet end of dynamics, presets, and the contract finally matching the code. Plus two

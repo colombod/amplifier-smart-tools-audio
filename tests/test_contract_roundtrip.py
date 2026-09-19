@@ -197,7 +197,44 @@ def test_hand_written_loudness_with_a_target_below_negative_sixty_renders() -> N
 # ---------------------------------------------------------------------------
 
 
+# --- Regression guard: `ceiling_met` must not be vacuous -------------------
+#
+# `_noise()` (std 0.1) never comes close to a -1.0 dBTP ceiling, so
+# `ceiling_met is True` on it would pass whether or not `ceiling_dbtp`,
+# `lookahead_ms`, `release_ms` and `oversample` were even read off the
+# hand-written params -- see the agent report and
+# tests/test_dsp_limiter.py's own regression-guard comment. This is
+# specifically the test that claims to exercise every one of those
+# documented fields, so it should force the limiter to actually engage
+# using them, not just accept the field names syntactically. Reuses
+# test_dsp_limiter.py's own proven recipe (a faded plateau several dB over
+# the ceiling) directly against `engine.apply_plan`, so it is exercised
+# through the exact contract-shaped params a hand-written plan would use.
+_FORCED_CEILING_DBTP = -1.0
+_FORCED_HEADROOM_OVER_CEILING_DB = 6.0
+_FORCED_FADE_MS = 50.0  # avoids resample_poly FIR ringing on a hard edge -- see test_dsp_limiter.py
+_GAIN_REDUCTION_TOLERANCE_DB = 0.05  # same tolerance test_dsp_limiter.py uses for this exact recipe
+
+
+def _forced_plateau_signal(sr: int, seconds: float = 1.0) -> tuple[np.ndarray, float]:
+    """A constant-level plateau `_FORCED_HEADROOM_OVER_CEILING_DB` dB over
+    the ceiling, faded in/out. See test_dsp_limiter.py's identical helper
+    for the full rationale (measured there; holds here too since it is the
+    same `dsp.limiter.brickwall` underneath).
+    """
+    input_peak_dbtp = _FORCED_CEILING_DBTP + _FORCED_HEADROOM_OVER_CEILING_DB
+    amplitude = 10.0 ** (input_peak_dbtp / 20.0)
+    n = int(seconds * sr)
+    fade_n = int(_FORCED_FADE_MS / 1000.0 * sr)
+    x = np.full(n, amplitude)
+    ramp = np.linspace(0.0, 1.0, fade_n)
+    x[:fade_n] *= ramp
+    x[-fade_n:] *= ramp[::-1]
+    return np.stack([x, x], axis=1), input_peak_dbtp
+
+
 def test_hand_written_limit_with_every_documented_field_renders() -> None:
+    x, input_peak_dbtp = _forced_plateau_signal(SR)
     plan = _hand_written_plan(
         [
             {
@@ -211,8 +248,21 @@ def test_hand_written_limit_with_every_documented_field_renders() -> None:
             }
         ]
     )
-    y, report = _render(plan, _noise())
+    y, report = _render(plan, x)
     assert np.all(np.isfinite(y))
+    limit_report = report["stages"][0]
+    print(f"\n[contract] limit stage: {limit_report}")
+    # The canary: without this, `ceiling_met` below proves nothing about
+    # whether the documented fields actually reached the DSP.
+    assert limit_report["max_gain_reduction_db"] != 0.0, (
+        "the forced plateau did not exercise the limiter (max_gain_reduction_db == 0.0) -- "
+        "ceiling_met below is not evidence the documented fields are wired up; fix the fixture, not the assertion"
+    )
+    expected_reduction_db = _FORCED_CEILING_DBTP - input_peak_dbtp  # exact arithmetic: -6.0 dB
+    assert abs(limit_report["max_gain_reduction_db"] - expected_reduction_db) < _GAIN_REDUCTION_TOLERANCE_DB, (
+        f"measured gain reduction {limit_report['max_gain_reduction_db']:.4f} dB strayed from the expected "
+        f"{expected_reduction_db:.4f} dB by more than {_GAIN_REDUCTION_TOLERANCE_DB} dB"
+    )
     assert report["stages"][0]["ceiling_met"] is True
 
 
@@ -233,6 +283,26 @@ def test_hand_written_limit_with_no_params_uses_the_contracts_release_default() 
 # Whole-chain smoke test: every field name in one hand-written plan at once,
 # for every stage this task touched.
 # ---------------------------------------------------------------------------
+
+# --- Regression guard: `ceiling_met` must not be vacuous -------------------
+#
+# Plain `_noise(seconds=2.0)` (std 0.1) never comes close to a -1.0 dBTP
+# ceiling by the time it reaches the end of this chain, so
+# `ceiling_met is True` would pass with the limiter never touching the
+# signal -- see the agent report and test_dsp_limiter.py's own
+# regression-guard comment. Unlike `lib.render`'s CLI-driven tests (which
+# round-trip through an actual WAV file and so must stay under the file
+# format's +-1.0 clip ceiling), this test drives `engine.apply_plan`
+# directly on an in-memory array with no such cap, so a much smaller
+# multiplier on a brief spike is enough to force real engagement.
+_NOISE_HOT_SPIKE_SAMPLES = 50  # ~1ms @ 48kHz
+_NOISE_HOT_SPIKE_MULTIPLIER = 10.0
+# Measured on this exact chain (see agent report): multipliers below ~4
+# leave the limiter fully quiet (max_gain_reduction_db == 0.0); 5-20
+# reliably engage it (multiple dB of real reduction) while
+# `ceiling_met` stays True (output settles ~0.03-0.05 dB under the
+# ceiling, within limiter.py's own declared 0.05 dB numerical tolerance).
+# 10.0 sits in the middle of that band.
 
 
 def test_a_single_hand_written_plan_covering_eq_compress_saturate_loudness_limit_renders() -> None:
@@ -263,7 +333,19 @@ def test_a_single_hand_written_plan_covering_eq_compress_saturate_loudness_limit
             {"stage": "limit", "params": {"ceiling_dbtp": -1.0}},
         ]
     )
-    y, report = _render(plan, _noise(seconds=2.0))
+    x = _noise(seconds=2.0)
+    hot = slice(SR // 4, SR // 4 + _NOISE_HOT_SPIKE_SAMPLES)
+    x[hot] *= _NOISE_HOT_SPIKE_MULTIPLIER
+    y, report = _render(plan, x)
     assert np.all(np.isfinite(y))
     assert [s["stage"] for s in report["stages"]] == ["eq", "compress", "saturate", "loudness", "limit"]
+
+    limit_report = report["stages"][-1]
+    print(f"\n[contract] whole-chain limit stage: {limit_report}")
+    # The canary: without this, `ceiling_met` below proves nothing -- it
+    # would be equally true of a limiter that never touched the signal.
+    assert limit_report["max_gain_reduction_db"] != 0.0, (
+        "the hot noise fixture did not exercise the limiter (max_gain_reduction_db == 0.0) -- "
+        "ceiling_met below is not evidence the whole chain works; fix the fixture, not the assertion"
+    )
     assert report["stages"][-1]["ceiling_met"] is True

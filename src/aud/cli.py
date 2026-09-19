@@ -261,7 +261,10 @@ def _build_parser() -> _Parser:
     detect_silence_parser.add_argument("--min-len", dest="min_len", type=float, default=400.0)
     detect_fillers_parser = detect_sub.add_parser("fillers")
     detect_fillers_parser.add_argument("path")
-    detect_fillers_parser.add_argument("--words", type=str, default="umm,uhm,uh,ehm,er,ah")
+    # Default is None, not a second hard-coded vocabulary: aud.dsp.speech.FILLER_WORDS
+    # is the ONE place this list is defined (see D3 in the lane report -- a
+    # second copy here previously always won and never contained "um").
+    detect_fillers_parser.add_argument("--words", type=str, default=None)
     detect_fillers_parser.add_argument("--min-pause", dest="min_pause", type=float, default=700.0)
 
     # Editing stages. These DO append to the plan, at the front of canonical order.
@@ -273,6 +276,11 @@ def _build_parser() -> _Parser:
     # threshold, whose bias is systematically INSIDE the speech, so padding is
     # on by default there. See contracts/plan.v1.md#edit-point-resolution.
     _add_edit_point_arguments(cut_parser, pad_default=0.0)
+    # Unlike --pad-out/--pad-in (shrink-only, see above), this EXTENDS a
+    # filler region's end_s past a recogniser's known-early boundary --
+    # default None lets aud.lib.cut pick the kind-aware default (200ms for
+    # kind="filler", 0 otherwise); see aud/lib.py's _FILLER_TAIL_PAD_MS.
+    cut_parser.add_argument("--filler-tail-pad", dest="filler_tail_pad", type=float, default=None)
 
     strip_silence_parser = sub.add_parser("strip-silence")
     strip_silence_parser.add_argument("--threshold", type=float, default=6.0)
@@ -446,6 +454,7 @@ def _dispatch(verb: str, args: argparse.Namespace, stdin_text: str | None) -> An
             fade_in_ms=args.fade_in,
             crossfade_ms=args.crossfade,
             crossfade_shape=args.crossfade_shape,
+            filler_tail_pad_ms=args.filler_tail_pad,
         )
     if verb in STAGE_VERB_NAMES:
         plan = read_plan(stdin_text)
@@ -465,7 +474,11 @@ def _dispatch(verb: str, args: argparse.Namespace, stdin_text: str | None) -> An
         if args.detect_kind == "silence":
             return lib.detect_silence(args.path, threshold_above_floor_db=args.threshold, min_len_ms=args.min_len)
         if args.detect_kind == "fillers":
-            words = [w.strip() for w in args.words.split(",") if w.strip()] or None
+            # args.words is None unless the caller passed --words explicitly
+            # (see _build_parser); None flows straight through so
+            # aud.dsp.speech.FILLER_WORDS -- the one place that vocabulary is
+            # defined -- is what actually runs by default (D3, lane report).
+            words = [w.strip() for w in args.words.split(",") if w.strip()] if args.words else None
             return lib.detect_fillers(args.path, words=words, min_pause_ms=args.min_pause)
         raise AssertionError(f"unreachable detect kind: {args.detect_kind}")
     if verb == "advise":

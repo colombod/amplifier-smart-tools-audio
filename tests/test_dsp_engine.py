@@ -32,8 +32,33 @@ def _noise(seconds: float = 2.0, sr: int = SR, seed: int = 0) -> np.ndarray:
     return rng.normal(0.0, 0.1, size=(n, 2))
 
 
+# --- Regression guard: `ceiling_met` must not be vacuous, and the
+# "sane, not garbage" bound must actually be a bound --------------------
+#
+# Plain `_noise()` (std 0.1) never comes close to a -1.0 dBTP ceiling, so
+# `ceiling_met is True` reads True whether or not the limiter did anything
+# -- see the agent report and test_dsp_limiter.py's own regression-guard
+# comment. Worse, `input_true_peak_dbtp > output_true_peak_dbtp - 20` is
+# satisfied by a silent no-op limiter just as easily as a working one (a
+# 20 dB-wide band is not a bound on limiting behavior, only a guard
+# against genuinely garbage numbers). A brief hot spike added to the noise
+# forces real engagement through this exact eq/compress/loudness/limit
+# chain, at which point the *measured* gap between input and output true
+# peak becomes meaningful evidence rather than a tautology.
+_HOT_SPIKE_SAMPLES = 50  # ~1ms @ 48kHz
+_HOT_SPIKE_MULTIPLIER = 10.0
+# Measured on this exact chain (see agent report): multipliers below ~4
+# leave the limiter fully quiet (max_gain_reduction_db == 0.0); 5-20
+# reliably engage it (multiple dB of real reduction) with the output
+# settling at a stable ~-1.37 dBTP -- comfortably under the ceiling, not
+# just within limiter.py's 0.05 dB numerical tolerance. 10.0 sits in the
+# middle of that band.
+
+
 def test_apply_plan_runs_eq_compress_loudness_limit_end_to_end_with_real_numbers():
     x = _noise()
+    hot = slice(SR // 4, SR // 4 + _HOT_SPIKE_SAMPLES)
+    x[hot] *= _HOT_SPIKE_MULTIPLIER
     stages = [
         _Stage(
             "eq",
@@ -89,9 +114,18 @@ def test_apply_plan_runs_eq_compress_loudness_limit_end_to_end_with_real_numbers
 
     limit_report = report["stages"][3]
     print(f"[engine] limit: {limit_report}")
+    # The canary: without this, `ceiling_met` and the peak-gap check below
+    # prove nothing -- both are equally satisfied by a limiter that never
+    # touched the signal.
+    assert limit_report["max_gain_reduction_db"] != 0.0, (
+        "the hot fixture did not exercise the limiter (max_gain_reduction_db == 0.0) -- "
+        "ceiling_met/the peak-gap check below are not evidence the limiter works; fix the fixture, not the assertion"
+    )
     assert limit_report["ceiling_met"] is True
     assert limit_report["output_true_peak_dbtp"] <= -1.0 + 0.1
-    assert limit_report["input_true_peak_dbtp"] > limit_report["output_true_peak_dbtp"] - 20  # sane, not garbage
+    # A real bound now that the limiter is known to be engaged: the input
+    # peak must sit measurably (not just "not garbage") above the output.
+    assert limit_report["input_true_peak_dbtp"] > limit_report["output_true_peak_dbtp"] + 1.0
 
 
 def test_apply_plan_raises_a_clear_error_for_an_unimplemented_stage():

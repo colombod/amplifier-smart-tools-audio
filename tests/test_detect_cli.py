@@ -7,13 +7,18 @@ it calls do.
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 import soundfile as sf
+
+from aud import lib
+from aud.cli import _build_parser, _dispatch
 
 
 def _run(args: list[str], input_text: str = "", env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -152,3 +157,45 @@ def test_detect_verb_registered_and_documented() -> None:
     proc = _run(["detect", "--help"])
     assert proc.returncode == 0, proc.stderr
     assert "detect -- find things in the audio" in proc.stdout
+
+
+# --- D3: the CLI's default filler vocabulary must not shadow the library's -
+
+
+def test_detect_fillers_cli_words_defaults_to_none_not_a_second_vocabulary() -> None:
+    """A caller who does not pass --words must get argparse's `None`, not a
+    second, hard-coded vocabulary string -- that second copy is exactly what
+    let 'um' (arguably the most common English filler) go undetectable by
+    default (D3, lane report), because the CLI's copy always won.
+    """
+    parser = _build_parser()
+    args = parser.parse_args(["detect", "fillers", "in.wav"])
+    assert args.words is None
+
+
+def test_detect_fillers_cli_default_vocabulary_is_speechs_filler_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The effective vocabulary the CLI hands to the library, with no
+    --words given, must be `None` -- so `aud.dsp.speech.FILLER_WORDS`, the
+    one place that vocabulary is defined, is what actually runs.
+    """
+    captured: dict[str, object] = {}
+
+    def fake_detect_fillers(path: str, words: list[str] | None = None, min_pause_ms: float = 700.0) -> dict:
+        captured["words"] = words
+        captured["min_pause_ms"] = min_pause_ms
+        return {"kind": "filler"}
+
+    monkeypatch.setattr(lib, "detect_fillers", fake_detect_fillers)
+
+    parser = _build_parser()
+    args: argparse.Namespace = parser.parse_args(["detect", "fillers", "in.wav"])
+    _dispatch("detect", args, None)
+
+    assert captured["words"] is None
+
+
+def test_detect_fillers_cli_explicit_words_still_override() -> None:
+    """--words, when given, must still work -- only the *default* changed."""
+    parser = _build_parser()
+    args = parser.parse_args(["detect", "fillers", "in.wav", "--words", "like,basically"])
+    assert args.words == "like,basically"

@@ -12,10 +12,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
+import soundfile as sf
 
 from aud import lib
 from aud.schemas import AudError
+
+_SR = 44100
 
 _PROVIDER_ENV_VARS = (
     "ANTHROPIC_API_KEY",
@@ -43,6 +47,60 @@ _SIMPLE_CHAIN = json.dumps(
     }
 )
 
+# --- Regression guard: `lufs_ok`/`ceiling_ok` must not be vacuous ----------
+#
+# Both are booleans that read True whenever the measured value happens to
+# land on the right side of the line -- including when the limiter never
+# engaged at all. Measured (see agent report): `tiny_wav` run through
+# `_SIMPLE_CHAIN` (just loudness + limit) never engages the limiter
+# (max_gain_reduction_db == 0.0) -- the loudness stage's own gain already
+# lands the peak under the ceiling by luck of this content, not by
+# enforcement. A bare loudness+limit chain also turns out to be a poor
+# vehicle for *forcing* engagement with real margin: a brief transient hot
+# enough to push the true peak over the ceiling gets fully absorbed by the
+# limiter only to within its own ~0.05 dB numerical tolerance (see
+# limiter.py), not lib.verify()'s zero-tolerance `ceiling_ok` -- there is no
+# transient shape that is simultaneously "hot enough to force engagement"
+# and "settles with comfortable strict-ceiling margin" without some tonal
+# reshaping ahead of the limiter (measured extensively; see agent report).
+# `tests/test_pipeline_all_stages.py` already established exactly such a
+# shape -- a brief hot spike through eq/compress/saturate/loudness/limit,
+# landing at -1.24 dBTP (comfortable margin) with -3.3 dB of real gain
+# reduction. This test reuses that same proven recipe (as a richer,
+# still-simple FakeBackend plan) rather than re-deriving a new one for a
+# bare two-stage chain that structurally can't produce a clean result.
+_HOT_CHAIN = json.dumps(
+    {
+        "stages": [
+            {"stage": "eq", "params": {"hpf": 40.0, "peaks": [[3000.0, -3.0, 1.2]]}, "reason": "tone shaping"},
+            {"stage": "compress", "params": {"bands": [120.0, 900.0, 5500.0], "ratio": 3.0}, "reason": "dynamics"},
+            {"stage": "saturate", "params": {"drive": 1.5, "mix": 0.25}, "reason": "warmth"},
+            {"stage": "loudness", "params": {"target_lufs": -14.0}, "reason": "loudness target"},
+            {"stage": "limit", "params": {"ceiling_dbtp": -1.0}, "reason": "ceiling"},
+        ]
+    }
+)
+_HOT_SPIKE_SAMPLES = 50  # ~1.1 ms @ 44.1kHz -- same recipe as test_pipeline_all_stages.py
+_HOT_SPIKE_MULTIPLIER = 300.0
+_CEILING_TOLERANCE_DB = 0.05  # same numerical tolerance limiter.py itself uses for ceiling_met
+_LUFS_TOLERANCE_LU = 0.5  # same tolerance lib.verify() itself uses for lufs_ok
+
+
+def _hot_wav(tmp_path: Path) -> Path:
+    """Like conftest's `tiny_wav`, but with a hot enough transient that the
+    limiter must engage once run through `_HOT_CHAIN`.
+    """
+    seconds = 2.0
+    t = np.arange(int(_SR * seconds)) / _SR
+    x = 0.25 * np.sin(2 * np.pi * 220 * t) + 0.15 * np.sin(2 * np.pi * 3000 * t)
+    rng = np.random.default_rng(0)
+    x = x + 0.02 * rng.standard_normal(t.size)
+    hot = slice(_SR // 4, _SR // 4 + _HOT_SPIKE_SAMPLES)
+    x[hot] *= _HOT_SPIKE_MULTIPLIER
+    path = tmp_path / "hot_in.wav"
+    sf.write(str(path), np.stack([x, x], axis=1), _SR, subtype="PCM_24")
+    return path
+
 
 # --- lib-level: FakeBackend injection, real render/verify -------------------
 
@@ -61,26 +119,41 @@ def test_lib_advise_returns_a_plan_that_pipes_into_render(tiny_wav: Path, tmp_pa
     assert stage_names == ["loudness", "limit"]
 
 
-def test_lib_master_renders_and_verifies_end_to_end(tiny_wav: Path, tmp_path: Path) -> None:
+def test_lib_master_renders_and_verifies_end_to_end(tmp_path: Path) -> None:
+    hot_wav = _hot_wav(tmp_path)
     out_path = tmp_path / "mastered.wav"
     result = lib.master(
-        str(tiny_wav),
+        str(hot_wav),
         str(out_path),
         target_lufs=-14.0,
         ceiling_dbtp=-1.0,
-        backend=FakeBackend(_SIMPLE_CHAIN),
+        backend=FakeBackend(_HOT_CHAIN),
         model="fake-1",
     )
     assert out_path.exists()
     assert result["out_path"] == str(out_path)
-    assert [s["stage"] for s in result["stages"]] == ["loudness", "limit"]
+    assert [s["stage"] for s in result["stages"]] == ["eq", "compress", "saturate", "loudness", "limit"]
     assert result["render"]["stages"][-1]["stage"] == "limit"
+
+    limit_stage = result["render"]["stages"][-1]
+    print(f"\n[advise_master] limit stage: {limit_stage}")
+    # The canary: without this, `ceiling_ok` below proves nothing -- it would
+    # be equally true of a limiter that never touched the signal.
+    assert limit_stage["max_gain_reduction_db"] != 0.0, (
+        "the hot fixture did not exercise the limiter (max_gain_reduction_db == 0.0) -- "
+        "ceiling_ok/lufs_ok below are not evidence master() works; fix the fixture, not the assertion"
+    )
+
+    measured = result["verify"]["measured"]
+    assert abs(measured["integrated_lufs"] - (-14.0)) <= _LUFS_TOLERANCE_LU, result["verify"]
+    assert measured["true_peak_dbtp"] <= -1.0 + _CEILING_TOLERANCE_DB, result["verify"]
+    # The booleans are still necessary, just no longer sufficient on their own.
     assert result["verify"]["lufs_ok"] is True
     assert result["verify"]["ceiling_ok"] is True
     assert isinstance(result["verify"]["measured"]["integrated_lufs"], float)
     assert isinstance(result["verify"]["measured"]["true_peak_dbtp"], float)
     # The plan travels as a plain dict in master's result -- JSON-serializable, matching the CLI's envelope.
-    assert result["plan"]["stages"][0]["stage"] in ("loudness", "limit")
+    assert result["plan"]["stages"][0]["stage"] == "eq"
     json.dumps(result)  # must not raise: master's whole result is one JSON document
 
 
@@ -100,9 +173,6 @@ def test_lib_master_dry_run_does_not_render(tiny_wav: Path, tmp_path: Path) -> N
 
 
 def test_lib_advise_with_reference_measures_both_files(tiny_wav: Path, tmp_path: Path) -> None:
-    import numpy as np
-    import soundfile as sf
-
     reference = tmp_path / "reference.wav"
     sr = 44100
     t = np.arange(int(sr * 1.5)) / sr

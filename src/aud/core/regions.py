@@ -60,7 +60,9 @@ REGIONS_FORMAT = 1
 _KINDS: tuple[str, ...] = ("silence", "transient", "filler")
 
 # Per-kind fields beyond the universal start_s/end_s, and the detection keys
-# that kind requires. Both are exact sets: nothing more, nothing less.
+# that kind requires. Both are exact sets: nothing more, nothing less --
+# except for detection, which also has an optional extension point; see
+# `_OPTIONAL_DETECTION_KEYS` below.
 _REGION_FIELDS: dict[str, tuple[str, ...]] = {
     "silence": ("peak_dbfs", "rms_dbfs"),
     "transient": ("strength",),
@@ -70,6 +72,17 @@ _DETECTION_KEYS: dict[str, tuple[str, ...]] = {
     "silence": ("threshold_above_floor_db", "min_len_ms", "noise_floor_dbfs"),
     "transient": ("sensitivity", "min_gap_ms"),
     "filler": ("words", "min_pause_ms", "engine", "model"),
+}
+
+# Per-kind detection keys that MAY be present but are not required -- an
+# additive, backward-compatible extension point (contracts/regions.v1.md's
+# "Versioning" section: a new detection key stays in regions_format 1
+# because no document written before the change contains it). Kept
+# separate from `_DETECTION_KEYS` so a document produced before this key
+# existed still validates: only `_DETECTION_KEYS` drives the "missing
+# required key" check.
+_OPTIONAL_DETECTION_KEYS: dict[str, tuple[str, ...]] = {
+    "filler": ("degenerate_words_dropped",),
 }
 
 _COMMON_REGION_FIELDS = ("start_s", "end_s")
@@ -266,7 +279,9 @@ def _validate_ordering(regions: list[Region]) -> None:
 
 
 def _validate_detection(kind: str, detection: dict[str, Any]) -> None:
-    allowed = set(_DETECTION_KEYS[kind])
+    required = set(_DETECTION_KEYS[kind])
+    optional = set(_OPTIONAL_DETECTION_KEYS.get(kind, ()))
+    allowed = required | optional
     present = set(detection.keys())
     unknown = sorted(present - allowed)
     if unknown:
@@ -275,12 +290,12 @@ def _validate_detection(kind: str, detection: dict[str, Any]) -> None:
             f"detection has key(s) not valid for kind '{kind}': {', '.join(unknown)}.",
             f"For kind '{kind}', detection may only carry: {', '.join(sorted(allowed))}.",
         )
-    missing = sorted(allowed - present)
+    missing = sorted(required - present)
     if missing:
         raise _err(
             "bad_regions",
             f"detection is missing required key(s) for kind '{kind}': {', '.join(missing)}.",
-            f"For kind '{kind}', detection needs: {', '.join(sorted(allowed))}.",
+            f"For kind '{kind}', detection needs: {', '.join(sorted(required))}.",
         )
     if kind == "filler":
         words = detection.get("words")
@@ -296,6 +311,17 @@ def _validate_detection(kind: str, detection: dict[str, Any]) -> None:
                     "bad_region_field",
                     f"detection.{key} must be a string, got {detection.get(key)!r}.",
                     f"Provide {key} as a string.",
+                )
+        # Optional: absent on a document produced before this key existed
+        # (see `_OPTIONAL_DETECTION_KEYS`'s docstring). If present, it must
+        # be a real, non-negative count -- not merely present.
+        if "degenerate_words_dropped" in detection:
+            degenerate = detection["degenerate_words_dropped"]
+            if isinstance(degenerate, bool) or not isinstance(degenerate, int) or degenerate < 0:
+                raise _err(
+                    "bad_region_field",
+                    f"detection.degenerate_words_dropped must be a non-negative integer, got {degenerate!r}.",
+                    "Provide degenerate_words_dropped as a non-negative integer count, or omit it.",
                 )
 
 

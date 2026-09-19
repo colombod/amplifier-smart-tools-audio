@@ -162,6 +162,67 @@ def test_filler_confidence_out_of_range_is_rejected() -> None:
     assert exc_info.value.code == "bad_region_field"
 
 
+# --- filler detection: optional degenerate_words_dropped key (D2) ---------
+
+
+def test_filler_detection_without_degenerate_count_field_is_still_valid() -> None:
+    """`degenerate_words_dropped` is optional: a document produced before
+    this key existed (or by any producer that never sets it) must still
+    validate -- see contracts/regions.v1.md's filler detection table.
+    """
+    doc = new_regions(
+        kind="filler",
+        source="in.wav",
+        sample_rate=44100,
+        detection=_FILLER_DETECTION,
+        regions=[{"start_s": 1.0, "end_s": 1.2, "text": "um", "confidence": 0.9}],
+    )
+    assert "degenerate_words_dropped" not in doc.detection
+    # And it must still round-trip cleanly without the optional key appearing.
+    reparsed = read_regions(write_regions(doc))
+    assert "degenerate_words_dropped" not in reparsed.detection
+
+
+def test_filler_detection_with_degenerate_count_field_round_trips() -> None:
+    detection = {**_FILLER_DETECTION, "degenerate_words_dropped": 2}
+    doc = new_regions(
+        kind="filler",
+        source="in.wav",
+        sample_rate=44100,
+        detection=detection,
+        regions=[{"start_s": 1.0, "end_s": 1.2, "text": "um", "confidence": 0.9}],
+    )
+    reparsed = read_regions(write_regions(doc))
+    assert reparsed.detection["degenerate_words_dropped"] == 2
+
+
+def test_filler_detection_degenerate_count_rejects_negative() -> None:
+    detection = {**_FILLER_DETECTION, "degenerate_words_dropped": -1}
+    with pytest.raises(AudError) as exc_info:
+        new_regions(
+            kind="filler",
+            source="in.wav",
+            sample_rate=44100,
+            detection=detection,
+            regions=[{"start_s": 1.0, "end_s": 1.2, "text": "um", "confidence": 0.9}],
+        )
+    assert exc_info.value.code == "bad_region_field"
+
+
+def test_filler_detection_degenerate_count_rejects_bool() -> None:
+    """A JSON `true`/`false` is not a count, even though Python's bool is an int subclass."""
+    detection = {**_FILLER_DETECTION, "degenerate_words_dropped": True}
+    with pytest.raises(AudError) as exc_info:
+        new_regions(
+            kind="filler",
+            source="in.wav",
+            sample_rate=44100,
+            detection=detection,
+            regions=[{"start_s": 1.0, "end_s": 1.2, "text": "um", "confidence": 0.9}],
+        )
+    assert exc_info.value.code == "bad_region_field"
+
+
 def test_peak_dbfs_above_zero_is_rejected() -> None:
     with pytest.raises(AudError) as exc_info:
         new_regions(

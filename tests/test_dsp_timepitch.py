@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
+import types
+
 import numpy as np
 import pytest
 
 from aud.dsp import timepitch
 
 SR = 44100
+
+_SIGNALSMITH_INSTALLED = importlib.util.find_spec("python_stretch") is not None
 
 
 def _tone(freq: float, seconds: float, sr: int = SR, amplitude: float = 0.5) -> np.ndarray:
@@ -122,4 +128,104 @@ def test_stats_report_which_engine_ran():
 def test_forcing_signalsmith_without_the_extra_raises_a_clear_error():
     x = _tone(150.0, seconds=0.1)
     with pytest.raises(RuntimeError, match="python_stretch"):
+        timepitch.time_stretch(x, SR, factor=1.2, quality="signalsmith")
+
+
+# ---------------------------------------------------------------------------
+# D4 regression: Signalsmith's `--factor` inversion, and the guard that
+# would have caught it (contracts: measured output duration must match the
+# requested factor, on BOTH engines, within a stated tolerance).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("quality", ["phase_vocoder", "signalsmith"])
+@pytest.mark.parametrize("factor", [0.8, 1.2, 2.0])
+def test_measured_duration_ratio_matches_requested_factor(quality, factor):
+    """Real call, both engines -- the literal regression guard for D4.
+
+    `signalsmith` is skipped-with-reason when python_stretch is not
+    installed (installs here are DTU-only, see AGENTS.md); the assertion
+    below is therefore UNVERIFIED against a real Signalsmith install on
+    this host and is only exercised by the mocked test below instead.
+    """
+    if quality == "signalsmith" and not _SIGNALSMITH_INSTALLED:
+        pytest.skip("python_stretch (the 'stretch' extra) is not installed on this host -- DTU-only install")
+
+    x = _tone(220.0, seconds=1.0)
+    y, stats = timepitch.time_stretch(x, SR, factor=factor, quality=quality)
+
+    assert stats["engine"] == quality
+    measured_ratio = y.shape[0] / x.shape[0]
+    print(f"\n[timepitch] engine={quality} requested factor={factor} measured ratio={measured_ratio:.4f}")
+    assert measured_ratio == pytest.approx(factor, rel=timepitch._STRETCH_RATIO_RELATIVE_TOLERANCE)
+    assert stats["measured_factor"] == pytest.approx(measured_ratio, rel=1e-9)
+
+
+class _FakeSignalsmithStretch:
+    """Stands in for `python_stretch.Signalsmith.Stretch()`.
+
+    Encodes the REAL, measured behaviour reported in D4: Signalsmith's
+    `timeFactor` is the reciprocal of this module's `factor` convention, so
+    `out_len == round(in_len / timeFactor)`. Exercises the actual
+    `_stretch_signalsmith` code path (including its `1.0 / factor` fix) --
+    this is not a stand-in for the assertion, it is a stand-in for the
+    third-party library, so the fix itself is what gets tested.
+    """
+
+    def __init__(self) -> None:
+        self.timeFactor = 1.0
+
+    def preset(self, channels: int, sr: int) -> None:
+        del sr
+        self._channels = channels
+
+    def process(self, audio: np.ndarray) -> np.ndarray:
+        in_len = audio.shape[1]
+        out_len = max(1, round(in_len / self.timeFactor))
+        return np.zeros((audio.shape[0], out_len), dtype=np.float32)
+
+
+def _install_fake_signalsmith(monkeypatch, stretch_cls: type) -> None:
+    fake_signalsmith_ns = types.SimpleNamespace(Stretch=stretch_cls)
+    fake_module = types.SimpleNamespace(Signalsmith=fake_signalsmith_ns)
+    monkeypatch.setitem(sys.modules, "python_stretch", fake_module)
+    monkeypatch.setattr(timepitch, "_signalsmith_available", lambda: True)
+
+
+def test_signalsmith_inversion_fix_is_exercised_without_the_real_package(monkeypatch):
+    """Mocked python_stretch, faithful to the measured D4 behaviour.
+
+    Does not require the real optional dependency: it fakes only the
+    third-party surface (`Signalsmith.Stretch`), and runs this module's own
+    `_stretch_signalsmith`, which is where the `1.0 / factor` fix lives. If
+    the inversion were reintroduced, this test fails (measured ratio would
+    be ~1/factor, not factor) even on a host where python_stretch can never
+    be installed.
+    """
+    _install_fake_signalsmith(monkeypatch, _FakeSignalsmithStretch)
+
+    x = _tone(220.0, seconds=1.0)
+    factor = 1.2
+    y, stats = timepitch.time_stretch(x, SR, factor=factor, quality="signalsmith")
+
+    assert stats["engine"] == "signalsmith"
+    measured_ratio = y.shape[0] / x.shape[0]
+    print(f"\n[timepitch] fake signalsmith: requested factor={factor} measured ratio={measured_ratio:.4f}")
+    assert measured_ratio == pytest.approx(factor, rel=0.02)
+
+
+class _BrokenSignalsmithStretch(_FakeSignalsmithStretch):
+    """A hypothetical FUTURE regression: ignores `timeFactor` entirely."""
+
+    def process(self, audio: np.ndarray) -> np.ndarray:
+        return np.zeros_like(audio)
+
+
+def test_ratio_guard_refuses_a_broken_engine_instead_of_returning_wrong_audio(monkeypatch):
+    """The guard itself: an engine that silently ignores `factor` must be
+    refused loudly, not shipped with a `measured_factor` nobody checked."""
+    _install_fake_signalsmith(monkeypatch, _BrokenSignalsmithStretch)
+
+    x = _tone(220.0, seconds=1.0)
+    with pytest.raises(RuntimeError, match="measured duration ratio"):
         timepitch.time_stretch(x, SR, factor=1.2, quality="signalsmith")
