@@ -66,3 +66,36 @@ def test_manifest_body_is_markdown_after_frontmatter() -> None:
     body = manifest_body()
     assert body.strip().startswith("# aud")
     assert "---" not in body.splitlines()[0]
+
+
+def test_manifest_description_does_not_overclaim_every_verb_appends_to_a_plan() -> None:
+    """Regression guard for the spec-adherence finding: analyze, detect, verify,
+    check, config, manifest and plan itself do not append to a plan -- only
+    chain stages do (src/aud/cli.py registers them as distinct non-stage verbs).
+    """
+    manifest = load_manifest()
+    lowered = manifest.description.lower()
+    assert "every verb appends to a plan" not in lowered
+    assert "chain stage" in lowered, "description should scope the append claim to chain stages"
+
+
+def test_ai_provider_requirement_flags_the_azure_endpoint_condition() -> None:
+    """AzureOpenAIBackend (src/aud/intelligence/interface.py) rejects an Azure
+    key with no AZURE_OPENAI_ENDPOINT set -- the manifest must say so, not
+    imply the key alone is sufficient like the other four providers.
+    """
+    manifest = load_manifest()
+    ai_provider = next(r for r in manifest.requires if r.name == "ai-provider")
+    assert "AZURE_OPENAI_ENDPOINT" in ai_provider.purpose or any(
+        r.name == "azure-openai-endpoint" for r in manifest.requires
+    )
+
+
+def test_azure_openai_endpoint_is_a_declared_conditional_requirement() -> None:
+    manifest = load_manifest()
+    azure_endpoint = next((r for r in manifest.requires if r.name == "azure-openai-endpoint"), None)
+    assert azure_endpoint is not None, "expected a conditional 'azure-openai-endpoint' requirement"
+    assert "AZURE_OPENAI_API_KEY" in azure_endpoint.purpose
+    assert "AZURE_OPENAI_ENDPOINT" in azure_endpoint.purpose
+    assert azure_endpoint.optional is True
+    assert azure_endpoint.install == "docs/CONFIGURATION.md"

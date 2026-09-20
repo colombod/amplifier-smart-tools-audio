@@ -3,6 +3,16 @@
 `aud <verb> --help` prints VERB_DOCS[verb] verbatim; `aud <verb> -h` falls
 through to argparse's terse, auto-generated usage instead. Keep every entry
 here in sync with the verb's actual arguments in cli.py.
+
+Every entry carries three sections beyond the narrative "What it does"/"When
+to reach for it" prose: **Kind** (deterministic or model-backed -- whether it
+needs an AI provider credential), **Result** (what comes back on success, and
+in what shape), and **Failures** (the non-zero-exit conditions this verb can
+actually produce, by error code, and what state is left behind). All error
+codes named here are the `{"error": {"code", "message", "remedy"}}` envelope's
+`code` field (cli.py's module docstring); "bad_plan" applies to every verb
+that reads a plan document on stdin, so it is not repeated in each entry's
+prose beyond a mention.
 """
 
 from __future__ import annotations
@@ -21,8 +31,22 @@ When to reach for it:
   clipping risk", "does this sound boxy" are all answered by analyze, not
   by guessing from ear alone.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   path (positional)  Path to the audio file to measure.
+
+Result:
+  {"result": {...}} carrying the measurement fields "aud verify"/"aud advise"
+  also cite: integrated_lufs, true_peak_dbtp, crest_factor_db, per-band
+  spectral energies, sibilance metrics, and an ambience/reverb-tail estimate.
+  Read-only -- nothing is written.
+
+Failures:
+  file_not_found      path does not exist.
+  audio_decode_error  path exists but is not a file this tool's decoder
+                      (libsndfile, optionally ffmpeg) can read.
 
 Example:
   aud analyze podcast_ep12.wav
@@ -39,9 +63,23 @@ When to reach for it:
   The first verb in every pipeline. Every stage verb after it reads a plan
   on stdin and writes an updated plan back out.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --from PATH   Load an existing plan document from PATH instead of
                 starting empty.
+
+Result:
+  The plan document itself, raw and unwrapped (contracts/plan.v1.md) --
+  either a fresh one with zero stages, or the one loaded from --from --
+  so it pipes straight into the next stage verb.
+
+Failures:
+  file_not_found  --from names a path that does not exist.
+  bad_plan        --from's contents are not valid JSON, or are valid JSON
+                  that does not match the plan shape (plan_format,
+                  created_with, stages).
 
 Example:
   aud plan | aud deess --amount 6 | aud render in.wav out.wav
@@ -92,6 +130,11 @@ Why transients matter even when you only asked about silence:
   energy-only guess, because those regions would look like words and 'cut'
   would remove them.
 
+Kind:
+  Deterministic for all three -- no AI provider, no credential, ever.
+  'detect fillers' is additionally gated on the optional 'speech' extra
+  (a local model, not a provider) being installed.
+
 Parameters:
   transients PATH  --sensitivity FLOAT  Peak-picking sensitivity. Default 1.0.
                    --min-gap FLOAT      Merge onsets closer than this, ms. Default 50.
@@ -99,6 +142,18 @@ Parameters:
                    --min-len FLOAT      Ignore silences shorter than this, ms. Default 400.
   fillers PATH     --words STR          Comma-separated filler vocabulary.
                    --min-pause FLOAT    Report pauses at least this long, ms. Default 700.
+
+Result:
+  A regions document, raw and unwrapped (contracts/regions.v1.md), one of
+  kind "transient" | "silence" | "filler" -- so it pipes straight into
+  'aud cut'. Read-only: opens path, writes nothing.
+
+Failures:
+  file_not_found        path does not exist.
+  audio_decode_error    path is not decodable audio.
+  speech_extra_missing  'detect fillers' only: the 'speech' extra
+                        (faster-whisper) is not installed; names the extra
+                        rather than degrading to an energy-only guess.
 
 Example:
   aud detect silence in.wav --threshold 6 --min-len 400
@@ -195,6 +250,9 @@ Why it renders FIRST, ahead of everything else:
   file its regions were measured on. It is not reusable across episodes
   the way a tonal plan is. Use 'strip-silence' for the reusable version.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --regions PATH          Regions document to cut. Default: read from stdin.
   --pad-out FLOAT         Programme kept at the end of the outgoing side, ms.
@@ -224,16 +282,33 @@ What the render report tells you:
   that, smart placement is unfalsifiable -- a snap that worked and a snap
   that quietly did nothing both produce a file.
 
-Status:
-  Not yet built in this release: the flags above parse, and the verb
-  returns {"error": {"code": "not_implemented", ...}}. No padding, snap,
-  fade or crossfade code exists yet. See contracts/plan.v1.md for the
-  stage's parameters and contracts/regions.v1.md for what it consumes.
+Result:
+  Appends a 'cut' stage to the plan and prints the updated plan, raw and
+  unwrapped -- nothing is rendered yet. At 'aud render' time the report
+  carries regions_removed, regions_dropped_by_padding, snap_failures,
+  seconds_removed, joins_crossfaded, and one edit_points entry per
+  boundary (nominal_s, resolved_s, moved_ms, rule_applied, snap_failed).
+
+Failures:
+  At 'cut' (plan-build) time:
+    bad_param            a pad/fade/crossfade value is negative or
+                         non-finite, --snap is not one of the four modes,
+                         --crossfade-shape is not equal_power/linear, or
+                         --filler-tail-pad is negative.
+    snap_window_invalid  --snap-window is not > 0 and <= 1000 ms.
+    regions_not_cuttable the piped-in regions document is kind "transient"
+                         -- transients are zero-length and describe
+                         nothing to remove.
+    bad_plan             the plan on stdin is not valid JSON, or does not
+                         match the plan shape.
+  At 'aud render' time:
+    crossfade_exceeds_gap  the requested crossfade is longer than the
+                           material available at that join.
 
 Worked example -- trim the pauses without chopping the start of a word:
   aud detect silence in.wav \\
     | aud cut --pad-in 80 --pad-out 80 --snap transient --snap-window 60 \\
-    | aud render in.wav out.wav                                    # (planned)
+    | aud render in.wav out.wav
 
   Read it as: find the quiet spans; keep 80 ms of programme either side of
   each one so nothing sounds clipped; then, if an onset lies within 60 ms
@@ -279,6 +354,9 @@ Why padding is ON by default here and off on 'cut':
   render report says which ones and why -- failing the whole render over
   one marginal pause would be worse, and dropping it silently worse still.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --threshold FLOAT       dB above the measured noise floor. Default 6.0.
   --min-len FLOAT         Leave silences shorter than this alone, ms.
@@ -299,16 +377,33 @@ Parameters:
   --crossfade FLOAT       Crossfade at each join, ms. Default 10.
   --crossfade-shape SHAPE equal_power | linear. Default equal_power.
 
-Status:
-  Not yet built in this release: the flags above parse, and the verb
-  returns {"error": {"code": "not_implemented", ...}}. No detection,
-  padding, snap, fade or crossfade code exists yet. See
-  contracts/plan.v1.md for the stage's parameters.
+Result:
+  Appends a 'strip_silence' stage (a rule, not positions) to the plan and
+  prints the updated plan, raw and unwrapped. Detection, resolution and
+  removal all happen at 'aud render' time; the render report carries the
+  same fields 'cut''s does (regions_removed, snap_failures,
+  seconds_removed, joins_crossfaded, edit_points), including which
+  silences were skipped because padding alone was at least as long as
+  the silence itself (regions_dropped_by_padding).
+
+Failures:
+  At 'strip-silence' (plan-build) time:
+    bad_param            --threshold/--min-len/--keep is negative,
+                         non-finite, or out of the documented bound, or a
+                         pad/fade/crossfade value is negative/non-finite,
+                         or --snap/--crossfade-shape is not a recognised
+                         mode.
+    snap_window_invalid  --snap-window is not > 0 and <= 1000 ms.
+    bad_plan             the plan on stdin is not valid JSON, or does not
+                         match the plan shape.
+  At 'aud render' time:
+    crossfade_exceeds_gap  the requested crossfade is longer than the
+                           material available at that join.
 
 Worked example -- trim the pauses without chopping the start of a word:
   aud plan \\
     | aud strip-silence --min-len 400 --keep 150 --snap transient --snap-window 60 \\
-    | aud render in.wav out.wav                                    # (planned)
+    | aud render in.wav out.wav
 
   Read it as: find pauses of at least 400 ms; leave 150 ms of silence in
   place of each; keep the default 80 ms of programme either side; and if an
@@ -357,6 +452,9 @@ Multiband, and a sidechain highpass:
   the signal itself, so low-frequency rumble cannot hold the gate open for
   content that, once the rumble is filtered out, is not actually there.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --threshold FLOAT       dB above the measured noise floor. Default 12.0.
   --threshold-abs FLOAT   Absolute dBFS threshold; overrides --threshold
@@ -373,6 +471,18 @@ Parameters:
   --sidechain-hpf FLOAT   Highpass corner for the level detector only, Hz.
                           Default 80.0.
   --bands F1,F2,...       Ascending crossover frequencies, Hz. Default: full-band.
+
+Result:
+  Appends a 'gate' stage to the plan and prints the updated plan, raw and
+  unwrapped. At 'aud render' time, the report includes this stage's
+  measured gain-reduction statistics.
+
+Failures:
+  bad_param  threshold/range/attack/hold/release/lookahead/sidechain-hpf is
+             negative or non-finite, or --bands is not strictly ascending
+             positive Hz values.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
 
 Example:
   aud plan | aud gate --threshold 12 --range 20 | aud render in.wav out.wav
@@ -398,6 +508,9 @@ Parameters shared with 'aud gate':
   why --hold prevents chatter, multiband splitting and the sidechain
   highpass.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --threshold FLOAT       dB above the measured noise floor. Default 6.0.
   --threshold-abs FLOAT   Absolute dBFS threshold; overrides --threshold
@@ -418,6 +531,18 @@ Parameters:
                           Default 80.0.
   --bands F1,F2,...       Ascending crossover frequencies, Hz. Default: full-band.
 
+Result:
+  Appends an 'expand' stage to the plan and prints the updated plan, raw
+  and unwrapped. At 'aud render' time, the report includes this stage's
+  measured gain-reduction statistics.
+
+Failures:
+  bad_param  threshold/ratio (< 1.0)/knee/attack/hold/release/lookahead/
+             sidechain-hpf is out of range, negative or non-finite, or
+             --bands is not strictly ascending positive Hz values.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
+
 Example:
   aud plan | aud expand --threshold 6 --ratio 2 | aud render in.wav out.wav
 """,
@@ -433,9 +558,23 @@ When to reach for it:
   "Get rid of the harsh S sounds", vocal or spoken-word recordings with
   bright, splashy sibilance.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --amount FLOAT   Maximum reduction in dB, >= 0. Default 6.
   --freq FLOAT     Center frequency of the sibilant band in Hz. Default 6500.
+
+Result:
+  Appends a 'deess' stage to the plan and prints the updated plan, raw and
+  unwrapped. At 'aud render' time, the report includes this stage's
+  measured gain-reduction statistics (max/avg reduction, frames reduced).
+
+Failures:
+  bad_param  --amount is negative or non-finite, --freq is <= 0 or exceeds
+             the 44100 Hz Nyquist ceiling.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
 
 Example:
   aud plan | aud deess --amount 8 --freq 7000 | aud render in.wav out.wav
@@ -455,9 +594,21 @@ When to reach for it:
   "The room sounds boxy", recordings made in a live or reflective space
   that need to sound drier and closer.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --amount FLOAT   Maximum reduction applied to the estimated reverberant
                    component, in dB, >= 0. Default 6.
+
+Result:
+  Appends a 'dereverb' stage to the plan and prints the updated plan, raw
+  and unwrapped. Reduction only happens at 'aud render' time.
+
+Failures:
+  bad_param  --amount is negative or non-finite.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
 
 Example:
   aud plan | aud dereverb --amount 6 | aud render in.wav out.wav
@@ -476,6 +627,9 @@ When to reach for it:
   specific frequency problem with a peaking band, or a broad tonal tilt
   with a shelf (--shelf).
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --hpf FLOAT              High-pass corner frequency in Hz. Must be > 0,
                            and below --lpf if both are given.
@@ -485,6 +639,17 @@ Parameters:
   --shelf TYPE,FREQ,GAIN,Q A shelving band as type,freq_hz,gain_db,q.
                            TYPE is 'low' or 'high'; Q must be > 0.
                            Repeatable.
+
+Result:
+  Appends an 'eq' stage to the plan and prints the updated plan, raw and
+  unwrapped. Filtering only happens at 'aud render' time.
+
+Failures:
+  bad_param  --hpf/--lpf is <= 0, or --hpf >= --lpf when both are given;
+             a --peak/--shelf entry is not the right shape, its frequency
+             is <= 0, its Q is <= 0, or its --shelf type is not low/high.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
 
 Example:
   aud plan | aud eq --hpf 40 --peak 3200,-2.5,1.4 --shelf low,80,3.0,0.7 | aud render in.wav out.wav
@@ -505,6 +670,9 @@ When to reach for it:
   "Make this podcast match last week's episode", matching a new take to an
   established reference recording.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --curve PATH       Path to a curve JSON file produced by 'aud curve
                      extract'. Exactly one of --curve/--reference required.
@@ -514,6 +682,22 @@ Parameters:
                      unchanged) to 1.0 (full). Default 1.0.
   --max-gain-db FLOAT  Clamp on the correction in either direction, per
                      band, in dB. Default 12.0.
+
+Result:
+  Appends an 'eq_match' stage to the plan and prints the updated plan, raw
+  and unwrapped. The diff-and-apply only happens at 'aud render' time.
+
+Failures:
+  bad_param  neither or both of --curve/--reference given; --strength is
+             outside 0.0-1.0; --max-gain-db is negative or non-finite; the
+             curve has fewer than 2 points, a malformed point, a
+             non-positive frequency, or frequencies that are not strictly
+             ascending; --reference names a file that fails to decode
+             (audio_decode_error instead, if the read itself fails).
+  file_not_found      --reference names a path that does not exist.
+  audio_decode_error  --reference names a file that is not decodable audio.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
 
 Example:
   aud curve extract reference.wav ref_curve.json
@@ -533,10 +717,28 @@ When to reach for it:
   file" -- when you want to reuse a tonal balance without going through
   eq-match's plan-based pipeline, e.g. to inspect or share the curve itself.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   extract PATH OUT     PATH to analyze, OUT is the curve JSON to write.
   apply PATH CURVE OUT PATH to process, CURVE is the curve JSON to apply,
                        OUT is the rendered file to write.
+
+Result:
+  extract: {"result": {"curve_path": OUT}} -- OUT now holds the extracted
+  spectral profile as JSON.
+  apply: {"result": {"out_path": OUT}} -- OUT now holds the rendered,
+  curve-matched audio file, written as PCM_24.
+
+Failures:
+  file_not_found      PATH (or, for apply, CURVE) does not exist.
+  audio_decode_error  PATH is not decodable audio.
+  bad_param           CURVE is not valid JSON, or is JSON that is not a
+                      valid curve (fewer than 2 points, wrong shape, or
+                      incompatible with PATH's sample rate at apply time).
+  audio_write_error   OUT cannot be written (permissions, missing
+                      directory, unsupported extension).
 
 Example:
   aud curve extract reference.wav curve.json
@@ -557,10 +759,26 @@ When to reach for it:
   that actually needs it. Multiband is the default for dynamics in this
   tool, not an opt-in.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --bands F1,F2,...   Ascending crossover frequencies in Hz. Required.
   --ratio FLOAT       Compression ratio per band, >= 1.0 (1.0 is no
                       compression in that band). Default 2.5.
+
+Result:
+  Appends a 'compress' stage to the plan and prints the updated plan, raw
+  and unwrapped. Splitting, per-band gain computation and recombination
+  only happen at 'aud render' time; the render report includes per-band
+  gain-reduction statistics.
+
+Failures:
+  bad_param  --bands is empty, contains a non-positive value, is not
+             strictly ascending with no repeats, or exceeds the 44100 Hz
+             Nyquist ceiling; --ratio is < 1.0 or non-finite.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
 
 Example:
   aud plan | aud compress --bands 120,900,5500 --ratio 2.5 | aud render in.wav out.wav
@@ -576,10 +794,23 @@ When to reach for it:
   Adding warmth, weight or "glue" to a mix or master that sounds clean but
   thin or sterile.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --drive FLOAT   Saturation drive, >= 0. Higher is more distortion; 0
                   disables the shaping. Default 1.0.
   --mix FLOAT     Wet/dry blend, 0.0-1.0. Default 0.25.
+
+Result:
+  Appends a 'saturate' stage to the plan and prints the updated plan, raw
+  and unwrapped. Distortion only happens at 'aud render' time.
+
+Failures:
+  bad_param  --drive is negative or non-finite, or --mix is outside
+             0.0-1.0.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
 
 Example:
   aud plan | aud saturate --drive 1.5 --mix 0.25 | aud render in.wav out.wav
@@ -594,10 +825,23 @@ What it does:
 When to reach for it:
   A recording is too dry/close and needs a touch of room to sit naturally.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --amount FLOAT     Wet amount, 0.0-1.0. Default 0.15.
   --decay FLOAT      Decay time in seconds, > 0. Default 1.2.
   --predelay FLOAT   Delay before the reverb tail begins, ms, >= 0. Default 0.
+
+Result:
+  Appends a 'reverb' stage to the plan and prints the updated plan, raw
+  and unwrapped. The ambience is only added at 'aud render' time.
+
+Failures:
+  bad_param  --amount is outside 0.0-1.0, --decay is <= 0 or non-finite,
+             or --predelay is negative or non-finite.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
 
 Example:
   aud plan | aud reverb --amount 0.15 --decay 1.2 | aud render in.wav out.wav
@@ -613,8 +857,20 @@ When to reach for it:
   Fitting a programme to a fixed slot length, or nudging tempo without
   affecting pitch.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --factor FLOAT   Stretch factor, > 0. Default 1.0.
+
+Result:
+  Appends a 'stretch' stage to the plan and prints the updated plan, raw
+  and unwrapped. Retiming only happens at 'aud render' time.
+
+Failures:
+  bad_param  --factor is <= 0 or non-finite.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
 
 Example:
   aud plan | aud stretch --factor 0.98 | aud render in.wav out.wav
@@ -628,8 +884,20 @@ What it does:
 When to reach for it:
   Correcting or creatively shifting pitch without altering duration.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --semitones FLOAT   Shift amount, -24 to 24. Default 0.0.
+
+Result:
+  Appends a 'pitch' stage to the plan and prints the updated plan, raw and
+  unwrapped. Re-pitching only happens at 'aud render' time.
+
+Failures:
+  bad_param  --semitones is outside -24 to 24.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
 
 Example:
   aud plan | aud pitch --semitones -2 | aud render in.wav out.wav
@@ -645,8 +913,20 @@ When to reach for it:
   "This is too quiet for YouTube", "hit -14 LUFS", "level these files to
   each other".
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --target FLOAT   Target integrated loudness in LUFS, must be < 0. Default -14.0.
+
+Result:
+  Appends a 'loudness' stage to the plan and prints the updated plan, raw
+  and unwrapped. The gain is only applied at 'aud render' time.
+
+Failures:
+  bad_param  --target is >= 0 or non-finite.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
 
 Example:
   aud plan | aud loudness --target -14 | aud limit --ceiling -1.0 | aud render in.wav out.wav
@@ -662,6 +942,9 @@ When to reach for it:
   Always, as the last stage before render, to guarantee no clipping or
   inter-sample overs -- especially right after a loudness stage.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --ceiling FLOAT   True-peak ceiling in dBTP, must be <= 0.0. Default -1.0.
 
@@ -669,6 +952,16 @@ Parameters:
   contracts/plan.v1.md#limit): lookahead_ms (default 5.0), release_ms
   (default 50.0), oversample (one of 1/2/4/8, default 4). A hand-written
   plan may set these directly.
+
+Result:
+  Appends a 'limit' stage to the plan and prints the updated plan, raw and
+  unwrapped. Limiting only happens at 'aud render' time; 'aud verify'
+  reports whether the render actually held the ceiling.
+
+Failures:
+  bad_param  --ceiling is > 0.0 or non-finite.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
 
 Example:
   aud plan | aud loudness --target -14 | aud limit --ceiling -1.0 | aud render in.wav out.wav
@@ -687,9 +980,34 @@ When to reach for it:
   The last verb in every chain. Never render each stage separately: every
   extra render is another round of quantization and another chance to clip.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   in_path (positional)   Source audio file.
   out_path (positional)  Destination audio file to write.
+
+Result:
+  {"result": {"out_path": ..., "report": {...}}}. The report names every
+  stage applied, in canonical order, with its own measured effect (gain
+  applied, gain reduction, true peak before/after, edit_points for
+  cut/strip_silence, and so on per stage).
+
+Failures:
+  file_not_found        in_path does not exist.
+  audio_decode_error    in_path is not decodable audio.
+  audio_write_error     out_path cannot be written (permissions, missing
+                        directory, unsupported extension).
+  bad_plan              the plan on stdin is not valid JSON, or does not
+                        match the plan shape.
+  crossfade_exceeds_gap a cut/strip_silence stage's crossfade is longer
+                        than the material available at that join.
+  bad_param             eq_match's stored curve is incompatible with this
+                        file's sample rate (frequency at or past Nyquist).
+  not_implemented       a stage name in the plan is not one this build of
+                        aud's render engine registers -- not currently
+                        reachable for any stage 'aud' itself builds, since
+                        all fifteen documented stages render.
 
 Example:
   aud plan | aud eq --hpf 40 | aud limit --ceiling -1.0 | aud render in.wav out.wav
@@ -705,10 +1023,22 @@ When to reach for it:
   "Verify that a finished render actually meets the loudness and ceiling it
   was asked for" -- confirming a render before shipping it.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   path (positional)   File to verify.
   --target FLOAT      Expected integrated loudness in LUFS, if any.
   --ceiling FLOAT     Expected true-peak ceiling in dBTP, if any.
+
+Result:
+  {"result": {"measured": {...}, "target_lufs"?, "lufs_ok"?,
+  "ceiling_dbtp"?, "ceiling_ok"?}}. lufs_ok/ceiling_ok are only present
+  when the corresponding target/ceiling was given. Read-only.
+
+Failures:
+  file_not_found      path does not exist.
+  audio_decode_error  path is not decodable audio.
 
 Example:
   aud verify out.wav --target -14 --ceiling -1.0
@@ -735,11 +1065,22 @@ When to reach for it:
   "Master this for podcast hosting" or "get this ready for streaming"
   without hand-assembling the chain and picking numbers yourself.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --list          List the available preset names and descriptions.
   show NAME       Print the named preset's chain. NAME is one of the
                   names 'preset --list' reports (e.g. 'podcast',
                   'music-streaming', 'broadcast', 'voiceover').
+
+Result:
+  --list: {"result": [{"name": ..., "description": ...}, ...]}.
+  show NAME: the preset's plan document, raw and unwrapped, ready to pipe
+  into 'aud render'.
+
+Failures:
+  unknown_preset  NAME is not one of the names 'preset --list' reports.
 
 Example:
   aud preset --list
@@ -757,8 +1098,22 @@ When to reach for it:
   Diagnosing why a verb behaves unexpectedly, or confirming a host is ready
   before scripting against it.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   (none)
+
+Result:
+  {"result": {"tool", "version", "python_version", "ready",
+  "deterministic_capabilities_available", "requirements": [...]}}. Each
+  requirement entry names its state ("satisfied"/"absent"), a human detail,
+  and where to install it -- credential requirements report by name and
+  boolean only, never by value.
+
+Failures:
+  None -- this verb always succeeds; an absent dependency is reported in
+  the result, not raised as an error.
 
 Example:
   aud check
@@ -774,12 +1129,25 @@ What it does:
 When to reach for it:
   Debugging "why is my render using -14 LUFS when I set AUD_DEFAULT_TARGET_LUFS".
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   --sample-rate-policy STR     Override the sample_rate_policy setting.
   --default-ceiling-dbtp FLOAT Override the default_ceiling_dbtp setting.
   --default-target-lufs FLOAT  Override the default_target_lufs setting.
   --oversample INT             Override the oversample setting.
   --output-subtype STR         Override the output_subtype setting.
+
+Result:
+  {"result": {<setting>: {"value": ..., "source": "argument" |
+  "config_file" | "environment" | "default"}, ...}}, one entry per known
+  setting.
+
+Failures:
+  None -- this verb always succeeds; an override always wins at the
+  "argument" tier regardless of value (no range validation is performed
+  here).
 
 Example:
   aud config
@@ -795,8 +1163,20 @@ When to reach for it:
   Confirming what aud claims to be able to do, or checking its declared
   requirements, straight from the source of truth.
 
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
 Parameters:
   (none)
+
+Result:
+  {"result": {...}} -- the validated SMART_TOOL.md frontmatter as a plain
+  dict: name, version, description, use_cases, platforms, requires.
+
+Failures:
+  None reachable at runtime -- the packaged manifest is validated once at
+  import time; a build with a malformed manifest would fail to import
+  'aud' at all, before any verb (including this one) could run.
 
 Example:
   aud manifest
@@ -832,6 +1212,10 @@ What the model may choose from:
   Editing (cut/strip-silence) needs detected regions, not measurements, so
   it is out of scope for advise; run 'aud detect' and build those by hand.
 
+Kind:
+  Model-backed. Needs one of the provider credentials named above; sends
+  measurements only, never raw audio.
+
 Parameters:
   path (positional)   Path to the audio file to measure and advise on.
   --target FLOAT      Target integrated loudness in LUFS, told to the
@@ -843,6 +1227,31 @@ Parameters:
                        configured. Default: a per-provider built-in,
                        overridable by the AUD_MODEL environment variable
                        too.
+
+Result:
+  The chosen plan, raw and unwrapped, ready for 'aud render'. The per-stage
+  reasoning ({"stage", "reason"} pairs), which provider answered, and which
+  model was used are written to stderr, not stdout.
+
+Failures:
+  file_not_found                path (or --reference) does not exist.
+  audio_decode_error             path (or --reference) is not decodable
+                                 audio.
+  provider_credential_missing    no accepted provider credential is set.
+  provider_config_incomplete     AZURE_OPENAI_API_KEY is set but
+                                 AZURE_OPENAI_ENDPOINT is not -- see
+                                 docs/CONFIGURATION.md.
+  provider_model_unavailable     the resolved model name is not one the
+                                 provider will serve.
+  provider_request_failed        the provider was reached but the request
+                                 itself failed (network, rate limit, HTTP
+                                 error).
+  bad_model_output / bad_model_plan  the model's response could not be
+                                 parsed, or its proposed chain does not
+                                 validate against the stage builders (e.g.
+                                 an out-of-range parameter); this is
+                                 refused before it becomes part of any
+                                 plan, never silently corrected.
 
 Example:
   aud advise in.wav --target -14 | aud render in.wav out.wav
@@ -867,6 +1276,11 @@ Requires:
   {"error": {"code": "provider_credential_missing", ...}} before touching
   out_path -- see docs/CONFIGURATION.md.
 
+Kind:
+  Model-backed. Needs one of the provider credentials named above; sends
+  measurements only, never raw audio. Every failure mode below that
+  happens before rendering leaves out_path untouched.
+
 Parameters:
   in_path (positional)   Source audio file.
   out_path (positional)  Destination audio file to write. Untouched if
@@ -877,6 +1291,30 @@ Parameters:
                          with -- informs the model's tonal choices.
   --model NAME           Override the model name. See 'aud advise --help'.
   --dry-run              Choose and print the plan; render nothing.
+
+Result:
+  {"result": {"plan", "stages", "provider", "model", "measurements",
+  "reference_measurements"?, "render", "out_path", "verify"}} -- or, with
+  --dry-run, the same document minus render/out_path/verify plus
+  "dry_run": true, and out_path is never written.
+
+Failures:
+  file_not_found                in_path (or --reference) does not exist.
+  audio_decode_error             in_path (or --reference) is not decodable
+                                 audio.
+  provider_credential_missing    no accepted provider credential is set;
+                                 out_path is never touched.
+  provider_config_incomplete     AZURE_OPENAI_API_KEY is set but
+                                 AZURE_OPENAI_ENDPOINT is not.
+  provider_model_unavailable     the resolved model name is not one the
+                                 provider will serve.
+  provider_request_failed        the provider was reached but the request
+                                 itself failed.
+  bad_model_output / bad_model_plan  the model's proposed chain failed
+                                 validation; out_path is never touched.
+  audio_write_error              out_path cannot be written.
+  crossfade_exceeds_gap           not reachable in practice -- advise never
+                                 proposes cut/strip_silence (see above).
 
 Example:
   aud master in.wav out.wav --target -14

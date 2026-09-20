@@ -3,6 +3,15 @@
 Every value is a number (or null) -- no prose verdicts, no "sounds good".
 Judgement about what those numbers mean belongs to a later, model-backed
 verb; this module only measures.
+
+`integrated_lufs` and `loudness_range_lu` are a DOCUMENTED partial outcome:
+both are BS.1770-gated measurements that pyloudnorm cannot compute for
+audio shorter than its gating block (`_BS1770_MIN_SECONDS`, 0.4s) -- every
+other field in `analyze`'s result still measures normally. When that
+precondition is not met, both are `null` and `loudness_unavailable_reason`
+names why, rather than the whole call failing or (the previous defect) a
+bare `except Exception` around only the range measurement silently
+swallowing any bug alongside the one genuinely expected condition.
 """
 
 from __future__ import annotations
@@ -27,9 +36,16 @@ _SIBILANCE_HIGH_HZ = 9000.0
 
 _CLIP_THRESHOLD = 0.999
 
+# pyloudnorm.Meter's default `block_size` (seconds): the minimum audio
+# length its BS.1770 gating needs. Below this, both `integrated_lufs` and
+# `loudness_range` raise `ValueError("Audio must have length greater than
+# the block size.")` -- a real, easily reproducible condition (any file
+# shorter than 400ms), not a hypothetical.
+_BS1770_MIN_SECONDS = 0.4
 
-def _finite_or_none(value: float) -> float | None:
-    return float(value) if math.isfinite(value) else None
+
+def _finite_or_none(value: float | None) -> float | None:
+    return float(value) if value is not None and math.isfinite(value) else None
 
 
 def _db(value: float) -> float:
@@ -130,11 +146,29 @@ def analyze(x: np.ndarray, sr: int) -> dict:
     rms = float(np.sqrt(np.mean(x**2))) if x.size else 0.0
     crest_factor_db = _db(sample_peak) - _db(rms) if rms > _EPS else None
 
-    integrated_lufs = _loudness.integrated_lufs(x, sr)
-    try:
+    # BS.1770 gating needs at least `_BS1770_MIN_SECONDS` of audio (see the
+    # module docstring and the constant's own comment); checking that
+    # PRECONDITION up front -- rather than calling into pyloudnorm and
+    # catching whatever it raises -- means the only exception this module
+    # ever expects from loudness measurement is the one it has already
+    # named, and anything else pyloudnorm might raise still surfaces as a
+    # genuine crash instead of a silently swallowed null.
+    loudness_measurable = sr > 0 and n_samples >= sr * _BS1770_MIN_SECONDS
+    loudness_unavailable_reason: str | None = None
+    if loudness_measurable:
+        integrated_lufs = _loudness.integrated_lufs(x, sr)
         lra = _loudness.loudness_range(x, sr)
-    except Exception:  # LRA can fail on very short/quiet inputs; report null, not a crash
-        lra = float("nan")
+    else:
+        integrated_lufs = None
+        lra = None
+        loudness_unavailable_reason = (
+            f"sample_rate must be a positive integer, got {sr!r}"
+            if sr <= 0
+            else (
+                f"audio is {n_samples / sr:.3f}s ({n_samples} samples at {sr} Hz); BS.1770 loudness "
+                f"gating needs at least {_BS1770_MIN_SECONDS}s"
+            )
+        )
 
     dc_offset = [float(np.mean(x[:, ch])) for ch in range(n_channels)]
 
@@ -152,7 +186,7 @@ def analyze(x: np.ndarray, sr: int) -> dict:
 
     clipped_sample_count = int(np.sum(np.abs(x) >= _CLIP_THRESHOLD))
 
-    return {
+    result = {
         "sample_rate": int(sr),
         "channels": int(n_channels),
         "duration_seconds": float(n_samples / sr) if sr else 0.0,
@@ -171,3 +205,6 @@ def analyze(x: np.ndarray, sr: int) -> dict:
         "sibilance_ratio": _sibilance_ratio(x, sr),
         "ambience_decay_estimate_ms": _ambience_decay_estimate_ms(x, sr),
     }
+    if loudness_unavailable_reason is not None:
+        result["loudness_unavailable_reason"] = loudness_unavailable_reason
+    return result

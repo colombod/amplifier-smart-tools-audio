@@ -14,6 +14,7 @@ rather than a bare ImportError or a silent fake result.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import json
 import math
@@ -142,14 +143,72 @@ def _load_config_file() -> dict[str, Any]:
         return {}
 
 
-def _coerce_like(default: Any, raw: str) -> Any:
+def _coerce_env_value(key: str, default: Any, raw: str) -> Any:
+    """Coerce an `AUD_<KEY>` environment string to match a setting's declared type.
+
+    An environment variable is always a string, so "wrong type" here means
+    "does not parse as the declared type" -- exactly the condition
+    docs/CONFIGURATION.md declares fatal ("Absent, null, and wrong-type are
+    three different conditions"). Never coerced to a default and never
+    silently ignored: a bad `AUD_OVERSAMPLE=four` must stop the run naming
+    the variable, the value found, and the type expected -- not render with
+    a parameter nobody chose.
+    """
     if isinstance(default, bool):
         return raw.strip().lower() in {"1", "true", "yes", "on"}
+    env_name = _CONFIG_ENV_PREFIX + key.upper()
     if isinstance(default, int):
-        return int(raw)
+        try:
+            return int(raw)
+        except ValueError:
+            raise AudError(
+                code="bad_config",
+                message=f"{env_name} is {raw!r}; '{key}' must be an integer.",
+                remedy=f"Set {env_name} to an integer (e.g. {default!r}), or unset it to use the built-in default.",
+            ) from None
     if isinstance(default, float):
-        return float(raw)
+        try:
+            return float(raw)
+        except ValueError:
+            raise AudError(
+                code="bad_config",
+                message=f"{env_name} is {raw!r}; '{key}' must be a number.",
+                remedy=f"Set {env_name} to a number (e.g. {default!r}), or unset it to use the built-in default.",
+            ) from None
     return raw
+
+
+def _validate_file_config_value(key: str, value: Any, default: Any) -> Any:
+    """Enforce docs/CONFIGURATION.md's "wrong type is fatal" rule for a
+    config-file-sourced value.
+
+    Unlike an environment variable (always a string, coerced by
+    `_coerce_env_value`), a TOML value already carries its own type -- so
+    "wrong type" here means it does not match the setting's declared type
+    at all (`oversample = "four"`, `output_subtype = 24`). Never coerced
+    and never silently replaced by the default: a chain rendering with
+    parameters nobody chose would mean the audio is wrong instead of the
+    command.
+    """
+    if isinstance(default, bool):
+        ok = isinstance(value, bool)
+    elif isinstance(default, int):
+        ok = isinstance(value, int) and not isinstance(value, bool)
+    elif isinstance(default, float):
+        ok = isinstance(value, int | float) and not isinstance(value, bool)
+    else:
+        ok = isinstance(value, str)
+    if not ok:
+        expected = {bool: "boolean", int: "integer", float: "number", str: "string"}.get(
+            type(default), type(default).__name__
+        )
+        raise AudError(
+            code="bad_config",
+            message=f"{key} in {_CONFIG_FILE_PATH} is {value!r} ({type(value).__name__}); expected type: {expected}.",
+            remedy=f"Fix {key} in {_CONFIG_FILE_PATH} -- expected type: {expected}, "
+            "or remove the line to fall through to the environment/default.",
+        )
+    return float(value) if isinstance(default, float) else value
 
 
 def config(**overrides: Any) -> dict:
@@ -159,6 +218,11 @@ def config(**overrides: Any) -> dict:
     (~/.config/aud/config.toml) > environment (AUD_*) > built-in default.
     Pass an override as a keyword argument set to a non-None value to make
     it win at the "argument" tier.
+
+    A config-file or environment value whose type does not match the
+    setting's declared type is fatal: `AudError(code="bad_config")` naming
+    the setting, the value found and the type expected -- see
+    docs/CONFIGURATION.md's "absent, null, and wrong-type" table.
     """
     file_values = _load_config_file()
     result: dict[str, dict[str, Any]] = {}
@@ -167,11 +231,12 @@ def config(**overrides: Any) -> dict:
             result[key] = {"value": overrides[key], "source": "argument"}
             continue
         if key in file_values:
-            result[key] = {"value": file_values[key], "source": "config_file"}
+            value = _validate_file_config_value(key, file_values[key], default)
+            result[key] = {"value": value, "source": "config_file"}
             continue
         env_key = _CONFIG_ENV_PREFIX + key.upper()
         if env_key in os.environ:
-            result[key] = {"value": _coerce_like(default, os.environ[env_key]), "source": "environment"}
+            result[key] = {"value": _coerce_env_value(key, default, os.environ[env_key]), "source": "environment"}
             continue
         result[key] = {"value": default, "source": "default"}
     return result
@@ -1165,6 +1230,48 @@ def _write_audio(io_module: Any, path: str, x: Any, sr: int, subtype: str) -> No
         ) from exc
 
 
+def _resolve_path(path: str) -> str:
+    """An artifact's location is named: always the absolute path it was written at.
+
+    A relative path a caller handed in has no stated base once it comes
+    back in a result -- resolved relative to what, the caller's cwd or
+    aud's own? Every function that writes an artifact and reports its own
+    path (`render`, `curve_extract`, `curve_apply`) resolves through this
+    first, so the reported path is exactly where the file landed, no
+    matter the caller's cwd.
+    """
+    return str(Path(path).expanduser().resolve())
+
+
+def _write_text_atomic(path: str, text: str) -> None:
+    """Write `text` to `path` atomically: a reader never observes a partial file.
+
+    Writes to a sibling temp file in the same directory, then renames it
+    into place -- `os.replace` is atomic on the same filesystem, so a
+    process that reads `path` at any point either sees the old content (or
+    nothing) or the complete new content, never a half-written file. An
+    unwritable destination (missing parent directory, permissions, full
+    disk) raises `AudError(code="bad_path")` naming the path and the
+    underlying OS reason, and leaves no partial file behind at `path` --
+    the temp file is removed on failure.
+    """
+    target = Path(path)
+    tmp_path = target.with_name(f".{target.name}.tmp-{os.getpid()}")
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path.write_text(text, encoding="utf-8")
+        tmp_path.replace(target)
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            tmp_path.unlink()
+        raise AudError(
+            code="bad_path",
+            message=f"Could not write '{path}': {exc}",
+            remedy=f"Check that the parent directory of '{path}' exists and is writable, and that there is "
+            "free disk space.",
+        ) from exc
+
+
 def read_text_file(path: str) -> str:
     """Read a text file, mapping I/O failures to an AudError.
 
@@ -1263,8 +1370,14 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
             "frequencies fit under this file's Nyquist frequency.",
         ) from exc
     output_subtype = config()["output_subtype"]["value"]
-    _write_audio(io, out_path, rendered, sample_rate, output_subtype)
-    return {"out_path": out_path, "report": report}
+    # An artifact's location is named: resolve to an absolute path BEFORE
+    # writing, so the file lands exactly where the returned path says it
+    # did, no matter the caller's cwd -- and so the returned path has a
+    # stated base rather than being an unresolved echo of whatever `out_path`
+    # the caller happened to pass in.
+    resolved_out_path = _resolve_path(out_path)
+    _write_audio(io, resolved_out_path, rendered, sample_rate, output_subtype)
+    return {"out_path": resolved_out_path, "report": report}
 
 
 def verify(path: str, target_lufs: float | None = None, ceiling_dbtp: float | None = None) -> dict:
@@ -1336,18 +1449,25 @@ def advise(
           "stages": [{"stage": str, "reason": str}, ...],
         }
     """
-    measurements = analyze(path)
-    reference_measurements = analyze(reference_path) if reference_path else None
-
     from aud.intelligence import advisor
     from aud.intelligence.interface import resolve_backend
 
+    # A missing prerequisite fails BEFORE the work: resolve (and validate)
+    # the provider credential first, so a caller with no credential
+    # configured is refused before paying for decoding and measuring
+    # `path` (and `reference_path`) -- not after. `resolve_backend` also
+    # constructs the backend, which is where e.g. Azure's endpoint check
+    # happens, so this one reordering covers every provider-readiness
+    # check, not just the credential-presence one.
     if backend is not None:
         active_backend = backend
         provider = "injected"
         chosen_model = model or "test-model"
     else:
         active_backend, provider, chosen_model = resolve_backend(model)
+
+    measurements = analyze(path)
+    reference_measurements = analyze(reference_path) if reference_path else None
 
     plan, reasoning = advisor.advise(
         measurements,
@@ -1411,8 +1531,12 @@ def master(
 
     render_result = render(plan, in_path, out_path)
     result["render"] = render_result["report"]
+    # `render`'s own returned path is already resolved to absolute (see
+    # `render`'s docstring) -- verify against THAT, not the possibly
+    # relative `out_path` the caller passed in, so this never depends on
+    # cwd staying the same between the two calls.
     result["out_path"] = render_result["out_path"]
-    result["verify"] = verify(out_path, target_lufs=target_lufs, ceiling_dbtp=ceiling_dbtp)
+    result["verify"] = verify(result["out_path"], target_lufs=target_lufs, ceiling_dbtp=ceiling_dbtp)
     return result
 
 
@@ -1465,6 +1589,12 @@ def detect_fillers(path: str, words: list[str] | None = None, min_pause_ms: floa
     optional `speech` extra (faster-whisper); with it absent, raises
     `AudError(code="speech_extra_missing")` -- see `aud.dsp.speech`. Never
     degrades to an energy-only guess.
+
+    The extra is checked BEFORE `path` is decoded: a missing prerequisite
+    fails immediately rather than after paying for a decode the call was
+    always going to refuse anyway (Amplifier Smart Tools spec: "a missing
+    prerequisite fails immediately, naming what is absent and how to
+    install it").
     """
     try:
         from aud.dsp import io
@@ -1473,30 +1603,74 @@ def detect_fillers(path: str, words: list[str] | None = None, min_pause_ms: floa
     from aud.core.regions import new_regions
     from aud.dsp import speech
 
+    if not speech.is_available():
+        # Mirrors aud.dsp.speech's own (private) `_missing_extra_error()` --
+        # duplicated rather than imported because dsp/ modules do not raise
+        # user-facing errors themselves (AGENTS.md #8): the check needs to
+        # run here, before the decode, not inside `speech.detect_fillers`.
+        raise AudError(
+            code="speech_extra_missing",
+            message="'detect fillers' needs word-level speech timings, and the 'speech' extra is not installed.",
+            remedy=(
+                "Install aud with the speech extra: uv tool install 'aud[speech] @ "
+                "git+https://github.com/colombod/amplifier-smart-tools-audio' -- see docs/CONFIGURATION.md. "
+                "The other detect verbs need nothing extra."
+            ),
+        )
+
     samples, sample_rate = _read_audio(io, path)
     regions, detection = speech.detect_fillers(samples, sample_rate, words=words, min_pause_ms=min_pause_ms)
     return new_regions(kind="filler", source=path, sample_rate=sample_rate, detection=detection, regions=regions)
 
 
 def curve_extract(path: str, out: str) -> dict:
-    """Extract a spectral profile from `path` and save it as JSON at `out`."""
+    """Extract a spectral profile from `path` and save it as JSON at `out`.
+
+    `curve_path` in the result is always the absolute path the file was
+    actually written at (`_resolve_path`), even when `out` was relative to
+    the caller's cwd -- an artifact's location is named, not left as an
+    unresolved echo of the input (Amplifier Smart Tools spec). The write
+    itself is atomic (`_write_text_atomic`): a failure never leaves a
+    partial file at the destination, and names the path and the reason.
+    """
     try:
         from aud.dsp import eqmatch, io
     except ImportError as exc:
         raise _not_implemented("curve_extract", exc) from exc
     samples, sample_rate = _read_audio(io, path)
     curve = eqmatch.spectrum_profile(samples, sample_rate)
-    Path(out).write_text(json.dumps(curve), encoding="utf-8")
-    return {"curve_path": out}
+    resolved_out = _resolve_path(out)
+    _write_text_atomic(resolved_out, json.dumps(curve))
+    return {"curve_path": resolved_out}
 
 
-def curve_apply(path: str, curve_path: str, out_path: str) -> dict:
-    """Apply a saved spectral curve to `path`, writing the result to `out_path`."""
+def curve_apply(path: str, out_path: str, *, curve: Any = None, curve_path: str | None = None) -> dict:
+    """Apply a spectral curve to `path`, writing the result to `out_path`.
+
+    `curve` is the parsed curve structure (a bare array of
+    `[freq_hz, gain_db]` pairs, or the rich dict `curve_extract`/
+    `spectrum_profile` produce) -- the data-only interface a library caller
+    should use directly: pass the curve's actual content, not a path to it
+    (Amplifier Smart Tools spec: "the payload is data, not a reference").
+    `curve_path` is a CLI convenience: when `curve` is not given, the curve
+    is read from this file; when given alongside `curve`, it is used only
+    to name the source in an error message.
+
+    `out_path` in the result is always the absolute path the file was
+    actually written at -- see `curve_extract`'s docstring for why.
+    """
     try:
         from aud.dsp import eqmatch, io
     except ImportError as exc:
         raise _not_implemented("curve_apply", exc) from exc
-    curve = load_json_file(curve_path)
+    if curve is None:
+        if curve_path is None:
+            raise AudError(
+                code="bad_param",
+                message="curve_apply needs either 'curve' (parsed curve data) or 'curve_path' (a file to read it from).",
+                remedy="Pass the parsed curve structure via 'curve', or a JSON file path via 'curve_path'.",
+            )
+        curve = load_json_file(curve_path)
     samples, sample_rate = _read_audio(io, path)
     try:
         matched = eqmatch.apply_curve(samples, sample_rate, curve)
@@ -1504,11 +1678,13 @@ def curve_apply(path: str, curve_path: str, out_path: str) -> dict:
         # dsp/ modules raise plain exceptions (AGENTS.md #8); this is the
         # boundary where a malformed/incompatible curve becomes a
         # user-facing bad_param instead of an unhandled internal_error.
+        source = f"'{curve_path}'" if curve_path else "the given curve data"
         raise AudError(
             code="bad_param",
-            message=f"Could not apply curve '{curve_path}' to '{path}': {exc}",
+            message=f"Could not apply curve from {source} to '{path}': {exc}",
             remedy="Provide a curve JSON with at least 2 finite, strictly ascending [freq_hz, gain_db] "
             "pairs, as produced by 'aud curve extract'.",
         ) from exc
-    _write_audio(io, out_path, matched, sample_rate, "PCM_24")
-    return {"out_path": out_path}
+    resolved_out = _resolve_path(out_path)
+    _write_audio(io, resolved_out, matched, sample_rate, "PCM_24")
+    return {"out_path": resolved_out}

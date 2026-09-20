@@ -167,11 +167,21 @@ def test_documented_example_parses_and_returns_a_clean_envelope(
 
     proc = _run(tokens)
 
-    # Whatever happened, stdout must be exactly one parseable JSON document --
-    # never a raw traceback, never prose alongside it.
-    payload = json.loads(proc.stdout)
+    # stdout carries results, stderr carries diagnostics: a failing
+    # invocation has NO result, so stdout must be completely empty and the
+    # one parseable JSON document (error envelope or success payload) is
+    # wherever the outcome actually landed. Never a raw traceback, never
+    # prose alongside it, on either stream.
     assert "Traceback" not in proc.stdout
     assert "Traceback" not in proc.stderr
+
+    if proc.returncode != 0:
+        assert proc.stdout == "", (
+            f"'aud {command}' failed but left something on stdout -- errors belong on stderr only: {proc.stdout!r}"
+        )
+        payload = json.loads(proc.stderr)
+    else:
+        payload = json.loads(proc.stdout)
 
     if isinstance(payload, dict) and "error" in payload:
         assert set(payload) == {"error"}

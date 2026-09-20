@@ -67,7 +67,8 @@ def test_detect_silence_missing_file_is_file_not_found(tmp_path: Path) -> None:
     missing = tmp_path / "does-not-exist.wav"
     proc = _run(["detect", "silence", str(missing)])
     assert proc.returncode != 0
-    payload = json.loads(proc.stdout)
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
     assert payload["error"]["code"] == "file_not_found"
     assert str(missing) in payload["error"]["message"]
     assert "Traceback" not in proc.stderr
@@ -76,10 +77,45 @@ def test_detect_silence_missing_file_is_file_not_found(tmp_path: Path) -> None:
 def test_detect_fillers_on_this_host_gives_speech_extra_missing_never_a_traceback(tiny_wav: Path) -> None:
     proc = _run(["detect", "fillers", str(tiny_wav)])
     assert proc.returncode != 0
-    payload = json.loads(proc.stdout)
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
     assert payload["error"]["code"] == "speech_extra_missing"
     assert "aud[speech]" in payload["error"]["remedy"]
     assert "Traceback" not in proc.stderr
+
+
+def test_detect_fillers_missing_extra_fails_before_the_input_is_ever_decoded(tmp_path: Path) -> None:
+    """Deviation-fix regression guard: the prerequisite check must fire
+
+    BEFORE `path` is read, not after. Pointing the verb at a path that
+    would fail on DECODE (not merely on lookup) if the code ever got that
+    far, and still getting `speech_extra_missing` rather than a decode
+    error, is what actually proves the ordering -- a plain missing-file
+    test would pass even if the extra check ran second.
+    """
+    not_audio = tmp_path / "not-really-audio.wav"
+    not_audio.write_bytes(b"this is not a wav file at all")
+    proc = _run(["detect", "fillers", str(not_audio)])
+    assert proc.returncode != 0
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
+    assert payload["error"]["code"] == "speech_extra_missing"
+    assert payload["error"]["code"] not in {"file_not_found", "audio_decode_error", "internal_error"}
+    assert "Traceback" not in proc.stderr
+
+
+def test_detect_fillers_checks_the_speech_extra_before_touching_the_file(tmp_path: Path) -> None:
+    """A missing prerequisite fails BEFORE the work: the extra-availability
+    check must run before the input file is even opened, not after. Proven
+    with a path that does not exist -- if the code decoded first, this
+    would come back `file_not_found`; the fix means it never gets that far.
+    """
+    missing = tmp_path / "does-not-exist.wav"
+    proc = _run(["detect", "fillers", str(missing)])
+    assert proc.returncode != 0
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
+    assert payload["error"]["code"] == "speech_extra_missing"
 
 
 def test_detect_silence_output_is_valid_input_for_cut(tiny_wav: Path) -> None:
@@ -94,8 +130,9 @@ def test_detect_silence_output_is_valid_input_for_cut(tiny_wav: Path) -> None:
     assert detect_proc.returncode == 0, detect_proc.stderr
     cut_proc = _run(["cut"], input_text=detect_proc.stdout)
     assert "Traceback" not in cut_proc.stderr
-    payload = json.loads(cut_proc.stdout)
     if cut_proc.returncode != 0:
+        assert cut_proc.stdout == ""
+        payload = json.loads(cut_proc.stderr)
         regions_document_error_codes = {
             "bad_regions",
             "unknown_region_field",

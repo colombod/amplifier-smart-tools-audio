@@ -9,6 +9,84 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-20
+
+Ten spec deviations closed, and the README turned from a tutorial into a landing page.
+
+### Fixed
+
+- **Error envelopes went to stdout.** Every `AudError` was printed to stdout, so a caller piping
+  a chain got the error mixed into the stream carrying results. Errors now go to **stderr**;
+  stdout carries only the result. Verified: a bad flag leaves stdout empty and puts the envelope
+  on stderr, exit 2.
+- **The library required a shared filesystem.** `curve_apply` took only a path and read it
+  inside the library, so a caller in another process could not use it. It now accepts the curve
+  as **data**; the CLI reads the file and passes the content, which is a command-line
+  convenience rather than a change to what the library accepts.
+- **Artifact locations had no stated base.** `render`, `curve extract` and `curve apply` echoed
+  back whatever relative path the caller passed. Each destination is now resolved to an
+  **absolute path** before writing, and that resolved path is what the result reports —
+  including `master`'s propagated render result.
+- **A typo in a setting was reported as our bug.** A bad `AUD_*` value raised a bare `ValueError`
+  that surfaced as `internal_error` telling the user to file a bug report. It is now
+  `bad_config`, naming the variable, the bad value and the expected type —
+  `AUD_OVERSAMPLE is 'four'; 'oversample' must be an integer.` — which is what
+  `docs/CONFIGURATION.md` already promised. Curve output is written atomically, and an
+  unwritable destination is a named `bad_path` with no partial file left behind.
+- **A partial analysis looked like a complete one.** `analyze` caught every exception from the
+  loudness-range measurement and returned `loudness_range_lu: null` with no status or reason —
+  so a genuine measurement limit and a real bug were indistinguishable. The bare `except` is
+  gone, an explicit precondition decides when the metric is unavailable, and a reason is
+  reported. This also fixed a crash: the integrated-loudness call was **unguarded**, so `analyze`
+  failed outright on any file below pyloudnorm's 0.4 s gating block.
+- **Prerequisites were checked after the work.** `advise` analysed the input before looking for a
+  credential, and `detect fillers` decoded the entire file before checking whether the speech
+  extra was installed. Both now fail first: a nonexistent path still reports
+  `provider_credential_missing` / `speech_extra_missing` rather than `file_not_found`.
+- **`aud --help` had no install and no non-goals**, though the manifest carried them. Both are
+  now in the rendered tool skill (104 lines, against the 500-line Agent Skills ceiling).
+- **Capability help was incomplete**, and two entries were lying. Every verb's `--help` now
+  carries **Kind** (deterministic or model-backed), **Result** and **Failures** with real error
+  codes traced from the source. `cut` and `strip-silence` still claimed to be unbuilt and to
+  return `not_implemented` — they have rendered since 0.4.0. Swept the whole file; no other
+  stale claim remains.
+- **The manifest promised something untrue.** "Every verb appends to a plan" is false for
+  `manifest`, `check`, `analyze`, `config` and `plan`. It now says every **chain stage** appends
+  to a plan, and names the read-only and lifecycle verbs separately. The manifest also now
+  declares the **Azure endpoint** prerequisite, which the runtime enforces and the manifest had
+  omitted.
+
+### Changed
+
+- **The agent skill is thin, the way the spec asks.** `skills/aud/SKILL.md` went from 104 lines
+  to 58: frontmatter, a short summary, install, and the instruction to run `aud --help` then
+  `aud <verb> --help`. The prerequisite matrix, pipelines and preset names it used to carry —
+  all of which could drift from runtime help — now live in `aud --help`, which is their proper
+  home. The `description` is untouched: that field is the discovery surface, it describes intent
+  rather than mechanics, and it cannot drift.
+- **The README is a landing page, not a tutorial.** 249 lines to 104, matching the rest of the
+  fleet: what it is, the full install ladder, an Interface section, and pointers into `docs/`.
+  It now carries **`npx skills add colombod/amplifier-smart-tools-audio`**, which was missing
+  entirely despite the repo shipping a skill — nobody could install it into another harness.
+  Also removed a status box still claiming `detect`, `cut` and `strip-silence` were unimplemented
+  in 0.3.0.
+
+### Verified
+
+- 418 tests pass, 0 skipped (was 382). ruff clean. Conformance 16 PASS / 0 FAIL.
+- Each of the ten deviations re-checked against its own evidence by running the tool, not by
+  reading the diff — including the three config coercion paths, the two prerequisite orderings,
+  and the stdout/stderr split.
+
+### Known limits
+
+- `smart-tool-creator` no longer exposes the `check-spec-adherence` verb that produced the
+  original report, so the ten fixes were verified individually against that report's own
+  file:line evidence rather than by re-running it.
+- Config type-checking covers the environment-variable tier. The config-file tier is unchecked:
+  `sample_rate_policy` legitimately takes either a string or an int and `output_subtype` needs
+  enum validation, so a generic check needs per-key logic.
+
 ## [0.10.0] - 2026-09-19
 
 An installable skill, the two replay rules moved from prose into code, gate and expander

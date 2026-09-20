@@ -51,7 +51,7 @@ def test_gate_and_expand_chain_through_the_cli_and_render(tiny_wav: Path, tmp_pa
     render_proc = _run(["render", str(tiny_wav), str(out_path)], input_text=expand_proc.stdout)
     assert render_proc.returncode == 0, render_proc.stderr
     render_result = json.loads(render_proc.stdout)["result"]
-    assert render_result["out_path"] == str(out_path)
+    assert render_result["out_path"] == str(out_path.resolve())
     assert out_path.exists()
 
     report_by_stage = {s["stage"]: s for s in render_result["report"]["stages"]}

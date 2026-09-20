@@ -1,7 +1,7 @@
 ---
 smart_tool_format: 1
 name: aud
-version: 0.10.0
+version: 0.11.0
 description: >-
   Anything to do with finishing an audio file the user already has -- .wav, .flac, .aiff, .mp3.
   Reach for it when the ask sounds like "make this sound finished", "this is too quiet for
@@ -14,12 +14,16 @@ description: >-
   cut listed regions, strip or shorten silences, de-ess, de-verb, parametric EQ, EQ-match
   against a reference recording, MULTIBAND compression and multiband dynamic range control,
   saturation, controlled ambience, loudness targeting and true-peak brickwall limiting. Every
-  verb appends to a plan and one render applies the whole chain in a single pass, so a chain
-  can be inspected and re-run, and the whole job is ONE shell command rather than a round trip
-  per stage. This is mastering and cleanup, NOT mixing: it works on a finished stereo or mono
-  programme, not on multitrack stems. It uses speech recognition internally to locate filler
-  words, but it does NOT produce transcripts -- do NOT use it for video files, for
-  transcription as an output, or for music generation.
+  CHAIN STAGE (cut, strip-silence, gate, expand, deess, dereverb, eq, eq-match, compress,
+  saturate, reverb, stretch, pitch, loudness, limit) appends to a plan, and one render applies
+  the whole chain in a single pass, so a chain can be inspected and re-run, and the whole job is
+  ONE shell command rather than a round trip per stage. The read-only/reporting verbs (analyze,
+  detect, verify, check, config, manifest) and the plan-lifecycle verbs (plan, preset) do not
+  append to a plan themselves -- see the verb table below for which is which. This is mastering
+  and cleanup, NOT mixing: it works on a finished stereo or mono programme, not on multitrack
+  stems. It uses speech recognition internally to locate filler words, but it does NOT produce
+  transcripts -- do NOT use it for video files, for transcription as an output, or for music
+  generation.
 use_cases:
   - Measure a file honestly before touching it -- LUFS, true peak, crest factor, spectral balance
   - Bring a podcast or music file to a loudness target without clipping or inter-sample peaks
@@ -48,8 +52,20 @@ requires:
       verbs refuse, saying so, rather than guessing a chain; every other verb -- analysing,
       building a chain by hand, rendering, verifying, extracting and applying EQ curves -- keeps
       working with no credential configured at all. Any one of ANTHROPIC_API_KEY, OPENAI_API_KEY,
-      GOOGLE_API_KEY, GEMINI_API_KEY or AZURE_OPENAI_API_KEY satisfies it. This tool stores no
-      credentials of its own.
+      GOOGLE_API_KEY, GEMINI_API_KEY or AZURE_OPENAI_API_KEY satisfies it -- AZURE_OPENAI_API_KEY
+      additionally needs the separate azure-openai-endpoint requirement below; the other four
+      need nothing beyond the key itself. This tool stores no credentials of its own.
+    optional: true
+    install: docs/CONFIGURATION.md
+  - name: azure-openai-endpoint
+    purpose: >-
+      Required in addition to AZURE_OPENAI_API_KEY, and only when that key is the credential in
+      use: Azure OpenAI needs a resource endpoint to reach a deployment, which the other four
+      accepted credentials do not. Without AZURE_OPENAI_ENDPOINT set, `advise` and `master`
+      refuse with `provider_config_incomplete` even though AZURE_OPENAI_API_KEY is present.
+      AZURE_OPENAI_DEPLOYMENT and AZURE_OPENAI_API_VERSION are separate, already-defaulted
+      settings, not part of this requirement. Irrelevant to every other provider and to every
+      deterministic verb.
     optional: true
     install: docs/CONFIGURATION.md
   - name: faster-whisper

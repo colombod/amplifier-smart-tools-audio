@@ -35,11 +35,14 @@ def test_manifest_emits_a_parseable_result_envelope() -> None:
     assert payload["result"]["name"] == "aud"
 
 
-def test_bad_argument_emits_error_envelope_on_stdout_only() -> None:
+def test_bad_argument_emits_error_envelope_on_stderr_only() -> None:
     proc = _run(["limit", "--ceiling", "not-a-number"])
     assert proc.returncode in (1, 2)
-    # The whole of stdout must be one JSON document -- nothing non-JSON alongside it.
-    payload = json.loads(proc.stdout)
+    # Stdout carries the result, stderr carries diagnostics (Amplifier Smart
+    # Tools spec) -- a failing invocation has no result, so stdout must be
+    # completely empty and the whole error envelope must be on stderr.
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
     assert set(payload) == {"error"}
     assert set(payload["error"]) == {"code", "message", "remedy"}
     assert payload["error"]["code"]
@@ -49,15 +52,35 @@ def test_bad_argument_emits_error_envelope_on_stdout_only() -> None:
 def test_missing_required_argument_is_also_a_clean_error_envelope() -> None:
     proc = _run(["compress"])  # --bands is required
     assert proc.returncode in (1, 2)
-    payload = json.loads(proc.stdout)
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
     assert set(payload) == {"error"}
 
 
 def test_unknown_verb_is_a_clean_error_envelope() -> None:
     proc = _run(["not-a-real-verb"])
     assert proc.returncode in (1, 2)
-    payload = json.loads(proc.stdout)
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
     assert set(payload) == {"error"}
+
+
+def test_failing_invocation_writes_nothing_to_stdout_and_the_envelope_to_stderr() -> None:
+    """The direct regression guard for the stdout/stderr separation itself.
+
+    A pipe chain (`aud detect silence x.wav | aud cut | aud render in out`)
+    reads only stdout downstream of a failure; an error envelope leaking
+    onto stdout would look like real data to that pipe instead of the loud,
+    separate failure it needs to be (Amplifier Smart Tools spec: "stdout
+    carries the result, stderr carries diagnostics").
+    """
+    proc = _run(["not-a-real-verb"])
+    assert proc.returncode != 0
+    assert proc.stdout == ""
+    assert proc.stderr != ""
+    payload = json.loads(proc.stderr)
+    assert set(payload) == {"error"}
+    assert set(payload["error"]) == {"code", "message", "remedy"}
 
 
 def test_plan_pipeline_yields_both_stages() -> None:
@@ -128,7 +151,8 @@ def test_missing_input_file_is_a_file_not_found_error_not_an_internal_bug(tmp_pa
     missing = tmp_path / "does-not-exist.wav"
     proc = _run(["verify", str(missing), "--target", "-14"])
     assert proc.returncode != 0
-    payload = json.loads(proc.stdout)
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
     assert set(payload) == {"error"}
     assert payload["error"]["code"] == "file_not_found"
     assert str(missing) in payload["error"]["message"]
@@ -144,7 +168,8 @@ def test_eq_match_missing_curve_file_is_a_file_not_found_error(tmp_path: Path) -
     assert plan_proc.returncode == 0, plan_proc.stderr
     proc = _run(["eq-match", "--curve", str(missing_curve)], input_text=plan_proc.stdout)
     assert proc.returncode != 0
-    payload = json.loads(proc.stdout)
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
     assert payload["error"]["code"] == "file_not_found"
     assert str(missing_curve) in payload["error"]["message"]
 
@@ -164,14 +189,16 @@ def test_unexpected_exception_is_wrapped_in_error_envelope_not_a_raw_traceback(t
     assert plan_proc.returncode == 0, plan_proc.stderr
     proc = _run(["render", str(tiny_wav), str(bogus_out)], input_text=plan_proc.stdout)
     assert proc.returncode != 0
-    # The whole of stdout must still be exactly one JSON document -- a raw
-    # Python traceback on stdout would fail this parse outright.
-    payload = json.loads(proc.stdout)
+    # Stdout must be completely empty -- a raw Python traceback (or anything
+    # else) on stdout would fail this outright, and so would an error
+    # envelope landing on the wrong stream.
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
     assert set(payload) == {"error"}
     assert payload["error"]["code"] == "internal_error"
     assert "remedy" in payload["error"]
     assert payload["error"]["remedy"]
-    # Without --debug/AUD_DEBUG, the raw traceback is not dumped to stderr either.
+    # Without --debug/AUD_DEBUG, the raw traceback is not dumped either.
     assert "Traceback" not in proc.stderr
 
 
@@ -194,7 +221,8 @@ def test_invalid_output_subtype_is_an_audio_write_error_not_internal_error(tiny_
     proc = _run(["render", str(tiny_wav), str(out_path)], input_text=plan_proc.stdout, env=env)
 
     assert proc.returncode != 0
-    payload = json.loads(proc.stdout)
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
     assert set(payload) == {"error"}
     assert payload["error"]["code"] == "audio_write_error"
     assert payload["error"]["code"] != "internal_error"
@@ -216,7 +244,8 @@ def test_unwritable_destination_directory_is_an_audio_write_error(tiny_wav: Path
         proc = _run(["render", str(tiny_wav), str(out_path)], input_text=plan_proc.stdout)
 
         assert proc.returncode != 0
-        payload = json.loads(proc.stdout)
+        assert proc.stdout == ""
+        payload = json.loads(proc.stderr)
         assert set(payload) == {"error"}
         assert payload["error"]["code"] == "audio_write_error"
         assert payload["error"]["code"] != "internal_error"
@@ -238,7 +267,11 @@ def test_debug_flag_puts_the_real_traceback_on_stderr(tiny_wav: Path, tmp_path: 
         input_text=plan_proc.stdout,
     )
     assert proc.returncode != 0
-    payload = json.loads(proc.stdout)
-    assert payload["error"]["code"] == "internal_error"
+    assert proc.stdout == ""
+    # With --debug, stderr carries BOTH the traceback and the error envelope
+    # (in that order, see cli.py::main) -- the envelope is always the last
+    # line, since `_print_error` is the last thing written.
     assert "Traceback" in proc.stderr
     assert "NotADirectoryError" in proc.stderr
+    payload = json.loads(proc.stderr.strip().splitlines()[-1])
+    assert payload["error"]["code"] == "internal_error"

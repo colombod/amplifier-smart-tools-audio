@@ -47,58 +47,12 @@ As a library — the CLI is a thin wrapper and `aud.lib` holds every capability:
 `uv add "aud @ git+https://github.com/colombod/amplifier-smart-tools-audio"`.
 Already installed? `uv tool upgrade aud`; `aud manifest` reports what you have.
 
-## What needs setting up, and what it unlocks
+## Read this first
 
-| capability | needs |
-|---|---|
-| `analyze`, `detect silence`/`transients`, every chain stage, `render`, `verify`, `preset` | **nothing** |
-| `.mp3`, `.m4a`, `.ogg` (`.wav`/`.flac`/`.aiff` need nothing) | **ffmpeg** |
-| `detect fillers` — find the "umm"s | `aud[speech]`: a **local** 142 MB model, fetched once, no credential |
-| `stretch`/`pitch` at the higher tier | `aud[stretch]` — the built-in vocoder works without it |
-| `advise`, `master` | a provider key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `GEMINI_API_KEY` or `AZURE_OPENAI_API_KEY` |
-
-**Run `aud check` first.** It reports what THIS machine has and prints the exact
-command for each gap. Never tell a user a capability is unavailable without
-running it, and never silently substitute another approach for a missing tier.
-
-## Read this before running anything
-
-**`aud --help` prints the real instructions** — every verb, the chain order, the
-sharp edges. It is written for you, not for a human skimming a man page. Read it
-first, then confirm each argument with `aud <verb> --help` rather than from
-memory. The flags are not guessable: `cut` alone takes padding, four snap modes,
-a search window, fades and a crossfade shape.
-
-**`aud analyze <file>` before changing anything.** It costs nothing, needs no
-credential, and turns "it sounds bad" into numbers you can act on and cite back.
-Advising a chain without measuring first is guessing.
-
-## The one thing worth knowing up front
-
-**Chain the verbs. Do not call them one at a time.**
-
-Every verb except `render` takes a plan on stdin, appends one stage, and passes
-it on. Nothing touches a sample until `render`, which applies the whole chain in
-a **single pass**:
-
-```bash
-aud detect silence in.wav \
-  | aud cut --snap transient --crossfade 10 \
-  | aud deess --amount 6 \
-  | aud compress --bands 150,1200,6000 --ratio 2.5 \
-  | aud loudness --target -14 \
-  | aud limit --ceiling -1.0 \
-  | aud render in.wav out.wav
-```
-
-Six operations, **one decode and one encode**. Rendering between each step is the
-obvious approach and the expensive one — every extra render is another
-quantisation and another chance to clip. Composing costs nothing: a plan is JSON
-and no sample is read until `render`.
-
-Three ways in, for three callers: the pipe chain when you know what the file
-needs; `aud preset show podcast | aud render in.wav out.wav` when you want a
-known-good chain (`music-streaming`, `broadcast`, `voiceover` too); and
-`aud advise in.wav` or `aud master in.wav out.wav` when you want the decision
-made for you — `advise` returns a plan with a stated reason per stage, so you can
-show the user why before anything is written.
+Run **`aud --help`** for the real instructions — every verb, the chain order,
+prerequisites, install commands and the sharp edges. It is written for an agent
+to act on, not for a human skimming a man page, so it is the source of truth
+here, not this file. Then run **`aud <verb> --help`** for the full
+documentation of any one verb before using it — the flags are not guessable.
+Run **`aud check`** first to see what this host actually has and can reach;
+never assume a capability is missing without running it.

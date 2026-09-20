@@ -121,7 +121,9 @@ def test_lib_master_renders_and_verifies_end_to_end(tmp_path: Path) -> None:
         model="fake-1",
     )
     assert out_path.exists()
-    assert result["out_path"] == str(out_path)
+    # `master`'s `out_path` is `render`'s own resolved (absolute) path --
+    # an artifact's location is named, not an unresolved echo of the input.
+    assert result["out_path"] == str(out_path.resolve())
     assert [s["stage"] for s in result["stages"]] == ["expand", "loudness", "limit"]
     assert result["render"]["stages"][-1]["stage"] == "limit"
 
@@ -189,6 +191,22 @@ def test_lib_advise_refuses_with_no_credentials(tiny_wav: Path, monkeypatch: pyt
     assert excinfo.value.code == "provider_credential_missing"
 
 
+def test_lib_advise_checks_the_credential_before_decoding_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing prerequisite fails BEFORE the work: the credential check
+    must run before `path` is even opened. Proven with a path that does
+    not exist -- if `advise` decoded first, this would come back
+    `file_not_found`; the fix means it never gets that far.
+    """
+    for var in _PROVIDER_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    missing = tmp_path / "does-not-exist.wav"
+    with pytest.raises(AudError) as excinfo:
+        lib.advise(str(missing))
+    assert excinfo.value.code == "provider_credential_missing"
+
+
 def test_lib_master_refuses_with_no_credentials_and_touches_nothing(
     tiny_wav: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -226,7 +244,8 @@ def test_cli_advise_refuses_with_no_credentials_but_other_verbs_still_work(
 ) -> None:
     advise_proc = _run(["advise", str(tiny_wav)], env=scrubbed_env)
     assert advise_proc.returncode != 0
-    payload = json.loads(advise_proc.stdout)
+    assert advise_proc.stdout == ""
+    payload = json.loads(advise_proc.stderr)
     assert payload["error"]["code"] == "provider_credential_missing"
     assert any(var in payload["error"]["message"] or var in payload["error"]["remedy"] for var in _PROVIDER_ENV_VARS)
 
@@ -250,9 +269,46 @@ def test_cli_master_refuses_with_no_credentials_and_writes_no_file(
     out_path = tmp_path / "out.wav"
     proc = _run(["master", str(tiny_wav), str(out_path)], env=scrubbed_env)
     assert proc.returncode != 0
-    payload = json.loads(proc.stdout)
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
     assert payload["error"]["code"] == "provider_credential_missing"
     assert not out_path.exists()
+
+
+def test_cli_advise_refuses_before_decoding_a_file_that_would_fail_to_decode(
+    scrubbed_env: dict[str, str], tmp_path: Path
+) -> None:
+    """Deviation-fix regression guard: the credential prerequisite must be
+
+    resolved BEFORE `path` is decoded and measured. Point `advise` at a
+    path that is not real audio at all -- if the code decoded first, this
+    would fail with a decode error, not a credential error. Getting
+    `provider_credential_missing` here is what actually proves the
+    ordering, not just the final error code.
+    """
+    not_audio = tmp_path / "not-really-audio.wav"
+    not_audio.write_bytes(b"this is not a wav file at all")
+    proc = _run(["advise", str(not_audio)], env=scrubbed_env)
+    assert proc.returncode != 0
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
+    assert payload["error"]["code"] == "provider_credential_missing"
+    assert payload["error"]["code"] not in {"file_not_found", "audio_decode_error", "internal_error"}
+
+
+def test_lib_advise_resolves_backend_before_analyzing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same guarantee at the library level, directly: `analyze` must never
+
+    run before the provider prerequisite is resolved. Passes a path that
+    does not exist at all -- `analyze` would raise `file_not_found` if it
+    ran first -- with every credential stripped, so `resolve_backend` is
+    what must fail, before `analyze` ever gets a chance to.
+    """
+    for var in _PROVIDER_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    with pytest.raises(AudError) as excinfo:
+        lib.advise("/does/not/exist/at/all.wav")
+    assert excinfo.value.code == "provider_credential_missing"
 
 
 def test_cli_advise_and_master_help_no_longer_say_not_yet_built() -> None:

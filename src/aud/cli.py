@@ -5,9 +5,11 @@ the library, and prints exactly one JSON document to stdout. Progress and
 diagnostics never go to stdout.
 
 Output contract:
-  Success:  {"result": ...}
-  Failure:  {"error": {"code", "message", "remedy"}}, exit 1 (AudError) or
-            exit 2 (usage error).
+  Success:  {"result": ...} on stdout.
+  Failure:  {"error": {"code", "message", "remedy"}} on stderr, exit 1
+            (AudError) or exit 2 (usage error). stdout stays empty so a
+            piped chain ('aud <verb> ... | aud render ...') never mistakes
+            an error envelope for the plan it was expecting to read.
   Exception: 'plan' and every stage verb print the plan document itself,
   raw and unwrapped, to stdout, so verbs pipe into each other.
 """
@@ -462,7 +464,14 @@ def _dispatch(verb: str, args: argparse.Namespace, stdin_text: str | None) -> An
     if verb == "curve":
         if args.curve_action == "extract":
             return lib.curve_extract(args.path, args.out)
-        return lib.curve_apply(args.path, args.curve, args.out)
+        # `lib.curve_apply` takes the curve as DATA, not a path -- a Python
+        # caller with no filesystem in common with `aud` can hand it a
+        # parsed curve directly. Reading `args.curve` (a file path) here is
+        # the CLI's own convenience, exactly like `eq-match --curve` already
+        # does above. `curve_path` is passed through too, purely so an
+        # error message can still name the file the caller pointed at.
+        curve = lib.load_json_file(args.curve)
+        return lib.curve_apply(args.path, args.out, curve=curve, curve_path=args.curve)
     if verb == "render":
         plan = read_plan(stdin_text)
         return lib.render(plan, args.in_path, args.out_path)
@@ -526,7 +535,13 @@ def _print_result(result: Any) -> None:
 
 
 def _print_error(exc: AudError) -> None:
-    print(json.dumps({"error": exc.to_dict()}, sort_keys=True))
+    # stdout carries results, stderr carries diagnostics -- an error is a
+    # diagnostic, not a result, so it belongs on stderr like every other
+    # non-result message this module prints (see `_print_advise_reasoning`).
+    # This keeps stdout clean for a piped chain: 'aud <verb> ... | aud render'
+    # must never see an error envelope arrive on the channel it reads a plan
+    # from.
+    print(json.dumps({"error": exc.to_dict()}, sort_keys=True), file=sys.stderr)
 
 
 def _print_advise_reasoning(outcome: dict[str, Any]) -> None:

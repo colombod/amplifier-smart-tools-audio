@@ -210,7 +210,8 @@ def test_cli_preset_show_prints_a_raw_unwrapped_plan_document() -> None:
 def test_cli_preset_show_unknown_name_is_a_named_error_not_a_crash() -> None:
     proc = _run(["preset", "show", "not-a-real-preset"])
     assert proc.returncode != 0
-    payload = json.loads(proc.stdout)
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
     assert payload["error"]["code"] == "unknown_preset"
     assert "Traceback" not in proc.stdout
     assert "Traceback" not in proc.stderr
@@ -230,5 +231,5 @@ def test_cli_preset_show_pipes_straight_into_render(tmp_path) -> None:
     render_proc = _run(["render", str(in_wav), str(out_wav)], input_text=show_proc.stdout)
     assert render_proc.returncode == 0, render_proc.stderr
     payload = json.loads(render_proc.stdout)
-    assert payload["result"]["out_path"] == str(out_wav)
+    assert payload["result"]["out_path"] == str(out_wav.resolve())
     assert out_wav.exists()

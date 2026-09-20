@@ -8,17 +8,17 @@ truth that silently goes stale the moment a verb changes. The guard is
 structural -- frontmatter identity, and "does it point outward instead of
 inlining the verb table" -- not a byte-diff against `--help`.
 
-A note on a naive size check, honestly: at the time of writing this skill is
-*larger* than `aud --help` (104 lines vs 83). That is not a red flag here --
-`aud --help` (rendered by `aud.core.skill.render_skill`) is unusually terse,
-one line per verb, because it targets an agent that will follow up with
-`aud <verb> --help`. A skill file additionally needs installation
-instructions, a capability/dependency table and worked examples that
-`--help` deliberately omits. So this file does NOT assert "shorter than
---help" -- that ratio is the wrong signal for this tool -- it asserts the
-actual structural property that matters: the skill does not inline the verb
-reference table `SMART_TOOL.md` owns, and it tells the reader where the real
-answers live.
+A note on a naive size check, honestly: this file's size relative to
+`aud --help` is not a stable signal either way -- at one point in this
+tool's history the skill was *larger* than `--help` (it carried a
+capability/dependency table and worked examples `--help` didn't yet have);
+after `--help` grew its own install/prerequisites/non-goals sections and the
+skill was thinned to a pointer, the relationship reversed. Neither direction
+means anything on its own, which is exactly why this file does NOT assert
+"shorter than --help" -- it asserts the actual structural property that
+matters: the skill does not inline the verb reference table `SMART_TOOL.md`
+owns, and it tells the reader where the real answers live (`aud --help`,
+`aud <verb> --help`, `aud check`).
 """
 
 from __future__ import annotations

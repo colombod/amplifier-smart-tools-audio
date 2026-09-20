@@ -104,7 +104,7 @@ def test_all_implemented_stages_chain_and_render_without_crashing(tmp_path: Path
     render_proc = _run(["render", str(in_path), str(out_path)], input_text=limit_proc.stdout)
     assert render_proc.returncode == 0, render_proc.stderr
     render_result = json.loads(render_proc.stdout)["result"]
-    assert render_result["out_path"] == str(out_path)
+    assert render_result["out_path"] == str(out_path.resolve())
     stage_names = [s["stage"] for s in render_result["report"]["stages"]]
     assert stage_names == ["eq", "compress", "saturate", "loudness", "limit"]
     assert out_path.exists()
