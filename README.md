@@ -1,5 +1,7 @@
 # aud
 
+[Branded website source and publishing guide](site/README.md)
+
 Master and clean up audio from the command line or from Python. `aud` measures a finished
 programme — loudness, true peak, crest factor, spectral balance, sibilance, ambience — finds
 what is in it — onsets, silences, filler words — then runs it through an editing and mastering

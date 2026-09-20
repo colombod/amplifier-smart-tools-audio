@@ -1,0 +1,55 @@
+{
+  "key": "aud",
+  "name": "Aud",
+  "kind": "tool",
+  "title": "Aud | Amplifier Smart Tools",
+  "accent": "#356e63",
+  "promise": "Give every recording its finish.",
+  "description": "Clean up speech, shape the sound, and reach the loudness you want. Aud turns a finished recording into an inspectable mastering plan, then applies the chain in one render.",
+  "image": "docs/images/chain-animation.gif",
+  "alt": "Aud animated mastering-chain illustration.",
+  "caption": "Mastering-chain animation from the Aud repository.",
+  "width": 1280,
+  "height": 720,
+  "flow_title": "Hear the difference. Keep the plan.",
+  "flow_intro": "Clean up speech, shape the sound, and reach the loudness you want. Aud turns a finished recording into an inspectable mastering plan, then applies the chain in one render.",
+  "steps": [
+    [
+      "Measure the recording.",
+      "Understand loudness, peaks, tonal balance, and the dynamics already in the file."
+    ],
+    [
+      "Shape the chain.",
+      "Trim pauses, tame harshness, balance frequencies, and set a loudness target."
+    ],
+    [
+      "Render and verify.",
+      "Apply the plan in one pass, then measure the result against the targets."
+    ]
+  ],
+  "detail_title": "Expertise your agent can put to work.",
+  "details": [
+    [
+      "Make speech flow.",
+      "Find silences and filler words, then make edits with padded boundaries and crossfades."
+    ],
+    [
+      "Find the right balance.",
+      "Use EQ, multiband compression, and reference matching to shape the sound."
+    ],
+    [
+      "Keep a repeatable finish.",
+      "Save a mastering plan, start from a preset, and reuse the same chain across recordings."
+    ]
+  ],
+  "prompt": "Use Aud to finish my recording. Read aud --help and the relevant command help. Measure the file, propose a mastering plan, and show me the plan before rendering. Verify the result against the agreed targets.",
+  "install": "uv tool install git+https://github.com/colombod/amplifier-smart-tools-audio\naud --help",
+  "prerequisites": "Python 3.11+ and uv. The setup guide covers FFmpeg for compressed formats and optional speech and time-stretch features.",
+  "model_note": "Model-backed advice and automatic mastering use your configured AI provider. Measurement, explicit mastering chains, rendering, and verification run locally.",
+  "guide": "src/aud/SMART_TOOL.md",
+  "related": [
+    "outtake",
+    "unfold",
+    "stories"
+  ]
+}

@@ -67,7 +67,7 @@ target-version = "py311"
 # byte-identical to what actually ran when the fixtures were captured (see
 # tests/fixtures/recorded/RECORDING.md) -- they are evidence, not
 # maintained source, and are never reformatted or "fixed".
-extend-exclude = ["tests/fixtures/recorded/scripts"]
+extend-exclude = ["tests/fixtures/recorded/scripts", "site/theme", "_site"]
 
 [tool.ruff.lint]
 select = ["F", "E", "I", "N", "UP", "RUF", "B", "C4", "PIE", "PT", "PTH", "SIM", "TID"]
