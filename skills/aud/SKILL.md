@@ -1,18 +1,13 @@
 ---
 name: aud
 description: >-
-  Anything to do with finishing an audio file the user already has — .wav, .flac,
-  .aiff, .mp3. Reach for it when the ask sounds like "make this sound finished",
-  "this is too quiet for YouTube", "get rid of the harsh S sounds", "the room
-  sounds boxy", "there's hiss between the sentences", "cut out the long pauses",
-  "get rid of the umms and ahs", "make this episode match last week's", "level
-  these three files to each other", or "hit -14 LUFS without clipping". It
-  MEASURES first — loudness, true peak, crest factor, spectral balance,
-  sibilance, noise floor — then runs an editing and mastering chain: cut
-  silences and filler words, de-ess, de-verb, noise gate, expander, EQ, EQ-match
-  against a reference recording, multiband compression, saturation, controlled
-  ambience, loudness targeting and true-peak limiting. Chain the verbs with
-  pipes — the whole job is one pass and one shell command. This is MASTERING and
+  Anything to do with finishing an audio file the user already has — .wav,
+  .flac, .aiff, .mp3. Reach for it when the ask sounds like "make this sound
+  finished", "this is too quiet for YouTube", "get rid of the harsh S sounds",
+  "the room sounds boxy", "there's hiss between the sentences", "cut out the
+  long pauses and umms", "make this episode match last week's", or "hit -14 LUFS
+  without clipping". It measures loudness, true peak and spectral balance first,
+  then runs an editing and mastering chain in one pass. This is MASTERING and
   CLEANUP, not mixing: it works on a finished stereo or mono programme. Do NOT
   use it for video files, for multitrack stems, for transcription as an output,
   or for generating music.

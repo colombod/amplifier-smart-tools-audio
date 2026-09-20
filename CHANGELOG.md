@@ -9,6 +9,18 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-09-20
+
+### Fixed
+
+- **Agent Skills description exceeded 1024 character limit.** The skill's frontmatter
+  description was 1093 characters, breaching Agent Skills spec compliance. Trimmed to 713
+  characters by removing DSP-stage enumeration, measurement-metric list, and pipe-chaining
+  mechanics — mechanics that runtime help already documents — while preserving the boundary
+  clause (not video, not multitrack, not transcription, not generation) that stops
+  agents reaching for the wrong tool. Added regression test covering all `skills/*/SKILL.md`
+  frontmatter descriptions to prevent re-introduction.
+
 ## [0.11.0] - 2026-09-20
 
 Ten spec deviations closed, and the README turned from a tutorial into a landing page.
