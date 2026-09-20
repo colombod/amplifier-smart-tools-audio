@@ -17,12 +17,10 @@ Status: **regions_format 1**. Scope: what the document *is*. How the positions i
 arrived at — the onset detector, the noise-floor estimator, the recogniser — is not part of this
 contract; see [Not promised](#not-promised).
 
-> **Implementation status.** This contract is specified and the verbs are registered. The
-> detection and editing signal processing behind them is **not implemented** in 0.3.0: `aud
-> detect`, `aud cut` and `aud strip-silence` currently exit non-zero with
-> `{"error": {"code": "not_implemented", ...}}`. The document below is the shape they will
-> produce and consume, written down first so that a generator can be built against it and so
-> that the implementation has something to be wrong about.
+> **Implementation status.** This contract was written down before the signal processing behind
+> it, so that a generator could be built against it and so that the implementation had something
+> to be wrong about. That is history now: `aud detect`, `aud cut` and `aud strip-silence` are
+> implemented and render. The document below is the shape they actually produce and consume.
 
 ## The positions in here are nominal
 

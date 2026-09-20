@@ -462,11 +462,12 @@ tool depend on an *optional* extra being installed, which is precisely the prope
 claims not to have.
 
 > **Status.** The two document contracts, the canonical order, the verb surface and the
-> edit-point resolution design (§2c) are in place as of 0.3.0. The modules in this table marked
-> as detection, resolution and editing — `dsp/detect`, `dsp/resolve`, `dsp/edit`,
-> `core/regions`, `core/speech` — are **specified, not written**. `aud detect`, `aud cut` and
-> `aud strip-silence` parse their full documented argument surface and return
-> `not_implemented`. No padding, snap, fade or crossfade code exists.
+> edit-point resolution design (§2c) were in place as of 0.3.0, ahead of the signal processing
+> behind them. That gap is closed: `dsp/detect`, `dsp/resolve`, `dsp/edit`, `core/regions` and
+> `core/speech` are all written, and `aud detect`, `aud cut` and `aud strip-silence` render.
+> Padding, the four snap rules, fades and crossfades are implemented, and every boundary a cut
+> resolves is reported back in the render report's `edit_points` — including the ones where a
+> snap found nothing acceptable and kept the nominal position.
 
 ## 7. Where intelligence attaches
 

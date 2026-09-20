@@ -677,20 +677,23 @@ says a rename is breaking.
 Apply the contract's own **test** rather than its shorthand: *can a document that already exists
 render differently?*
 
-- No released version of `aud` has ever rendered a `strip_silence` stage. `render` does not know
-  it; `aud strip-silence` returns `not_implemented` and never appends one.
-- So a plan carrying `strip_silence` with `pad_ms` is producible only by hand or by a
-  third-party generator — and it does not render today, and it will not render tomorrow. Its
-  behaviour cannot change, because it has none.
-- The eleven implemented stages are untouched, in name, type and default.
+- At the time of the rename, no released version of `aud` had ever rendered a `strip_silence`
+  stage. `render` did not know it; `aud strip-silence` returned `not_implemented` and never
+  appended one.
+- So a plan carrying `strip_silence` with `pad_ms` was producible only by hand or by a
+  third-party generator — and it did not render. Its behaviour could not change, because it had
+  none.
+- The eleven implemented stages were untouched, in name, type and default.
 
 The general rule "a rename is breaking" is a **conservative proxy** for that test, and it is the
 right proxy nearly always. Where the proxy and the test disagree, the test governs, because the
 test is the thing the format integer actually protects.
 
-This escape has an expiry, and naming it is the point of writing it down: **the moment
-`strip_silence` renders in a released version, it is gone.** From then on a stored plan carrying
-it has behaviour, and any rename of its params is `plan_format: 2`.
+> **That escape has expired, exactly as written.** The condition named here was: *the moment
+> `strip_silence` renders in a released version, it is gone.* It renders now. From this release
+> on, a stored plan carrying `strip_silence` **has** behaviour, and any rename of its params —
+> or of `cut`'s — is `plan_format: 2`, with no appeal to the test above. The reasoning is kept
+> on the record because it was sound when it was made, not because it still licenses anything.
 
 `cut` keeps `crossfade_ms` under its own name and its own default of `10.0`. Nothing that a
 released `aud` implements changed spelling or value.
