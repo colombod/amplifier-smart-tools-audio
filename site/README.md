@@ -29,8 +29,9 @@ shared preview directory named after its repository, then serve that directory.
 ## GitHub Pages
 
 The Website workflow builds relevant pull requests without deploying. Relevant
-pushes to main automatically build and publish to GitHub Pages. Enable Pages
-with GitHub Actions as the source and allow main in the github-pages environment.
+pushes to main automatically build and publish to GitHub Pages. The deploy job
+enables Pages with GitHub Actions as the source on its first run, so the only
+manual step is allowing main in the github-pages environment.
 The manual Website action remains available for explicit publication of a branch.
 
 Production navigation points to the Microsoft overview and catalog by default.
@@ -70,8 +71,8 @@ and generation provenance live in `amplifier-smart-tools/site/artwork/`.
 The vendored theme is excluded from tool-specific lint and type checks to preserve
 its shared source. The Website workflow validates it by building the site.
 
-After merge, open **Settings > Pages** and select **GitHub Actions** as the source.
-If the first deployment ran before Pages was enabled, rerun the Website workflow
+After merge, the Website workflow enables Pages with **GitHub Actions** as the
+source itself; if a deployment failed before that, rerun the Website workflow
 with **publish** checked. Later website changes on main publish automatically.
 
 This copy adds optional `--config` and family URL subpaths for multi-tool repositories.
