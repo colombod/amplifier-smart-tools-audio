@@ -56,7 +56,14 @@ def verify(path: str, target_lufs: float | None = None, ceiling_dbtp: float | No
   estimate. **0.11.0:** `integrated_lufs` and `loudness_range_lu` need at least 0.4 s of audio
   (pyloudnorm's BS.1770 gating block); below that they are `null` and the result carries a
   `loudness_unavailable_reason` string naming why, rather than the call failing or silently
-  returning a wrong number. Every other field measures normally regardless.
+  returning a wrong number. Every other field measures normally regardless. **0.12.0:**
+  `octave_band_analysis` is a numerically-ordered list (low-to-high by frequency, immune to
+  `json.dumps(..., sort_keys=True)` reordering `octave_band_energy_db`'s dict keys
+  lexicographically) carrying two derived, already-computed comparisons per band —
+  `rel_median_db` (that band vs. the file's own overall median; the primary diagnostic signal)
+  and `neighbour_contrast_db` (that band vs. its immediate octave neighbours; secondary, with a
+  documented blind spot on a defect spanning two adjacent bands). `octave_band_energy_db` is
+  unchanged and still present.
 - `verify(path, target_lufs=None, ceiling_dbtp=None)` — re-measures a file and, for whichever of
   `target_lufs`/`ceiling_dbtp` is given, reports whether it was actually met (`lufs_ok`,
   `ceiling_ok`). The ceiling check uses `aud.dsp.limiter.CEILING_TOLERANCE_DB`, the same

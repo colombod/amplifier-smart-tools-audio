@@ -186,13 +186,24 @@ amplifier-digital-twin destroy aud-record-fixtures
 The whisper `base` model (~142 MiB) is downloaded from HuggingFace on first use and
 is deliberately **not** stored here.
 
-`anthropic/` has no equivalent script: each of its four files is one real,
+`anthropic/` has no equivalent script: each of its files is one real,
 successful `POST https://api.anthropic.com/v1/messages` call, captured by hand
 in a session with a real credential (never committed) and saved as
 `{"provenance", "request", "response"}` -- see any file in `anthropic/` for the
 exact shape a new one must match. Re-capturing one is: make the real call with
 the model you want to test, save the request body and the raw response JSON
 verbatim in that shape, and name it `<scenario>-<model-slug>.json`.
+
+Three more were added recording the advisor-diagnosis fix (0.12.0), each with
+its driving wav shipped alongside it in `wav/` (`provenance.fixture_path`
+names it, `provenance.fixture_generation` says how it was made -- pink noise,
+optionally through a real `aud.lib.eq`+`render` shelf):
+
+| File | Fixture | What it proves |
+|---|---|---|
+| `advise-dull-shelf-opus5.json` | `wav/dull_shelf_48000.wav` (-9 dB high shelf @ 8 kHz induced) | the advisor reaches for a HIGH shelf on a broad top-end tilt, once `eq`'s stage reference documents `shelves` at all |
+| `advise-rumbly-shelf-haiku.json` | `wav/rumbly_shelf_48000.wav` (+8 dB low shelf @ 70 Hz induced) | the fix is reachable at the DEFAULT model tier, not only a top-tier one |
+| `advise-clean-pink-opus5.json` | `wav/control_pink_48000.wav` (unmodified) | the same model tier that previously applied a reflexive 25 Hz high-pass to this exact file now proposes no `eq` stage at all |
 
 ## Detecting version drift
 

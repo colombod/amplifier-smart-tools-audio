@@ -225,6 +225,64 @@ def test_lib_advise_bad_model_output_never_produces_a_partial_plan(tiny_wav: Pat
     assert excinfo.value.code == "bad_model_output"
 
 
+# --- Regression guards: the three advisor findings (shelves hidden, ------
+# --- reflexive tonal moves on clean material, absolute-only diagnosis) ---
+#
+# Every backend below replays a REAL recorded response captured against the
+# real fixed prompt/measurement code (see tests/fixtures/recorded/anthropic/
+# advise-{dull-shelf-opus5,clean-pink-opus5,rumbly-shelf-haiku}.json) -- not
+# a hand-authored plan. Each recording's driving wav is shipped alongside it
+# in tests/fixtures/recorded/wav/ for provenance; `repo_root` gives the path.
+
+
+def test_lib_advise_reaches_for_a_high_shelf_on_a_broad_top_end_tilt(repo_root: Path) -> None:
+    """Replays advise-dull-shelf-opus5.json: a -9 dB high shelf at 8 kHz was
+    induced (a broad, multi-band tilt at the spectrum's top edge -- exactly
+    the shape prompts.py now tells the model to treat as shelf-appropriate,
+    not bell-appropriate). Before the fix, `eq` was never shown `shelves` at
+    all (prompts.py:30) and no model tier ever proposed one for this shape.
+    """
+    wav = repo_root / "tests" / "fixtures" / "recorded" / "wav" / "dull_shelf_48000.wav"
+    backend = replay.ReplayAdviceBackend("advise-dull-shelf-opus5")
+    outcome = lib.advise(str(wav), target_lufs=-14.0, backend=backend, model="fake-1")
+    eq_stages = [s for s in outcome["plan"].stages if s.stage == "eq"]
+    assert eq_stages, "expected an 'eq' stage in the proposed plan"
+    shelves = eq_stages[0].params["shelves"]
+    assert shelves, "expected at least one shelf -- the correct instrument for a broad top-end tilt"
+    assert shelves[0]["type"] == "high"
+    assert shelves[0]["gain_db"] > 0, "the top end is depressed, so the correction must be a boost"
+
+
+def test_lib_advise_reaches_for_a_low_shelf_on_a_broad_bottom_end_tilt(repo_root: Path) -> None:
+    """Replays advise-rumbly-shelf-haiku.json -- the DEFAULT model tier,
+    proving the interface fix (shelves exposed + rel_median_db comparison)
+    is reachable even at the weakest tier a real user gets by default, not
+    only at a top-tier model."""
+    wav = repo_root / "tests" / "fixtures" / "recorded" / "wav" / "rumbly_shelf_48000.wav"
+    backend = replay.ReplayAdviceBackend("advise-rumbly-shelf-haiku")
+    outcome = lib.advise(str(wav), target_lufs=-14.0, backend=backend, model="fake-1")
+    eq_stages = [s for s in outcome["plan"].stages if s.stage == "eq"]
+    assert eq_stages, "expected an 'eq' stage in the proposed plan"
+    shelves = eq_stages[0].params["shelves"]
+    assert shelves, "expected at least one shelf -- the correct instrument for a broad low-end tilt"
+    assert shelves[0]["type"] == "low"
+    assert shelves[0]["gain_db"] < 0, "the low end is elevated, so the correction must be a cut"
+
+
+def test_lib_advise_proposes_no_tonal_stage_for_a_clean_control(repo_root: Path) -> None:
+    """Replays advise-clean-pink-opus5.json: unmodified pink noise, no
+    induced defect. Before the fix, this exact model tier applied a
+    reflexive 25 Hz high-pass to this file 3/3 (see project history) --
+    citing DC offset and the quietest band as if they were problems. The
+    fixed prompt must not invent a tonal stage for material with nothing
+    tonally wrong with it."""
+    wav = repo_root / "tests" / "fixtures" / "recorded" / "wav" / "control_pink_48000.wav"
+    backend = replay.ReplayAdviceBackend("advise-clean-pink-opus5")
+    outcome = lib.advise(str(wav), target_lufs=-14.0, backend=backend, model="fake-1")
+    stage_names = [s.stage for s in outcome["plan"].stages]
+    assert "eq" not in stage_names, f"expected no invented tonal move on clean material, got {stage_names}"
+
+
 # --- CLI-level: real subprocess, real refusal, real deterministic verbs -----
 
 

@@ -9,6 +9,54 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-21
+
+Three measured defects in `advise`'s diagnosis, found by controlled measurement
+(induced spectral defects, re-rendered and re-measured, not just graded on the
+proposed plan's parameters) and fixed together because all three sit in the
+same seam -- what the advisor is shown and how it is told to read it.
+
+### Fixed
+
+- **The advisor was never told `shelves` exist.** `lib.eq` has supported shelf
+  filters since they were added to `contracts/plan.v1.md`, but
+  `intelligence/prompts.py`'s stage reference only listed `hpf`/`lpf`/`peaks` --
+  the chooser could not name the correct instrument for a broad top- or
+  bottom-end tilt ("dull"/"no air", "rumbly"/"boomy"), only a narrow bell.
+  Measured before the fix: 0 of 6 shelf-appropriate cases across two model
+  tiers ever produced a shelf. `eq`'s stage reference now documents `shelves`
+  and includes guidance on choosing a peak (one isolated band) vs. a shelf
+  (several consecutive bands moving together at the spectrum's edge).
+- **A model tier applied a reflexive high-pass to clean material.** At
+  `--model claude-opus-5`, `advise` proposed a 25 Hz high-pass on verified-clean
+  pink noise 3/3, citing a trivial DC offset and the quietest band as if they
+  were defects -- a tool that always finds something is not diagnosing. The
+  system prompt now explicitly forbids a reflexive EQ move and instructs the
+  model to propose no `eq` stage at all when every band's relative deviation
+  is small.
+- **Tonal diagnosis compared absolute dB values with no derived comparison,
+  and `octave_band_energy_db`'s dict keys sort lexicographically once
+  serialized with `sort_keys=True`** (1000.0 next to 125.0, 16000.0 next to
+  2000.0), so a naive "compare to the next entry" walk over that report
+  compares the wrong neighbours. `analyze()` now also returns
+  `octave_band_analysis`: a numerically-ordered list (immune to key
+  resorting) carrying two derived, already-computed comparisons per band --
+  `rel_median_db` (vs. the file's own overall median; primary signal) and
+  `neighbour_contrast_db` (vs. immediate octave neighbours; secondary, with a
+  documented blind spot on a defect spanning two adjacent bands). The system
+  prompt now directs the advisor to ground every `eq` reason in the signed
+  `rel_median_db` value, not the raw absolute level.
+
+Re-measured against the fixed tool with real model calls (not assumed):
+a broad top-end tilt now gets a high shelf, a broad bottom-end tilt now gets a
+low shelf (reachable even at the default model tier, not only at a top-tier
+model), and the same verified-clean control that previously got an invented
+high-pass now proposes no `eq` stage at all. Regression tests replay these
+real recorded responses (`tests/fixtures/recorded/anthropic/advise-{dull-shelf,
+clean-pink}-opus5.json`, `advise-rumbly-shelf-haiku.json`) so a future prompt
+change that reintroduces any of the three defects fails a test, not just a
+manual check.
+
 ## [0.11.1] - 2026-09-20
 
 ### Fixed
