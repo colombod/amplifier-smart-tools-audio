@@ -57,6 +57,10 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Enable GitHub Pages with the Actions build type
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Deploy website
         id: deployment
         uses: actions/deploy-pages@v4
