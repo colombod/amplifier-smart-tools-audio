@@ -22,10 +22,6 @@ Someone hands you a recording that is *nearly* right — too quiet, too harsh, t
 boxy, full of pauses, or not matching the episode they released last week. `aud`
 is the tool for that last mile.
 
-**Almost all of it needs no AI provider and no credential.** The DSP is written
-into the tool, on numpy and scipy. Only `advise` and `master` call a model, and
-even they send only the **measurements**, never the audio.
-
 ## Install
 
 ```bash

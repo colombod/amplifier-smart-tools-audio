@@ -29,6 +29,7 @@ from aud.core.manifest import load_manifest
 from aud.core.skill import render_skill
 from aud.plan import Plan, append
 from aud.schemas import AudError, NotImplementedStageError
+from aud.verbdoc import VERB_DOCS
 
 # ---------------------------------------------------------------------------
 # manifest / check / config / skill
@@ -292,6 +293,22 @@ def config(**overrides: Any) -> dict:
 def skill() -> str:
     """The full `aud --help` skill text."""
     return render_skill()
+
+
+def verb_help(verb: str) -> str | None:
+    """Full `aud <verb> --help` prose, exactly what the CLI prints.
+
+    This is the one library-level accessor for per-verb documentation
+    (AGENTS.md #2: "the library is the tool" -- a capability, including its
+    own documentation, reachable only through the CLI is a defect). A
+    Python caller with no CLI, no argparse, gets the identical text `aud
+    <verb> --help` prints, sourced from the same data (`aud.verbdoc.VERB_DOCS`).
+
+    Returns None if `verb` is not one of aud's documented verbs -- never
+    raises, so a caller (including the CLI) can use this to test whether a
+    name has documentation before deciding what to do next.
+    """
+    return VERB_DOCS.get(verb)
 
 
 def preset_list() -> list[dict[str, str]]:

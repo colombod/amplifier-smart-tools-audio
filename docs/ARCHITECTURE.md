@@ -114,11 +114,13 @@ sorts stages into canonical order and states in its report that it did so:
 
 ```
 ["cut", "strip_silence",
- "stretch", "pitch", "dereverb", "deess", "eq", "eq_match",
- "compress", "saturate", "reverb", "loudness", "limit"]
+ "stretch", "pitch",
+ "gate", "expand", "dereverb", "deess", "eq", "eq_match",
+ "compress", "saturate", "reverb", "loudness", "limit",
+ "downmix", "resample"]
 ```
 
-Grouped, that is: **editing → repair → tone → dynamics → character → loudness → limiting.**
+Grouped, that is: **editing → repair → tone → dynamics → character → loudness → limiting → output format.**
 
 The ordering is not arbitrary. Repair before tone, because de-essing a resonance you are about
 to cut wastes gain reduction. Tone before dynamics, because a compressor's detector hears the
@@ -352,7 +354,9 @@ write.
     |            changes HERE and nowhere later, so every measurement below is
     |            of the material that will actually ship
     v
-  REPAIR ......  dereverb -> deess
+  RETIME ......  stretch -> pitch
+    |
+  REPAIR ......  gate -> expand -> dereverb -> deess
     |
   TONE ........  eq (biquad cascade) -> eq_match (measured curve -> filter bank)
     |
@@ -373,6 +377,8 @@ write.
   LOUDNESS ....  measure (ITU-R BS.1770 / pyloudnorm), apply ONE gain
     |
   LIMIT .......  single full-band, oversampled, lookahead true-peak brickwall
+    |
+  OUTPUT FMT ..  downmix (fold channels) -> resample (target rate)
     |
   [encode]  quantise once, to the configured output subtype
     |
