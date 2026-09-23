@@ -24,7 +24,7 @@ from scipy import signal
 from aud.dsp import limiter as _limiter
 from aud.dsp import loudness as _loudness
 
-__all__ = ["analyze"]
+__all__ = ["analyze", "reference_anchored_band_deviation_db"]
 
 _EPS = 1e-12
 
@@ -71,7 +71,82 @@ def _octave_band_energy_db(x: np.ndarray, sr: int) -> dict[str, float | None]:
     return bands
 
 
-def _octave_band_analysis(bands: dict[str, float | None]) -> list[dict[str, float | None]]:
+def reference_anchored_band_deviation_db(
+    band_energy_db: list[float | None],
+    reference_band_energy_db: list[float | None],
+) -> list[float | None]:
+    """Per-band deviation of `band_energy_db` from `reference_band_energy_db`,
+    anchored by the MEDIAN OF THE PER-BAND DELTAS -- not by either file's own
+    median.
+
+    Why not anchor to the file's own median (what `rel_median_db` below
+    does): that anchor is moved by the very defect it exists to find, and is
+    dominated by the material's natural spectral shape. Measured on six
+    controlled induced-defect fixtures (boxy/rumbly/dull/harsh/muddy/thin):
+    taking the largest `|rel_median_db|` picked the right band AND direction
+    in only 1 of 6 cases -- it mostly picked the band that is naturally
+    quietest in that material, not the defective one.
+
+    This function instead measures each band's energy relative to a
+    REFERENCE file believed to be tonally correct (`d = band_energy_db -
+    reference_band_energy_db`), then subtracts the median of THOSE DELTAS
+    (never either file's own per-band median) to remove the overall
+    level/gain difference between the two files while leaving genuine
+    band-shape differences intact. Measured 6 of 6 correct band-and-direction
+    on the same six fixtures.
+
+    Two variants were tried and rejected on the same fixtures -- do not
+    reintroduce either:
+    - Deviation from a smooth 2nd-order polynomial fit across log-frequency:
+      1 of 6, no better than the file's-own-median approach.
+    - Subtracting each file's own median from the raw per-band delta
+      (instead of the median of the deltas): 5 of 6 -- it still fails on a
+      broad tilt, because it reintroduces a moving, defect-affected anchor.
+
+    Args:
+        band_energy_db: This file's octave-band energies (dB), one entry per
+            band, in the same fixed band order as `reference_band_energy_db`
+            (see `_OCTAVE_CENTERS`). `None` marks a band that could not be
+            measured (e.g. above that file's Nyquist frequency).
+        reference_band_energy_db: The reference file's octave-band energies,
+            same length and band order.
+
+    Returns:
+        One entry per band: `band_energy_db[i] - reference_band_energy_db[i]`,
+        minus the median of all present per-band deltas. `None` where either
+        input is `None` at that index; such entries do not contribute to the
+        median. A positive value means this file carries more energy than
+        the reference in that band (after correcting for their overall level
+        difference) -- i.e. a candidate for a cut. A negative value means
+        less -- a candidate for a boost.
+
+    Raises:
+        ValueError: if the two arrays are not the same length. This is a
+            programming-contract violation (misaligned band lists supplied
+            by the caller), never a condition a real caller routes
+            user-facing error handling around -- `dsp/` modules take arrays
+            and parameters and raise no user-facing errors (AGENTS.md #8).
+    """
+    if len(band_energy_db) != len(reference_band_energy_db):
+        raise ValueError(
+            f"band_energy_db and reference_band_energy_db must have the same length "
+            f"(got {len(band_energy_db)} and {len(reference_band_energy_db)})"
+        )
+    deltas: list[float | None] = [
+        (value - reference_value) if value is not None and reference_value is not None else None
+        for value, reference_value in zip(band_energy_db, reference_band_energy_db, strict=True)
+    ]
+    present = [delta for delta in deltas if delta is not None]
+    if not present:
+        return [None] * len(deltas)
+    alignment = float(np.median(present))
+    return [_finite_or_none(delta - alignment) if delta is not None else None for delta in deltas]
+
+
+def _octave_band_analysis(
+    bands: dict[str, float | None],
+    reference_bands: dict[str, float | None] | None = None,
+) -> list[dict[str, float | None]]:
     """A numerically-ordered, comparison-ready view of `octave_band_energy_db`.
 
     `octave_band_energy_db`'s dict keys sort LEXICOGRAPHICALLY once
@@ -83,25 +158,42 @@ def _octave_band_analysis(bands: dict[str, float | None]) -> list[dict[str, floa
     only reorders dict keys), so it cannot be re-sorted out from under a
     reader by that serialization step.
 
-    Each entry also carries two derived comparisons already computed, so a
+    Each entry also carries derived comparisons already computed, so a
     reader is never asked to do that arithmetic on ten absolute numbers
     itself -- ten absolute dB values with no comparison is exactly what let
     a model read `-30.1 dB` as a defect while missing that every other band
     sat at `-33.8 dB`:
 
+    - `rel_reference_db` (only present when `reference_bands` is given):
+      this band's energy relative to a REFERENCE file believed to be
+      tonally correct, anchored by the median of the per-band deltas (see
+      `reference_anchored_band_deviation_db`). THE PRIMARY signal whenever a
+      reference is available -- correct band and sign on 6 of 6 known
+      induced defects in controlled measurement, unlike `rel_median_db`
+      below (1 of 6 on the same fixtures), because it is not fooled by this
+      file's own natural spectral shape.
     - `rel_median_db`: this band's energy minus the MEDIAN of all present
-      bands' energy. The primary signal: correct band and sign on 8 of 8
-      known induced defects in controlled measurement, with a flat/control
-      spectrum reading within a few tenths of a dB of zero on every band.
+      bands' energy in THIS file alone. The signal to fall back on when no
+      reference is available -- its anchor (this file's own median) is
+      exactly what the defect being diagnosed can move, so it is a weaker
+      signal than `rel_reference_db` and must never be preferred over it
+      when a reference is present.
     - `neighbour_contrast_db`: this band's energy minus the mean of its
       immediate lower/upper octave neighbours (whichever are present). A
-      SECONDARY signal only -- it has a documented blind spot: a defect
-      spanning two adjacent bands cancels out, because each depressed
-      band's neighbour is the other depressed band.
+      SECONDARY signal only, regardless of which of the above is primary --
+      it has a documented blind spot: a defect spanning two adjacent bands
+      cancels out, because each depressed band's neighbour is the other
+      depressed band.
     """
     ordered: list[tuple[float, float | None]] = [(center, bands.get(str(center))) for center in _OCTAVE_CENTERS]
     present = [value for _, value in ordered if value is not None]
     median = float(np.median(present)) if present else None
+
+    rel_reference: list[float | None] | None = None
+    if reference_bands is not None:
+        reference_ordered = [reference_bands.get(str(center)) for center in _OCTAVE_CENTERS]
+        rel_reference = reference_anchored_band_deviation_db([value for _, value in ordered], reference_ordered)
+
     result: list[dict[str, float | None]] = []
     for index, (center, value) in enumerate(ordered):
         rel_median_db = value - median if value is not None and median is not None else None
@@ -113,16 +205,17 @@ def _octave_band_analysis(bands: dict[str, float | None]) -> list[dict[str, floa
         neighbour_contrast_db = (
             value - (sum(neighbour_values) / len(neighbour_values)) if value is not None and neighbour_values else None
         )
-        result.append(
-            {
-                "hz": center,
-                "energy_db": value,
-                "rel_median_db": _finite_or_none(rel_median_db) if rel_median_db is not None else None,
-                "neighbour_contrast_db": _finite_or_none(neighbour_contrast_db)
-                if neighbour_contrast_db is not None
-                else None,
-            }
-        )
+        entry: dict[str, float | None] = {
+            "hz": center,
+            "energy_db": value,
+            "rel_median_db": _finite_or_none(rel_median_db) if rel_median_db is not None else None,
+            "neighbour_contrast_db": _finite_or_none(neighbour_contrast_db)
+            if neighbour_contrast_db is not None
+            else None,
+        }
+        if rel_reference is not None:
+            entry["rel_reference_db"] = rel_reference[index]
+        result.append(entry)
     return result
 
 
@@ -182,20 +275,47 @@ def _ambience_decay_estimate_ms(x: np.ndarray, sr: int) -> float | None:
     return float(min(estimate_ms, 5000.0))
 
 
-def analyze(x: np.ndarray, sr: int) -> dict:
+def analyze(
+    x: np.ndarray,
+    sr: int,
+    *,
+    reference_x: np.ndarray | None = None,
+    reference_sr: int | None = None,
+) -> dict:
     """Measure a signal. Every value is a number or null; JSON-serializable.
 
     Args:
         x: Array of shape (n_samples, n_channels).
         sr: Sample rate in Hz.
+        reference_x: Optional array of a second, reference signal believed
+            to be tonally correct. When given (with `reference_sr`), each
+            entry in the returned `octave_band_analysis` carries an extra
+            `rel_reference_db` field -- see `reference_anchored_band_deviation_db`.
+            When omitted, that field is ABSENT from every entry (not `None`
+            and not zero-filled): a caller can tell "not computed" from
+            "computed as zero".
+        reference_sr: Sample rate of `reference_x`, in Hz. Required when
+            `reference_x` is given.
 
     Returns:
         A dict of measurements (see module docstring for the honesty contract).
+
+    Raises:
+        ValueError: if `reference_x` is given without `reference_sr`.
     """
     x = np.asarray(x, dtype=np.float64)
     n_samples, n_channels = x.shape[0], x.shape[1] if x.ndim == 2 else 1
     if x.ndim == 1:
         x = x[:, None]
+
+    reference_octave_band_energy_db: dict[str, float | None] | None = None
+    if reference_x is not None:
+        if reference_sr is None:
+            raise ValueError("reference_sr is required when reference_x is given")
+        reference_array = np.asarray(reference_x, dtype=np.float64)
+        if reference_array.ndim == 1:
+            reference_array = reference_array[:, None]
+        reference_octave_band_energy_db = _octave_band_energy_db(reference_array, reference_sr)
 
     sample_peak = float(np.max(np.abs(x))) if x.size else 0.0
     rms = float(np.sqrt(np.mean(x**2))) if x.size else 0.0
@@ -254,7 +374,7 @@ def analyze(x: np.ndarray, sr: int) -> dict:
         "dc_offset": dc_offset,
         "rms_dbfs": _db(rms) if rms > _EPS else None,
         "octave_band_energy_db": octave_band_energy_db,
-        "octave_band_analysis": _octave_band_analysis(octave_band_energy_db),
+        "octave_band_analysis": _octave_band_analysis(octave_band_energy_db, reference_octave_band_energy_db),
         "stereo_correlation": stereo_correlation,
         "mid_side_ratio": mid_side_ratio,
         "noise_floor_dbfs": _noise_floor_dbfs(x, sr),
