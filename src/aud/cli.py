@@ -175,6 +175,7 @@ def _build_parser() -> _Parser:
 
     analyze_parser = sub.add_parser("analyze")
     analyze_parser.add_argument("path")
+    analyze_parser.add_argument("--reference", default=None)
 
     config_parser = sub.add_parser("config")
     config_parser.add_argument("--sample-rate-policy", dest="sample_rate_policy", default=None)
@@ -475,7 +476,7 @@ def _dispatch(verb: str, args: argparse.Namespace, stdin_text: str | None) -> An
     if verb == "check":
         return lib.check()
     if verb == "analyze":
-        return lib.analyze(args.path)
+        return lib.analyze(args.path, reference_path=args.reference)
     if verb == "config":
         return lib.config(
             sample_rate_policy=args.sample_rate_policy,

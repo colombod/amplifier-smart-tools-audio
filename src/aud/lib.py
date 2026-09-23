@@ -1419,14 +1419,29 @@ def load_json_file(path: str) -> Any:
         ) from exc
 
 
-def analyze(path: str) -> dict:
-    """What is actually in a file: LUFS, true peak, crest, bands, sibilance, ambience."""
+def analyze(path: str, *, reference_path: str | None = None) -> dict:
+    """What is actually in a file: LUFS, true peak, crest, bands, sibilance, ambience.
+
+    `reference_path`, if given, is read the same read-only way as `path` and
+    used only to add `rel_reference_db` to each `octave_band_analysis` entry
+    -- this file's octave-band energy relative to the reference's, anchored
+    by the median of the per-band deltas (see
+    `aud.dsp.analysis.reference_anchored_band_deviation_db`). Without a
+    reference, that field is absent from every entry -- never `None`, never
+    zero -- so a caller can tell "not computed" from "computed as zero".
+    """
     try:
         from aud.dsp import analysis, io
     except ImportError as exc:
         raise _not_implemented("analyze", exc) from exc
     samples, sample_rate = _read_audio(io, path)
-    return analysis.analyze(samples, sample_rate)
+    reference_samples, reference_sample_rate = _read_audio(io, reference_path) if reference_path else (None, None)
+    return analysis.analyze(
+        samples,
+        sample_rate,
+        reference_x=reference_samples,
+        reference_sr=reference_sample_rate,
+    )
 
 
 def render(plan: Plan, in_path: str, out_path: str) -> dict:
@@ -1606,7 +1621,14 @@ def advise(
     else:
         active_backend, provider, chosen_model = resolve_backend(model)
 
-    measurements = analyze(path)
+    # `measurements` carries the reference too (via `reference_path=`), so its
+    # `octave_band_analysis` entries get `rel_reference_db` -- the PRIMARY
+    # tonal signal `intelligence/prompts.py` tells the model to read when a
+    # reference is present (see `dsp.analysis.reference_anchored_band_deviation_db`).
+    # `reference_measurements` is a second, plain `analyze(reference_path)`
+    # (no reference of its own) purely for the model's own informational
+    # context about the reference file -- unchanged from before.
+    measurements = analyze(path, reference_path=reference_path)
     reference_measurements = analyze(reference_path) if reference_path else None
 
     plan, reasoning = advisor.advise(

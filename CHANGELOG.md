@@ -9,6 +9,78 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`advise`'s tonal diagnosis no longer anchors to the file's own median when a reference is
+  given.** `rel_median_db` (added in 0.12.0) compares each octave band to THIS FILE's own overall
+  median -- an anchor the very defect being diagnosed can move, and one dominated by the
+  material's natural spectral shape rather than by any actual defect. Measured on six controlled
+  induced-defect fixtures (boxy/rumbly/dull/harsh/muddy/thin): taking the largest `|rel_median_db|`
+  identified the right band AND direction in only 1 of 6 cases -- for 4 of 6 it picked 31.5 Hz
+  simply because that band sits naturally ~12 dB below the midrange in the test material,
+  reporting the quietest band, not the defective one.
+  - `dsp.analysis.reference_anchored_band_deviation_db(band_energy_db, reference_band_energy_db)`
+    is a new pure function: per-band deltas against a reference, anchored by the MEDIAN OF THE
+    DELTAS (never either file's own per-band median), which removes the overall level/gain
+    difference between the two files while leaving genuine band-shape differences intact.
+    Measured 6 of 6 correct band-and-direction on the same six fixtures.
+  - `analyze`'s (`dsp.analysis` and `aud.lib`) `octave_band_analysis` entries carry a new
+    `rel_reference_db` field whenever a reference is supplied (`reference_x`/`reference_sr` at the
+    DSP layer; `reference_path` on `lib.analyze` and the `analyze` CLI verb, matching `advise`,
+    `master` and `eq-match`'s existing convention). Without a reference, the field is **absent**
+    from every entry -- never `null`, never zero-filled -- so a caller can tell "not computed"
+    from "computed as zero".
+  - `advise`/`master`: when `reference_path` is given, `rel_reference_db` is now the PRIMARY tonal
+    signal in the advisor's system prompt; `rel_median_db` is explicitly demoted to a fallback for
+    when no reference is available. No behaviour change when no reference is given.
+  - No default/built-in target contour was added: with no reference there is still no taste-free
+    anchor, and a built-in target curve is genre- and material-dependent -- that judgement stays
+    out of the tool.
+  - Two variants were tried and rejected on the same fixtures (see
+    `reference_anchored_band_deviation_db`'s docstring): deviation from a smooth 2nd-order
+    polynomial fit across log-frequency (1 of 6), and subtracting each file's own median from the
+    raw per-band delta instead of the median of the deltas (5 of 6 -- still fails on a broad tilt).
+  - Regression coverage: `tests/test_reference_anchored_tonal.py` generates six induced-defect
+    fixtures from a common pink-ish-plus-harmonics source (seed 7), confirms each defect is
+    actually present (Welch PSD delta vs. the clean reference) before asserting anything can find
+    it, asserts 6 of 6 on the new signal, and pins a DELIBERATE negative control asserting the old
+    (file's-own-median) signal scores exactly 1 of 6 on the same fixtures -- so a future change
+    that silently reintroduces it as the primary signal is caught even with no reference present.
+    This is deterministic DSP, tested for free with no model call.
+- **`advise` no longer lets a proposed EQ move contradict the very measurement it cites.** Measured
+  end-to-end: given a file missing its top end (`rel_reference_db` -35.9 dB deficient at 16 kHz), a
+  real model correctly read and narrated the deficiency ("extreme high-frequency rolloff... lacks
+  presence") and then proposed *cutting* that band further -- the opposite of its own stated
+  reasoning. The prompt already states the sign convention explicitly; this needed a check that
+  runs for free, not a stronger (unverifiable) prompt.
+  - `aud.intelligence.advisor._eq_move_contradiction`/`_filter_contradictory_eq_moves`/
+    `_nearest_band_hz`/`_octave_reference_lookup`: new pure functions. A proposed `peaks`/`shelves`
+    move is checked against the nearest octave band's `rel_reference_db` (band matching: nearest
+    centre in log2/octave space -- a move at 6 kHz maps to the 8 kHz band, since their shared
+    boundary is `sqrt(4000*8000) ~= 5657` Hz). A cut whose band measured deficient, or a boost
+    whose band measured in excess, is a contradiction.
+  - Response to a contradiction: the offending move is DROPPED (never sign-corrected -- rewriting
+    what the model proposed into something it never said is not a fix, it is the tool
+    misrepresenting its own provenance) and reported as an additional `{"stage": "eq", "reason":
+    "GUARDED: ..."}` entry in the same `reasoning` list every other stage's rationale already
+    travels in -- visible on stderr (`aud advise`'s own reasoning printout) and in every library
+    caller's `"stages"` key, exactly like any other stage's reason. One wrong sign on one band no
+    longer discards an otherwise-good chain (a correct `loudness`/`limit`, or a correct move on a
+    different band).
+  - Guards `peaks` and `shelves` only -- each carries an explicit `(freq_hz, gain_db)` pair that
+    maps onto one band's signed measurement. `hpf`/`lpf` are NOT guarded: both are broadband corner
+    frequencies with no `gain_db` of their own (the attenuation varies continuously with frequency
+    rather than being one number at one band), so there is no well-defined sign to compare.
+  - A strict no-op with no reference supplied (`rel_reference_db` absent from every band) or with
+    no measurements passed at all -- `_validate_and_build_plan`'s new `measurements` parameter
+    defaults to `None`. Never falls back to guarding against `rel_median_db`.
+  - Regression coverage: `tests/test_advisor_eq_guard.py`, all deterministic (no model call),
+    reusing the six induced-defect fixtures from `tests/test_reference_anchored_tonal.py`. Includes
+    the caught case (a cut proposed on the `dull` fixture's deficient 16 kHz band), the control
+    that proves the guard is not simply rejecting every cut (a cut on the `boxy` fixture's *excess*
+    500 Hz band passes untouched), a boost-in-deficient-band control, and the no-reference/no-
+    measurements no-op cases.
+
 ### Added
 
 - **Two new deterministic plan stages: `downmix` and `resample`.** Both are output-format

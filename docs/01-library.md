@@ -47,12 +47,12 @@ def skill() -> str
 ## Measurement: `analyze`, `verify`
 
 ```python
-def analyze(path: str) -> dict
+def analyze(path: str, *, reference_path: str | None = None) -> dict
 def verify(path: str, target_lufs: float | None = None, ceiling_dbtp: float | None = None) -> dict
 ```
 
-- `analyze(path)` — read-only measurement of what is actually in a file: integrated LUFS, true
-  peak (dBTP), crest factor, per-band spectral energy, sibilance, and an ambience/reverb-tail
+- `analyze(path, ...)` — read-only measurement of what is actually in a file: integrated LUFS,
+  true peak (dBTP), crest factor, per-band spectral energy, sibilance, and an ambience/reverb-tail
   estimate. **0.11.0:** `integrated_lufs` and `loudness_range_lu` need at least 0.4 s of audio
   (pyloudnorm's BS.1770 gating block); below that they are `null` and the result carries a
   `loudness_unavailable_reason` string naming why, rather than the call failing or silently
@@ -60,10 +60,20 @@ def verify(path: str, target_lufs: float | None = None, ceiling_dbtp: float | No
   `octave_band_analysis` is a numerically-ordered list (low-to-high by frequency, immune to
   `json.dumps(..., sort_keys=True)` reordering `octave_band_energy_db`'s dict keys
   lexicographically) carrying two derived, already-computed comparisons per band —
-  `rel_median_db` (that band vs. the file's own overall median; the primary diagnostic signal)
-  and `neighbour_contrast_db` (that band vs. its immediate octave neighbours; secondary, with a
-  documented blind spot on a defect spanning two adjacent bands). `octave_band_energy_db` is
-  unchanged and still present.
+  `rel_median_db` (that band vs. the file's own overall median) and `neighbour_contrast_db` (that
+  band vs. its immediate octave neighbours; secondary, with a documented blind spot on a defect
+  spanning two adjacent bands). `octave_band_energy_db` is unchanged and still present.
+  **Unreleased:** `reference_path`, if given, is read the same read-only way as `path`; each
+  `octave_band_analysis` entry then ALSO carries `rel_reference_db` — this band's energy relative
+  to the reference file's energy in the same band, anchored by the median of the per-band deltas
+  (not either file's own median) so the overall level difference between the two files is removed
+  while genuine band-shape differences survive. This is now the **primary** tonal diagnostic
+  signal (`rel_median_db` is anchored to this file's own median, which the very defect being
+  diagnosed can move, and was measured to identify the right band and direction in only 1 of 6
+  controlled induced-defect fixtures, against 6 of 6 for `rel_reference_db` — see
+  `tests/test_reference_anchored_tonal.py`). Without `reference_path`, `rel_reference_db` is
+  **absent** from every entry — never `null`, never zero-filled — so a caller can tell "not
+  computed" from "computed as zero".
 - `verify(path, target_lufs=None, ceiling_dbtp=None)` — re-measures a file and, for whichever of
   `target_lufs`/`ceiling_dbtp` is given, reports whether it was actually met (`lufs_ok`,
   `ceiling_ok`). The ceiling check uses `aud.dsp.limiter.CEILING_TOLERANCE_DB`, the same
@@ -226,8 +236,20 @@ def master(in_path, out_path, *, target_lufs=-14.0, ceiling_dbtp=-1.0, reference
   `AudError(code="bad_model_plan")`, never a corrupted plan that would fail later at render.
   **0.11.0:** the provider credential is resolved (and validated) *before* `path` (and
   `reference_path`) is decoded, so a caller with no credential configured is refused before
-  paying for the decode, not after. Returns
+  paying for the decode, not after. **Unreleased:** `measurements` is `analyze(path,
+  reference_path=reference_path)` — when a reference is given, its `octave_band_analysis`
+  entries carry `rel_reference_db`, and the system prompt tells the model to treat it as the
+  primary tonal signal (see `analyze` above). `reference_measurements` is unchanged: a plain
+  `analyze(reference_path)`, informational context about the reference file only. Returns
   `{"plan", "measurements", "reference_measurements", "provider", "model", "stages"}`.
+  **Unreleased:** a proposed `eq` `peaks`/`shelves` move whose gain contradicts the sign of its
+  nearest band's `rel_reference_db` (a cut on a band measured deficient, or a boost on a band
+  measured in excess) is dropped from the built plan rather than applied, and reported as an
+  additional `{"stage": "eq", "reason": "GUARDED: ..."}` entry in `"stages"` — visible on stderr
+  and to every library caller, never silent. Band matching is nearest octave-band centre in
+  log2-frequency space (a move at 6 kHz maps to the 8 kHz band). `hpf`/`lpf` are not guarded —
+  neither carries a single `gain_db` to compare against one band. A strict no-op with no
+  reference supplied. See `aud.intelligence.advisor._eq_move_contradiction`.
 - `master(in_path, out_path, ...)` — the one-shot path: calls `advise` internally, renders that
   plan in a single pass, then verifies the result. `dry_run=True` stops after `advise`: the plan
   and its reasoning are returned, nothing is rendered, and `out_path` is never touched — neither
