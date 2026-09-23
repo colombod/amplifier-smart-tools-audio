@@ -30,7 +30,6 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   documented and accepted by `aud config`/`AUD_SAMPLE_RATE_POLICY` but never read at render time.
   `"preserve"` (default) writes at the input's own rate; an integer resamples the rendered output
   to that rate. An explicit `resample` stage in the plan always takes precedence.
-
 ## [0.12.0] - 2026-09-21
 
 Three measured defects in `advise`'s diagnosis, found by controlled measurement
