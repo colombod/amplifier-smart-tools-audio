@@ -45,9 +45,11 @@ from aud.dsp import filters as _filters
 from aud.dsp import gate as _gate
 from aud.dsp import resample as _resample_module
 from aud.dsp import resolve as _resolve
+from aud.dsp.edit import CrossfadeExceedsGapError
+from aud.dsp.eqmatch import CurveError
 from aud.schemas import NotImplementedStageError
 
-__all__ = ["MissingDspModuleError", "apply_plan"]
+__all__ = ["MissingDspModuleError", "StageParamError", "apply_plan"]
 
 _EPS = 1e-12
 
@@ -68,6 +70,37 @@ class MissingDspModuleError(ValueError):
         self.stage = stage
         self.needs = needs
         super().__init__(f"Stage '{stage}' needs '{needs}', which is not available in this build: {exc}")
+
+
+class StageParamError(ValueError):
+    """A stage handler rejected one of its own params as out of range or the wrong shape.
+
+    A plan's `params` (`aud.plan.Stage.params`) is an unvalidated dict --
+    format 1 never pinned per-stage param schemas at the `Plan` model level,
+    so a hand-authored plan can carry a param a real caller (the CLI's own
+    per-verb builders in `aud.lib`) would never construct. `apply_plan`'s
+    dispatch loop is the render-time backstop: any bare `ValueError` a stage
+    handler raises for its own params -- not one of the other named boundary
+    exceptions this module and `aud.dsp.edit`/`aud.dsp.eqmatch` already carry
+    forward unchanged -- is caught here and re-raised as this type, with the
+    stage name attached. `aud.lib.render` maps it to `AudError(code=
+    "bad_param")` instead of letting the CLI's catch-all report a caller's
+    typo as an internal aud bug (see AGENTS.md #4).
+
+    Subclasses ValueError, not AudError, for the same reason
+    `MissingDspModuleError`/`NotImplementedStageError` do: this is still
+    inside `dsp/`'s call chain (see AGENTS.md #8), so `AudError` construction
+    stays a job for `aud.lib`, above the boundary. The original message is
+    kept verbatim -- every `dsp/` validation raise already names the field,
+    the value found, and the constraint (see e.g. `aud.dsp.filters` and
+    `aud.dsp.gate`); only the stage name was missing, and that is what this
+    type adds.
+    """
+
+    def __init__(self, stage: str, detail: str) -> None:
+        self.stage = stage
+        self.detail = detail
+        super().__init__(f"'{stage}': {detail}")
 
 
 def _onsets_for_snap(x: np.ndarray, sr: int, snap: str, stage: str) -> list[float] | None:
@@ -571,6 +604,11 @@ def apply_plan(x: np.ndarray, sr: int, stages: list[_Stage]) -> tuple[np.ndarray
         ValueError: A stage name is not in the implemented registry. The
             error names the stage explicitly rather than failing silently
             or leaving it as a no-op.
+        StageParamError: A stage handler rejected one of its own params
+            (out of range, wrong shape) -- e.g. a hand-authored plan with
+            an invalid field a real caller could never construct. Carries
+            the stage name; `aud.lib.render` maps it to `AudError(code=
+            "bad_param")`.
     """
     y = np.asarray(x, dtype=np.float64)
     current_sr = sr
@@ -582,7 +620,16 @@ def apply_plan(x: np.ndarray, sr: int, stages: list[_Stage]) -> tuple[np.ndarray
         if handler is None:
             raise NotImplementedStageError(name, tuple(_REGISTRY))
         params = stage.params or {}
-        y, stage_report = handler(y, current_sr, params)
+        try:
+            y, stage_report = handler(y, current_sr, params)
+        except (MissingDspModuleError, CrossfadeExceedsGapError, CurveError):
+            # Already-named boundary exceptions `aud.lib.render` recognises
+            # on their own terms (not_implemented / crossfade_exceeds_gap /
+            # eq_match's own bad_param mapping) -- pass through unchanged
+            # rather than flattening them into a generic StageParamError.
+            raise
+        except ValueError as exc:
+            raise StageParamError(name, str(exc)) from exc
         if name == _SAMPLE_RATE_CHANGING_STAGE:
             current_sr = stage_report["target_hz"]
         stage_report = {"stage": name, **stage_report}

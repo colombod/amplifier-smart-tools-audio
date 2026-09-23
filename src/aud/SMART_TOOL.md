@@ -48,6 +48,26 @@ platforms:
   - macos
   - windows
 requires:
+  - name: numpy
+    purpose: >-
+      Array math backing every DSP stage.
+    optional: false
+    install: https://pypi.org/project/numpy/
+  - name: scipy
+    purpose: >-
+      Filter design and signal processing primitives.
+    optional: false
+    install: https://pypi.org/project/scipy/
+  - name: soundfile
+    purpose: >-
+      Reads and writes WAV/FLAC/AIFF via libsndfile.
+    optional: false
+    install: https://pypi.org/project/soundfile/
+  - name: pyloudnorm
+    purpose: >-
+      ITU-R BS.1770 loudness measurement.
+    optional: false
+    install: https://pypi.org/project/pyloudnorm/
   - name: ai-provider
     purpose: >-
       Backs the verbs that choose a chain rather than apply one -- `advise` and `master --auto`

@@ -197,3 +197,28 @@ def test_apply_plan_stage_after_resample_receives_the_new_rate():
     eq_report = report["stages"][1]
     assert eq_report["lpf_hz"] == 3900.0
     assert y.shape[0] > 0
+
+
+# --- Regression guard: an out-of-range stage param is a StageParamError,
+# never a bare ValueError the caller can't attribute to a stage --------
+#
+# A hand-authored plan's `params` is an unvalidated dict (aud.plan.Stage);
+# it can carry a field value none of the CLI's own per-verb builders would
+# ever construct. `apply_plan` must catch the dsp/ handler's bare
+# ValueError and re-raise it as `engine.StageParamError`, carrying the
+# stage name, so `aud.lib.render` can map it to `AudError(code="bad_param")`
+# instead of letting it fall through as an unattributed internal bug. See
+# also tests/test_cli_envelope.py's end-to-end `render` version of this.
+def test_apply_plan_wraps_out_of_range_param_as_stage_param_error():
+    x = _noise(seconds=0.2)
+    # gate.expand rejects ratio < 1.0 (dsp/gate.py) -- a real caller can
+    # never produce this through the CLI's own `expand --ratio` parser
+    # (argparse type=float has no floor), only by hand-editing a plan.
+    stages = [_Stage("expand", {"ratio": 0.5})]
+
+    with pytest.raises(engine.StageParamError) as excinfo:
+        engine.apply_plan(x, SR, stages)
+
+    assert excinfo.value.stage == "expand"
+    assert "expand" in str(excinfo.value)
+    assert "ratio" in str(excinfo.value)

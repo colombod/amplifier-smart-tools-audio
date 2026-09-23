@@ -99,3 +99,27 @@ def test_azure_openai_endpoint_is_a_declared_conditional_requirement() -> None:
     assert "AZURE_OPENAI_ENDPOINT" in azure_endpoint.purpose
     assert azure_endpoint.optional is True
     assert azure_endpoint.install == "docs/CONFIGURATION.md"
+
+
+def test_manifest_declares_every_core_dsp_package_lib_check_reports() -> None:
+    """Regression guard for prerequisite-failures-match-manifest.
+
+    `aud.lib.check()` reports numpy/scipy/soundfile/pyloudnorm as absent-or-
+    satisfied prerequisites (src/aud/lib.py's `_CORE_PACKAGE_NAMES`), reading
+    each one's purpose/install straight out of this manifest so the two
+    cannot drift apart again. The manifest previously declared none of the
+    four: `aud check` could report a missing numpy while `aud manifest`
+    said nothing needed it. Each must be present here, and non-optional --
+    the whole DSP surface (everything except `advise`/`master --auto`)
+    genuinely does not work without them.
+    """
+    from aud.lib import _CORE_PACKAGE_NAMES
+
+    manifest = load_manifest()
+    declared = {r.name: r for r in manifest.requires}
+    for package_name in _CORE_PACKAGE_NAMES:
+        requirement = declared.get(package_name)
+        assert requirement is not None, f"SMART_TOOL.md's requires list is missing '{package_name}'"
+        assert requirement.optional is False, f"'{package_name}' is a core DSP dependency, not optional"
+        assert requirement.purpose.strip()
+        assert requirement.install.strip()
