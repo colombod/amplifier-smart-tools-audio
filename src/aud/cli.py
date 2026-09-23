@@ -27,7 +27,6 @@ from aud import lib
 from aud.core.regions import write_regions
 from aud.plan import read_plan, write_plan
 from aud.schemas import AudError
-from aud.verbdoc import VERB_DOCS
 
 STAGE_VERB_NAMES = (
     "cut",
@@ -45,6 +44,8 @@ STAGE_VERB_NAMES = (
     "pitch",
     "loudness",
     "limit",
+    "downmix",
+    "resample",
 )
 # Verbs whose stdout is the plan document itself, unwrapped. `advise` joins
 # this set (rather than using `master`'s wrapped {"result": ...} envelope)
@@ -113,30 +114,56 @@ def _float_list(text: str) -> list[float]:
         raise argparse.ArgumentTypeError(f"expected comma-separated numbers, got {text!r}") from exc
 
 
+def _defer(**kwargs: Any) -> dict[str, Any]:
+    """Keep only the kwargs the caller actually supplied on the command line.
+
+    Every stage-verb parser default below is `None`, meaning "the user did
+    not pass this flag" -- never a copy of the library's own default value.
+    `aud.lib` is the single owner of what a stage parameter defaults to
+    (AGENTS.md #2: "the library is the tool"); a hardcoded argparse
+    `default=` that mirrors a library default independently is a second,
+    driftable copy of the same answer that always wins regardless of what
+    the library says, because argparse supplies it whether or not the flag
+    was typed. Dropping a `None` here (rather than passing it through)
+    means the key is simply absent from the call, so the corresponding
+    `aud.lib` function parameter's own default applies -- the CLI genuinely
+    defers, rather than merely matching, that value.
+    """
+    return {key: value for key, value in kwargs.items() if value is not None}
+
+
 SNAP_MODES = ("zero_crossing", "silence", "transient", "none")
 CROSSFADE_SHAPES = ("equal_power", "linear")
 
 
-def _add_edit_point_arguments(parser: argparse.ArgumentParser, *, pad_default: float) -> None:
+def _add_edit_point_arguments(parser: argparse.ArgumentParser) -> None:
     """Register the edit-point resolution surface shared by `cut` and `strip-silence`.
 
     A region boundary is a NOMINAL position; where the blade falls is resolved
     from it -- padded, then snapped within a bounded window, then joined with a
-    fade or a crossfade. Both editing stages take the identical set, and only
-    the padding default differs (see the call sites).
+    fade or a crossfade. Both editing stages take the identical set.
+
+    Every default here is `None` -- "the user did not pass this flag" -- and
+    every dispatch call site runs its kwargs through `_defer` before calling
+    `aud.lib`. `cut.pad_out_ms`/`pad_in_ms` default to 0.0 and
+    `strip_silence`'s default to 80.0 (see their own docstrings for why);
+    this shared parser no longer needs a `pad_default` to mirror that
+    difference; `aud.lib.cut`/`aud.lib.strip_silence` are each the one place
+    their own default lives, and simply omitting the flag lets whichever one
+    is being called supply its own answer.
 
     The value spellings are the document's spellings (`zero_crossing`, not
     `zero-crossing`), so there is no translation layer between what
     contracts/plan.v1.md promises and what the shell accepts.
     """
-    parser.add_argument("--pad-out", dest="pad_out", type=float, default=pad_default)
-    parser.add_argument("--pad-in", dest="pad_in", type=float, default=pad_default)
-    parser.add_argument("--snap", choices=SNAP_MODES, default="zero_crossing")
-    parser.add_argument("--snap-window", dest="snap_window", type=float, default=20.0)
-    parser.add_argument("--fade-out", dest="fade_out", type=float, default=0.0)
-    parser.add_argument("--fade-in", dest="fade_in", type=float, default=0.0)
-    parser.add_argument("--crossfade", type=float, default=10.0)
-    parser.add_argument("--crossfade-shape", dest="crossfade_shape", choices=CROSSFADE_SHAPES, default="equal_power")
+    parser.add_argument("--pad-out", dest="pad_out", type=float, default=None)
+    parser.add_argument("--pad-in", dest="pad_in", type=float, default=None)
+    parser.add_argument("--snap", choices=SNAP_MODES, default=None)
+    parser.add_argument("--snap-window", dest="snap_window", type=float, default=None)
+    parser.add_argument("--fade-out", dest="fade_out", type=float, default=None)
+    parser.add_argument("--fade-in", dest="fade_in", type=float, default=None)
+    parser.add_argument("--crossfade", type=float, default=None)
+    parser.add_argument("--crossfade-shape", dest="crossfade_shape", choices=CROSSFADE_SHAPES, default=None)
 
 
 def _build_parser() -> _Parser:
@@ -159,37 +186,42 @@ def _build_parser() -> _Parser:
     plan_parser = sub.add_parser("plan")
     plan_parser.add_argument("--from", dest="from_file", default=None)
 
+    # Every default below is None -- "the user did not pass this flag" --
+    # never a copy of the library's own default. `aud.lib.<verb>`'s own
+    # parameter defaults are the single source of truth (AGENTS.md #2); see
+    # `_defer`'s docstring for why a hardcoded argparse default here would
+    # always win regardless of what the library says.
     gate_parser = sub.add_parser("gate")
     # --threshold is dB ABOVE the file's measured noise floor -- the same
     # convention 'aud detect silence' uses, not an absolute dBFS value.
-    gate_parser.add_argument("--threshold", type=float, default=12.0)
+    gate_parser.add_argument("--threshold", type=float, default=None)
     gate_parser.add_argument("--threshold-abs", dest="threshold_abs", type=float, default=None)
-    gate_parser.add_argument("--range", type=float, default=20.0)
-    gate_parser.add_argument("--attack", type=float, default=2.0)
-    gate_parser.add_argument("--hold", type=float, default=50.0)
-    gate_parser.add_argument("--release", type=float, default=150.0)
-    gate_parser.add_argument("--lookahead", type=float, default=3.0)
-    gate_parser.add_argument("--sidechain-hpf", dest="sidechain_hpf", type=float, default=80.0)
+    gate_parser.add_argument("--range", type=float, default=None)
+    gate_parser.add_argument("--attack", type=float, default=None)
+    gate_parser.add_argument("--hold", type=float, default=None)
+    gate_parser.add_argument("--release", type=float, default=None)
+    gate_parser.add_argument("--lookahead", type=float, default=None)
+    gate_parser.add_argument("--sidechain-hpf", dest="sidechain_hpf", type=float, default=None)
     gate_parser.add_argument("--bands", dest="crossovers", type=_float_list, default=None)
 
     expand_parser = sub.add_parser("expand")
-    expand_parser.add_argument("--threshold", type=float, default=6.0)
+    expand_parser.add_argument("--threshold", type=float, default=None)
     expand_parser.add_argument("--threshold-abs", dest="threshold_abs", type=float, default=None)
-    expand_parser.add_argument("--ratio", type=float, default=2.0)
-    expand_parser.add_argument("--knee", type=float, default=6.0)
-    expand_parser.add_argument("--attack", type=float, default=5.0)
-    expand_parser.add_argument("--hold", type=float, default=50.0)
-    expand_parser.add_argument("--release", type=float, default=150.0)
-    expand_parser.add_argument("--lookahead", type=float, default=3.0)
-    expand_parser.add_argument("--sidechain-hpf", dest="sidechain_hpf", type=float, default=80.0)
+    expand_parser.add_argument("--ratio", type=float, default=None)
+    expand_parser.add_argument("--knee", type=float, default=None)
+    expand_parser.add_argument("--attack", type=float, default=None)
+    expand_parser.add_argument("--hold", type=float, default=None)
+    expand_parser.add_argument("--release", type=float, default=None)
+    expand_parser.add_argument("--lookahead", type=float, default=None)
+    expand_parser.add_argument("--sidechain-hpf", dest="sidechain_hpf", type=float, default=None)
     expand_parser.add_argument("--bands", dest="crossovers", type=_float_list, default=None)
 
     deess_parser = sub.add_parser("deess")
-    deess_parser.add_argument("--amount", type=float, default=6.0)
-    deess_parser.add_argument("--freq", type=float, default=6500.0)
+    deess_parser.add_argument("--amount", type=float, default=None)
+    deess_parser.add_argument("--freq", type=float, default=None)
 
     dereverb_parser = sub.add_parser("dereverb")
-    dereverb_parser.add_argument("--amount", type=float, default=6.0)
+    dereverb_parser.add_argument("--amount", type=float, default=None)
 
     eq_parser = sub.add_parser("eq")
     eq_parser.add_argument("--hpf", type=float, default=None)
@@ -201,33 +233,41 @@ def _build_parser() -> _Parser:
     eq_match_source = eq_match_parser.add_mutually_exclusive_group(required=True)
     eq_match_source.add_argument("--curve", default=None)
     eq_match_source.add_argument("--reference", default=None)
-    eq_match_parser.add_argument("--strength", type=float, default=1.0)
-    eq_match_parser.add_argument("--max-gain-db", dest="max_gain_db", type=float, default=12.0)
+    eq_match_parser.add_argument("--strength", type=float, default=None)
+    eq_match_parser.add_argument("--max-gain-db", dest="max_gain_db", type=float, default=None)
 
     compress_parser = sub.add_parser("compress")
     compress_parser.add_argument("--bands", type=_float_list, required=True)
-    compress_parser.add_argument("--ratio", type=float, default=2.5)
+    compress_parser.add_argument("--ratio", type=float, default=None)
 
     saturate_parser = sub.add_parser("saturate")
-    saturate_parser.add_argument("--drive", type=float, default=1.0)
-    saturate_parser.add_argument("--mix", type=float, default=0.25)
+    saturate_parser.add_argument("--drive", type=float, default=None)
+    saturate_parser.add_argument("--mix", type=float, default=None)
 
     reverb_parser = sub.add_parser("reverb")
-    reverb_parser.add_argument("--amount", type=float, default=0.15)
-    reverb_parser.add_argument("--decay", type=float, default=1.2)
-    reverb_parser.add_argument("--predelay", type=float, default=0.0)
+    reverb_parser.add_argument("--amount", type=float, default=None)
+    reverb_parser.add_argument("--decay", type=float, default=None)
+    reverb_parser.add_argument("--predelay", type=float, default=None)
 
     stretch_parser = sub.add_parser("stretch")
-    stretch_parser.add_argument("--factor", type=float, default=1.0)
+    stretch_parser.add_argument("--factor", type=float, default=None)
 
     pitch_parser = sub.add_parser("pitch")
-    pitch_parser.add_argument("--semitones", type=float, default=0.0)
+    pitch_parser.add_argument("--semitones", type=float, default=None)
 
     loudness_parser = sub.add_parser("loudness")
-    loudness_parser.add_argument("--target", type=float, default=-14.0)
+    loudness_parser.add_argument("--target", type=float, default=None)
 
     limit_parser = sub.add_parser("limit")
-    limit_parser.add_argument("--ceiling", type=float, default=-1.0)
+    limit_parser.add_argument("--ceiling", type=float, default=None)
+
+    # Output-format stages: no mastering decision, just the shape/rate the
+    # file is written at. Canonical order puts both at the very end (see
+    # aud.plan.STAGE_ORDER's own comment).
+    sub.add_parser("downmix")  # no parameters -- registered for its own honest --help
+
+    resample_parser = sub.add_parser("resample")
+    resample_parser.add_argument("--hz", dest="target_hz", type=int, required=True)
 
     curve_parser = sub.add_parser("curve")
     curve_sub = curve_parser.add_subparsers(dest="curve_action", required=True)
@@ -254,30 +294,31 @@ def _build_parser() -> _Parser:
     detect_sub = detect_parser.add_subparsers(dest="detect_kind", required=True)
     detect_transients_parser = detect_sub.add_parser("transients")
     detect_transients_parser.add_argument("path")
-    detect_transients_parser.add_argument("--sensitivity", type=float, default=1.0)
-    detect_transients_parser.add_argument("--min-gap", dest="min_gap", type=float, default=50.0)
+    detect_transients_parser.add_argument("--sensitivity", type=float, default=None)
+    detect_transients_parser.add_argument("--min-gap", dest="min_gap", type=float, default=None)
     detect_silence_parser = detect_sub.add_parser("silence")
     detect_silence_parser.add_argument("path")
     # dB ABOVE the file's measured noise floor, not an absolute dBFS value.
-    detect_silence_parser.add_argument("--threshold", type=float, default=6.0)
-    detect_silence_parser.add_argument("--min-len", dest="min_len", type=float, default=400.0)
+    detect_silence_parser.add_argument("--threshold", type=float, default=None)
+    detect_silence_parser.add_argument("--min-len", dest="min_len", type=float, default=None)
     detect_fillers_parser = detect_sub.add_parser("fillers")
     detect_fillers_parser.add_argument("path")
     # Default is None, not a second hard-coded vocabulary: aud.dsp.speech.FILLER_WORDS
     # is the ONE place this list is defined (see D3 in the lane report -- a
     # second copy here previously always won and never contained "um").
     detect_fillers_parser.add_argument("--words", type=str, default=None)
-    detect_fillers_parser.add_argument("--min-pause", dest="min_pause", type=float, default=700.0)
+    detect_fillers_parser.add_argument("--min-pause", dest="min_pause", type=float, default=None)
 
     # Editing stages. These DO append to the plan, at the front of canonical order.
     cut_parser = sub.add_parser("cut")
     cut_parser.add_argument("--regions", default=None)
-    # `cut` is handed positions a caller measured and means literally, so its
-    # padding defaults to none -- widening someone's stated edit unasked is a
-    # surprise. `strip_silence` finds its own boundaries from an energy
-    # threshold, whose bias is systematically INSIDE the speech, so padding is
-    # on by default there. See contracts/plan.v1.md#edit-point-resolution.
-    _add_edit_point_arguments(cut_parser, pad_default=0.0)
+    # `cut` is handed positions a caller measured and means literally, so
+    # `aud.lib.cut`'s own pad_out_ms/pad_in_ms default to 0.0 -- widening
+    # someone's stated edit unasked would be a surprise.
+    # `aud.lib.strip_silence`'s equivalents default to 80.0 instead: it finds
+    # its own boundaries from an energy threshold whose bias is
+    # systematically INSIDE the speech. See contracts/plan.v1.md#edit-point-resolution.
+    _add_edit_point_arguments(cut_parser)
     # Unlike --pad-out/--pad-in (shrink-only, see above), this EXTENDS a
     # filler region's end_s past a recogniser's known-early boundary --
     # default None lets aud.lib.cut pick the kind-aware default (200ms for
@@ -285,10 +326,10 @@ def _build_parser() -> _Parser:
     cut_parser.add_argument("--filler-tail-pad", dest="filler_tail_pad", type=float, default=None)
 
     strip_silence_parser = sub.add_parser("strip-silence")
-    strip_silence_parser.add_argument("--threshold", type=float, default=6.0)
-    strip_silence_parser.add_argument("--min-len", dest="min_len", type=float, default=400.0)
-    strip_silence_parser.add_argument("--keep", type=float, default=150.0)
-    _add_edit_point_arguments(strip_silence_parser, pad_default=80.0)
+    strip_silence_parser.add_argument("--threshold", type=float, default=None)
+    strip_silence_parser.add_argument("--min-len", dest="min_len", type=float, default=None)
+    strip_silence_parser.add_argument("--keep", type=float, default=None)
+    _add_edit_point_arguments(strip_silence_parser)
 
     # advise / master: model-backed. advise reads measurements and proposes a
     # chain (with reasons); master proposes it, renders it, and verifies it --
@@ -296,15 +337,15 @@ def _build_parser() -> _Parser:
     # docs/CONFIGURATION.md) and refuse by name without one.
     advise_parser = sub.add_parser("advise")
     advise_parser.add_argument("path")
-    advise_parser.add_argument("--target", type=float, default=-14.0)
+    advise_parser.add_argument("--target", type=float, default=None)
     advise_parser.add_argument("--reference", default=None)
     advise_parser.add_argument("--model", default=None)
 
     master_parser = sub.add_parser("master")
     master_parser.add_argument("in_path")
     master_parser.add_argument("out_path")
-    master_parser.add_argument("--target", type=float, default=-14.0)
-    master_parser.add_argument("--ceiling", type=float, default=-1.0)
+    master_parser.add_argument("--target", type=float, default=None)
+    master_parser.add_argument("--ceiling", type=float, default=None)
     master_parser.add_argument("--reference", default=None)
     master_parser.add_argument("--model", default=None)
     master_parser.add_argument("--dry-run", dest="dry_run", action="store_true")
@@ -340,77 +381,91 @@ def registered_verbs() -> frozenset[str]:
 
 
 def _dispatch_stage(verb: str, plan: Any, args: argparse.Namespace) -> Any:
+    # Every call below runs its optional parameters through `_defer`: a flag
+    # the user did not pass stays out of the kwargs entirely, so the
+    # corresponding `aud.lib` function's own default parameter value applies
+    # (see `_defer`'s docstring). Only required/positional arguments (`plan`,
+    # `bands`, `target_hz`) are passed directly.
     if verb == "strip-silence":
         return lib.strip_silence(
             plan,
-            threshold_above_floor_db=args.threshold,
-            min_len_ms=args.min_len,
-            keep_ms=args.keep,
-            pad_out_ms=args.pad_out,
-            pad_in_ms=args.pad_in,
-            snap=args.snap,
-            snap_window_ms=args.snap_window,
-            fade_out_ms=args.fade_out,
-            fade_in_ms=args.fade_in,
-            crossfade_ms=args.crossfade,
-            crossfade_shape=args.crossfade_shape,
+            **_defer(
+                threshold_above_floor_db=args.threshold,
+                min_len_ms=args.min_len,
+                keep_ms=args.keep,
+                pad_out_ms=args.pad_out,
+                pad_in_ms=args.pad_in,
+                snap=args.snap,
+                snap_window_ms=args.snap_window,
+                fade_out_ms=args.fade_out,
+                fade_in_ms=args.fade_in,
+                crossfade_ms=args.crossfade,
+                crossfade_shape=args.crossfade_shape,
+            ),
         )
     if verb == "gate":
         return lib.gate(
             plan,
-            threshold_above_floor_db=args.threshold,
-            threshold_db=args.threshold_abs,
-            range_db=args.range,
-            attack_ms=args.attack,
-            hold_ms=args.hold,
-            release_ms=args.release,
-            lookahead_ms=args.lookahead,
-            sidechain_hpf_hz=args.sidechain_hpf,
-            crossovers_hz=args.crossovers,
+            **_defer(
+                threshold_above_floor_db=args.threshold,
+                threshold_db=args.threshold_abs,
+                range_db=args.range,
+                attack_ms=args.attack,
+                hold_ms=args.hold,
+                release_ms=args.release,
+                lookahead_ms=args.lookahead,
+                sidechain_hpf_hz=args.sidechain_hpf,
+                crossovers_hz=args.crossovers,
+            ),
         )
     if verb == "expand":
         return lib.expand(
             plan,
-            threshold_above_floor_db=args.threshold,
-            threshold_db=args.threshold_abs,
-            ratio=args.ratio,
-            knee_db=args.knee,
-            attack_ms=args.attack,
-            hold_ms=args.hold,
-            release_ms=args.release,
-            lookahead_ms=args.lookahead,
-            sidechain_hpf_hz=args.sidechain_hpf,
-            crossovers_hz=args.crossovers,
+            **_defer(
+                threshold_above_floor_db=args.threshold,
+                threshold_db=args.threshold_abs,
+                ratio=args.ratio,
+                knee_db=args.knee,
+                attack_ms=args.attack,
+                hold_ms=args.hold,
+                release_ms=args.release,
+                lookahead_ms=args.lookahead,
+                sidechain_hpf_hz=args.sidechain_hpf,
+                crossovers_hz=args.crossovers,
+            ),
         )
     if verb == "deess":
-        return lib.deess(plan, amount_db=args.amount, freq_hz=args.freq)
+        return lib.deess(plan, **_defer(amount_db=args.amount, freq_hz=args.freq))
     if verb == "dereverb":
-        return lib.dereverb(plan, amount_db=args.amount)
+        return lib.dereverb(plan, **_defer(amount_db=args.amount))
     if verb == "eq":
-        return lib.eq(plan, hpf=args.hpf, lpf=args.lpf, peaks=args.peaks or [], shelves=args.shelves or [])
+        return lib.eq(plan, **_defer(hpf=args.hpf, lpf=args.lpf, peaks=args.peaks, shelves=args.shelves))
     if verb == "eq-match":
         curve = lib.load_json_file(args.curve) if args.curve else None
         return lib.eq_match(
             plan,
             curve=curve,
             reference_path=args.reference,
-            amount=args.strength,
-            max_gain_db=args.max_gain_db,
+            **_defer(amount=args.strength, max_gain_db=args.max_gain_db),
         )
     if verb == "compress":
-        return lib.compress(plan, bands=args.bands, ratio=args.ratio)
+        return lib.compress(plan, bands=args.bands, **_defer(ratio=args.ratio))
     if verb == "saturate":
-        return lib.saturate(plan, drive=args.drive, mix=args.mix)
+        return lib.saturate(plan, **_defer(drive=args.drive, mix=args.mix))
     if verb == "reverb":
-        return lib.reverb(plan, amount=args.amount, decay=args.decay, predelay_ms=args.predelay)
+        return lib.reverb(plan, **_defer(amount=args.amount, decay=args.decay, predelay_ms=args.predelay))
     if verb == "stretch":
-        return lib.stretch(plan, factor=args.factor)
+        return lib.stretch(plan, **_defer(factor=args.factor))
     if verb == "pitch":
-        return lib.pitch(plan, semitones=args.semitones)
+        return lib.pitch(plan, **_defer(semitones=args.semitones))
     if verb == "loudness":
-        return lib.loudness(plan, target_lufs=args.target)
+        return lib.loudness(plan, **_defer(target_lufs=args.target))
     if verb == "limit":
-        return lib.limit(plan, ceiling_dbtp=args.ceiling)
+        return lib.limit(plan, **_defer(ceiling_dbtp=args.ceiling))
+    if verb == "downmix":
+        return lib.downmix(plan)
+    if verb == "resample":
+        return lib.resample(plan, target_hz=args.target_hz)
     raise AssertionError(f"unreachable stage verb: {verb}")
 
 
@@ -448,15 +503,17 @@ def _dispatch(verb: str, args: argparse.Namespace, stdin_text: str | None) -> An
         return lib.cut(
             plan,
             regions_text,
-            pad_out_ms=args.pad_out,
-            pad_in_ms=args.pad_in,
-            snap=args.snap,
-            snap_window_ms=args.snap_window,
-            fade_out_ms=args.fade_out,
-            fade_in_ms=args.fade_in,
-            crossfade_ms=args.crossfade,
-            crossfade_shape=args.crossfade_shape,
-            filler_tail_pad_ms=args.filler_tail_pad,
+            **_defer(
+                pad_out_ms=args.pad_out,
+                pad_in_ms=args.pad_in,
+                snap=args.snap,
+                snap_window_ms=args.snap_window,
+                fade_out_ms=args.fade_out,
+                fade_in_ms=args.fade_in,
+                crossfade_ms=args.crossfade,
+                crossfade_shape=args.crossfade_shape,
+                filler_tail_pad_ms=args.filler_tail_pad,
+            ),
         )
     if verb in STAGE_VERB_NAMES:
         plan = read_plan(stdin_text)
@@ -479,23 +536,23 @@ def _dispatch(verb: str, args: argparse.Namespace, stdin_text: str | None) -> An
         return lib.verify(args.path, target_lufs=args.target, ceiling_dbtp=args.ceiling)
     if verb == "detect":
         if args.detect_kind == "transients":
-            return lib.detect_transients(args.path, sensitivity=args.sensitivity, min_gap_ms=args.min_gap)
+            return lib.detect_transients(args.path, **_defer(sensitivity=args.sensitivity, min_gap_ms=args.min_gap))
         if args.detect_kind == "silence":
-            return lib.detect_silence(args.path, threshold_above_floor_db=args.threshold, min_len_ms=args.min_len)
+            return lib.detect_silence(
+                args.path, **_defer(threshold_above_floor_db=args.threshold, min_len_ms=args.min_len)
+            )
         if args.detect_kind == "fillers":
             # args.words is None unless the caller passed --words explicitly
             # (see _build_parser); None flows straight through so
             # aud.dsp.speech.FILLER_WORDS -- the one place that vocabulary is
             # defined -- is what actually runs by default (D3, lane report).
             words = [w.strip() for w in args.words.split(",") if w.strip()] if args.words else None
-            return lib.detect_fillers(args.path, words=words, min_pause_ms=args.min_pause)
+            return lib.detect_fillers(args.path, words=words, **_defer(min_pause_ms=args.min_pause))
         raise AssertionError(f"unreachable detect kind: {args.detect_kind}")
     if verb == "advise":
         outcome = lib.advise(
             args.path,
-            target_lufs=args.target,
-            reference_path=args.reference,
-            model=args.model,
+            **_defer(target_lufs=args.target, reference_path=args.reference, model=args.model),
         )
         _print_advise_reasoning(outcome)
         return outcome["plan"]
@@ -503,11 +560,13 @@ def _dispatch(verb: str, args: argparse.Namespace, stdin_text: str | None) -> An
         return lib.master(
             args.in_path,
             args.out_path,
-            target_lufs=args.target,
-            ceiling_dbtp=args.ceiling,
-            reference_path=args.reference,
-            model=args.model,
             dry_run=args.dry_run,
+            **_defer(
+                target_lufs=args.target,
+                ceiling_dbtp=args.ceiling,
+                reference_path=args.reference,
+                model=args.model,
+            ),
         )
     if verb == "preset":
         if args.list:
@@ -569,9 +628,13 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["--help"]:
         print(lib.skill())
         return 0
-    if argv[:1] and argv[0] in VERB_DOCS and "--help" in argv[1:]:
-        print(VERB_DOCS[argv[0]])
-        return 0
+    if argv[:1] and "--help" in argv[1:]:
+        # Sourced through aud.lib, not read from aud.verbdoc directly (AGENTS.md
+        # #2): a library consumer gets the identical text via lib.verb_help.
+        verb_doc = lib.verb_help(argv[0])
+        if verb_doc is not None:
+            print(verb_doc)
+            return 0
 
     parser = _build_parser()
     try:

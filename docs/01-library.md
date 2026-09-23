@@ -120,6 +120,8 @@ def stretch(plan, factor=1.0) -> Plan
 def pitch(plan, semitones=0.0) -> Plan
 def loudness(plan, target_lufs=-14.0) -> Plan
 def limit(plan, ceiling_dbtp=-1.0) -> Plan
+def downmix(plan) -> Plan
+def resample(plan, target_hz: int) -> Plan
 ```
 
 Every one of these is a plan builder: it validates its own parameters, appends one stage to
@@ -131,9 +133,15 @@ document's `mix`/`decay_s`) — the field names the *document* actually stores a
 [contracts/plan.v1.md](../contracts/plan.v1.md)'s, not these argument names.
 
 `render` (below) applies a plan's stages in **canonical mastering order** — editing → repair →
-tone → dynamics → character → loudness → limiting (`aud.plan.STAGE_ORDER`) — regardless of the
-order they were appended in. Every stage name in `STAGE_ORDER` has a working DSP handler in this
-release; there is no stage `aud` itself builds that renders as `not_implemented`.
+tone → dynamics → character → loudness → limiting → output format (`downmix`, `resample`)
+(`aud.plan.STAGE_ORDER`) — regardless of the order they were appended in. Every stage name in
+`STAGE_ORDER` has a working DSP handler in this release; there is no stage `aud` itself builds
+that renders as `not_implemented`.
+
+`downmix` and `resample` are output-format decisions rather than mastering ones, so they sit at
+the very end — see contracts/plan.v1.md#why-downmixresample-sit-at-the-very-end. `downmix` takes
+no parameters (a fixed fold rule, always reported: see below); `resample`'s `target_hz` must be a
+positive integer.
 
 A bad parameter raises `AudError(code="bad_param")` naming the field and what a valid value looks
 like; an unrecognised stage name raises `AudError(code="unknown_stage")`.
@@ -166,6 +174,12 @@ points for `cut`/`strip_silence`, and so on per stage).
 written at (resolved before the write, via `Path(...).expanduser().resolve()`), never an
 unresolved echo of a relative `out_path` the caller passed in. The write itself is the tool's own
 atomic write path (see `curve_extract` below for the same guarantee on a text artifact).
+
+The rate the file is written at: when the plan carries an explicit `resample` stage, that rate
+wins outright. Otherwise `render` reads the `sample_rate_policy` setting
+(docs/CONFIGURATION.md) -- `"preserve"` (the default) writes at the input's own rate; an integer
+resamples the rendered output to that rate before writing, and the report gains a
+`sample_rate_policy_applied` key with the same shape a `resample` stage's own report carries.
 
 Raises `AudError` with code `file_not_found`, `audio_decode_error`, `audio_write_error`,
 `bad_plan`, `crossfade_exceeds_gap`, `bad_param` (an `eq_match` curve incompatible with this

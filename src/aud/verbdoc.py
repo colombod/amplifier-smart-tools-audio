@@ -141,6 +141,9 @@ Parameters:
   silence PATH     --threshold FLOAT    dB above the measured noise floor. Default 6.0.
                    --min-len FLOAT      Ignore silences shorter than this, ms. Default 400.
   fillers PATH     --words STR          Comma-separated filler vocabulary.
+                                        Default: the tool's built-in
+                                        vocabulary (aud.dsp.speech.FILLER_WORDS
+                                        -- "um", "uh", "ehm", and friends).
                    --min-pause FLOAT    Report pauses at least this long, ms. Default 700.
 
 Result:
@@ -632,13 +635,15 @@ Kind:
 
 Parameters:
   --hpf FLOAT              High-pass corner frequency in Hz. Must be > 0,
-                           and below --lpf if both are given.
+                           and below --lpf if both are given. Default: not
+                           set (no high-pass filtering applied).
   --lpf FLOAT              Low-pass corner frequency in Hz. Must be > 0.
+                           Default: not set (no low-pass filtering applied).
   --peak FREQ,GAIN,Q       A peaking band as freq_hz,gain_db,q. Q must be
-                           > 0. Repeatable.
+                           > 0. Repeatable. Default: none (no peaking bands).
   --shelf TYPE,FREQ,GAIN,Q A shelving band as type,freq_hz,gain_db,q.
                            TYPE is 'low' or 'high'; Q must be > 0.
-                           Repeatable.
+                           Repeatable. Default: none (no shelving bands).
 
 Result:
   Appends an 'eq' stage to the plan and prints the updated plan, raw and
@@ -966,15 +971,95 @@ Failures:
 Example:
   aud plan | aud loudness --target -14 | aud limit --ceiling -1.0 | aud render in.wav out.wav
 """,
+    "downmix": """\
+downmix -- output-format stage: fold a multichannel programme down to one channel
+
+What it does:
+  Appends a downmix stage to the plan on stdin: at render time, every
+  channel is folded to one by taking the arithmetic mean across channels
+  (sum-and-divide, never a plain sum) -- a rule chosen because it can
+  never push a sample outside [-1.0, 1.0] for in-range input, no matter
+  how many channels or how correlated they are. Sits at the very end of
+  canonical order, immediately before 'resample' and before the file is
+  written -- an output-format decision, not a mastering one.
+
+When to reach for it:
+  "This needs to be mono", "collapse this stereo file to one channel",
+  or preparing material for a mono-only destination.
+
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
+Parameters:
+  None. The fold rule and the antiphase-detection threshold are fixed,
+  not caller-configurable.
+
+Result:
+  Appends a 'downmix' stage to the plan and prints the updated plan, raw
+  and unwrapped. The fold only happens at 'aud render' time; the render
+  report for this stage includes 'input_channels', the mean pairwise
+  channel correlation it measured, and 'antiphase_detected' -- true when
+  that correlation is strongly negative, which means the fold has
+  cancelled most of the programme's energy rather than merely combined
+  it. A no-op, reported as such, when the input is already mono.
+
+Failures:
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
+
+Example:
+  aud plan | aud downmix | aud render in.wav out.wav
+""",
+    "resample": """\
+resample -- output-format stage: convert to a target sample rate
+
+What it does:
+  Appends a resample stage to the plan on stdin: at render time, the
+  programme is resampled to --hz using a polyphase resampler with its own
+  anti-aliasing filter (never hand-rolled decimation). Sits at the very
+  end of canonical order, immediately before the file is written -- an
+  output-format decision, not a mastering one. A no-op, reported as such,
+  when the file is already at --hz.
+
+When to reach for it:
+  "Deliver this at 48000", "downsample this to 16k for a speech model",
+  or matching a destination's required sample rate.
+
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
+Parameters:
+  --hz INTEGER   Target sample rate in Hz. Required; must be a positive integer.
+
+Result:
+  Appends a 'resample' stage to the plan and prints the updated plan, raw
+  and unwrapped. Resampling only happens at 'aud render' time; the render
+  report for this stage includes 'source_hz', 'target_hz',
+  'input_samples' and 'output_samples'. An explicit 'resample' stage in
+  the plan takes precedence over the 'sample_rate_policy' config setting
+  (docs/CONFIGURATION.md) -- 'render' never applies both.
+
+Failures:
+  bad_param  --hz is not a positive integer.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
+
+Example:
+  aud plan | aud resample --hz 48000 | aud render in.wav out.wav
+""",
     "render": """\
 render -- apply a whole plan to a file in one pass
 
 What it does:
   Reads the plan on stdin, reorders its stages into canonical order
-  (editing -> repair -> tone -> dynamics -> character -> loudness -> limit)
-  regardless of append order, and applies all of them in a single
-  decode/filter/encode pass. Prints a {"result": ...} envelope, not a plan
-  -- it is the end of the pipeline.
+  (editing -> repair -> tone -> dynamics -> character -> loudness -> limit
+  -> output format (downmix, resample)) regardless of append order, and
+  applies all of them in a single decode/filter/encode pass. Prints a
+  {"result": ...} envelope, not a plan -- it is the end of the pipeline.
+  When the plan carries no 'resample' stage, the 'sample_rate_policy'
+  config setting (docs/CONFIGURATION.md) still applies: "preserve"
+  (default) writes at the input's own rate; an integer resamples to it.
+  An explicit 'resample' stage always takes precedence over the setting.
 
 When to reach for it:
   The last verb in every chain. Never render each stage separately: every
@@ -1007,7 +1092,7 @@ Failures:
   not_implemented       a stage name in the plan is not one this build of
                         aud's render engine registers -- not currently
                         reachable for any stage 'aud' itself builds, since
-                        all fifteen documented stages render.
+                        all seventeen documented stages render.
 
 Example:
   aud plan | aud eq --hpf 40 | aud limit --ceiling -1.0 | aud render in.wav out.wav
@@ -1029,7 +1114,9 @@ Kind:
 Parameters:
   path (positional)   File to verify.
   --target FLOAT      Expected integrated loudness in LUFS, if any.
+                      Default: unset (lufs_ok is omitted from the result).
   --ceiling FLOAT     Expected true-peak ceiling in dBTP, if any.
+                      Default: unset (ceiling_ok is omitted from the result).
 
 Result:
   {"result": {"measured": {...}, "target_lufs"?, "lufs_ok"?,
@@ -1134,10 +1221,18 @@ Kind:
 
 Parameters:
   --sample-rate-policy STR     Override the sample_rate_policy setting.
+                               Default: not set (reports the config
+                               file/environment/built-in value unchanged).
   --default-ceiling-dbtp FLOAT Override the default_ceiling_dbtp setting.
+                               Default: not set (reports the existing value
+                               unchanged).
   --default-target-lufs FLOAT  Override the default_target_lufs setting.
-  --oversample INT             Override the oversample setting.
-  --output-subtype STR         Override the output_subtype setting.
+                               Default: not set (reports the existing value
+                               unchanged).
+  --oversample INT             Override the oversample setting. Default:
+                               not set (reports the existing value unchanged).
+  --output-subtype STR         Override the output_subtype setting. Default:
+                               not set (reports the existing value unchanged).
 
 Result:
   {"result": {<setting>: {"value": ..., "source": "argument" |
@@ -1222,7 +1317,8 @@ Parameters:
                        model. Default -14.0.
   --reference PATH    Optional reference file. Its measurements (never its
                        audio) are given to the model too, to inform tonal
-                       choices such as EQ peaks.
+                       choices such as EQ peaks. Default: none (no reference
+                       used).
   --model NAME        Override the model name for whichever provider is
                        configured. Default: a per-provider built-in,
                        overridable by the AUD_MODEL environment variable
@@ -1289,8 +1385,12 @@ Parameters:
   --ceiling FLOAT        Target true-peak ceiling in dBTP. Default -1.0.
   --reference PATH       Optional reference file; measured, not rendered
                          with -- informs the model's tonal choices.
+                         Default: none (no reference used).
   --model NAME           Override the model name. See 'aud advise --help'.
+                         Default: not set (a per-provider built-in, itself
+                         overridable by the AUD_MODEL environment variable).
   --dry-run              Choose and print the plan; render nothing.
+                         Default: off (renders and verifies normally).
 
 Result:
   {"result": {"plan", "stages", "provider", "model", "measurements",

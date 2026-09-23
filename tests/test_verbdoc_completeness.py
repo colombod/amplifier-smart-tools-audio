@@ -58,3 +58,52 @@ def test_cut_and_strip_silence_document_the_real_render_report_fields() -> None:
         doc = VERB_DOCS[verb]
         result_section = doc.split("Result:", 1)[1].split("\n\n", 1)[0]
         assert expected_field in result_section, f"{verb}'s Result section should name {expected_field!r}"
+
+
+# --- Regression guard for capability-skills-complete: every documented
+# optional argument states its default -------------------------------------
+#
+# 'detect fillers --words' documented its purpose but omitted its default
+# (the reviewer's finding). The audit that fix required found the same gap
+# on 15 more optional arguments across 5 more verbs -- not a single miss,
+# a pattern. Each (verb, flag) pair below is one that was previously silent
+# on its default; this pins it so it cannot regress silently.
+_PREVIOUSLY_UNDOCUMENTED_DEFAULTS: tuple[tuple[str, str], ...] = (
+    # detect's "fillers" sub-row packs flag+type on one line ("--words STR"),
+    # unlike every other verb's two-space-indented row start -- the type
+    # token makes the marker unique without needing the generic row logic.
+    ("detect", "--words STR"),
+    ("eq", "--hpf"),
+    ("eq", "--lpf"),
+    ("eq", "--peak"),
+    ("eq", "--shelf"),
+    ("verify", "--target"),
+    ("verify", "--ceiling"),
+    ("advise", "--reference"),
+    ("master", "--reference"),
+    ("master", "--model"),
+    ("master", "--dry-run"),
+    ("config", "--sample-rate-policy"),
+    ("config", "--default-ceiling-dbtp"),
+    ("config", "--default-target-lufs"),
+    ("config", "--oversample"),
+    ("config", "--output-subtype"),
+)
+
+
+def test_every_previously_undocumented_default_now_states_one() -> None:
+    for verb, marker in _PREVIOUSLY_UNDOCUMENTED_DEFAULTS:
+        doc = VERB_DOCS[verb]
+        params_section = doc.split("Parameters:", 1)[1].split("\n\n", 1)[0]
+        # A bare "--flag" marker must start its own row (preceded by a
+        # newline and leading whitespace only), not an incidental mention
+        # inside another parameter's prose (e.g. master's out_path entry
+        # mentions "--dry-run" before --dry-run's own row is documented).
+        # A marker that already includes its type token (detect's packed
+        # "--words STR" row) is unique enough to search for directly.
+        row_marker = marker if " " in marker else "\n  " + marker
+        assert row_marker in params_section, f"{verb}'s Parameters section no longer documents {marker} as its own row"
+        after_flag = params_section.split(row_marker, 1)[1]
+        next_flag_pos = after_flag.find("\n  --", 1)
+        flag_text = after_flag if next_flag_pos == -1 else after_flag[:next_flag_pos]
+        assert "default" in flag_text.lower(), f"{verb}'s {marker} still does not state a default"

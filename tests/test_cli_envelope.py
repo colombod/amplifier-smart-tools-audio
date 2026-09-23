@@ -202,6 +202,41 @@ def test_unexpected_exception_is_wrapped_in_error_envelope_not_a_raw_traceback(t
     assert "Traceback" not in proc.stderr
 
 
+def test_hand_authored_plan_with_out_of_range_stage_param_is_bad_param_not_internal_error(
+    tiny_wav: Path, tmp_path: Path
+) -> None:
+    """A hand-authored plan can carry a stage param no CLI verb would ever
+    construct -- e.g. `expand.ratio` below 1.0, which argparse's own
+    `--ratio` (a bare `type=float`) has no floor to reject. Before this
+    fix, `dsp/gate.py`'s bare ValueError propagated unmapped through
+    `render` and was flattened by the CLI's catch-all into `internal_error`
+    -- telling the caller to file a bug about their own plan (AGENTS.md #4:
+    failures name what went wrong and the remedy; a caller-fixable plan is
+    never labeled an internal bug).
+    """
+    out_path = tmp_path / "out.wav"
+    hand_authored_plan = json.dumps(
+        {
+            "plan_format": 1,
+            "created_with": "test-harness",
+            "stages": [{"stage": "expand", "params": {"ratio": 0.5}}],
+        }
+    )
+
+    proc = _run(["render", str(tiny_wav), str(out_path)], input_text=hand_authored_plan)
+
+    assert proc.returncode != 0
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
+    assert set(payload) == {"error"}
+    assert payload["error"]["code"] == "bad_param"
+    assert payload["error"]["code"] != "internal_error"
+    assert "expand" in payload["error"]["message"]
+    assert "ratio" in payload["error"]["message"]
+    assert payload["error"]["remedy"]
+    assert not out_path.exists()
+
+
 # --- write_audio failures: honest audio_write_error, not internal_error ---
 
 

@@ -60,7 +60,7 @@ Each element of `stages` is an object with **exactly two** keys:
 ```json
 ["cut", "strip_silence",
  "stretch", "pitch", "gate", "expand", "dereverb", "deess", "eq", "eq_match",
- "compress", "saturate", "reverb", "loudness", "limit"]
+ "compress", "saturate", "reverb", "loudness", "limit", "downmix", "resample"]
 ```
 
 `render` applies stages in this order regardless of the order they appear in `stages`. The array
@@ -106,6 +106,23 @@ Two separate reasons, both of which bite:
 Between the two: `cut` runs before `strip_silence`. `cut` works from absolute positions measured
 on the source, so it must see the source timeline; `strip_silence` detects at render time and is
 therefore happy to run on whatever is left.
+
+### Why `downmix`/`resample` sit at the very end
+
+Both change the medium's shape rather than shape the sound: `downmix` folds the channel count,
+`resample` changes the sample rate. Neither is a mastering decision, and both sit at the tail of
+canonical order, after `limit` and immediately before the file is written, for the mirror image
+of [why editing is first](#why-editing-is-first): every stage *before* them should measure and
+process the programme's real, currently-mastered channel layout and rate. A de-esser's sibilant
+band, a compressor's crossover frequencies, and the limiter's oversampling ratio are all defined
+against the sample rate of the material actually being processed at that point in the chain;
+folding channels or changing rate any earlier would mean those stages are shaping a signal that
+is not the one the caller is asking to master.
+
+`downmix` precedes `resample` in the canonical order for efficiency only (resampling fewer
+channels costs less), not correctness: `resample_poly`'s anti-alias filter is applied identically
+to every channel, so folding channels before or after resampling produces the same result to
+floating-point precision. Either ordering is mathematically sound; only one is cheaper.
 
 Stage names in the document use underscores; the CLI verb that appends them may not. `aud
 eq-match` appends the stage `eq_match`. The document's spelling is the contract.
@@ -561,6 +578,37 @@ There is one limiter and it is full-band, after the multiband compressor recombi
 cannot ask for per-band limiting, because independently limited bands can sum above the ceiling
 and the guarantee would be false.
 
+### `downmix`
+
+Fold a multichannel programme down to one channel. Takes no parameters: the fold rule (the
+arithmetic mean across channels -- sum-and-divide, never a plain sum) and the antiphase-detection
+threshold are fixed, not caller-configurable.
+
+| Param | Type | Default | Constraint |
+|---|---|---|---|
+| *(none)* | | | `params` is always `{}`. |
+
+A no-op when the input is already mono. The render report for this stage always includes
+`input_channels`, the mean pairwise Pearson correlation the fold measured across channels
+(`correlation`, `null` when undefined), and `antiphase_detected` -- `true` when that correlation
+is at or below the antiphase threshold, meaning the fold has cancelled most of the programme's
+energy rather than merely combined it. This is reported, not refused: a caller asking to downmix
+genuinely out-of-phase material still gets the file, plus the evidence that something is
+suspicious about the source.
+
+### `resample`
+
+Convert to a target sample rate.
+
+| Param | Type | Default | Constraint |
+|---|---|---|---|
+| `target_hz` | integer | required | `> 0`. |
+
+A no-op when the input is already at `target_hz`. Uses a polyphase resampler with its own
+anti-aliasing filter (never hand-rolled decimation, never a filter stripped out to save time).
+The render report for this stage always includes `source_hz`, `target_hz`, `input_samples` and
+`output_samples`.
+
 ## Promised
 
 Within `plan_format: 1`, a caller may rely on all of this:
@@ -710,6 +758,23 @@ names is breaking") is a proxy for it, not the thing itself.
   `dereverb` still precedes `deess`, and so on through `limit`. `gate`/`expand` occupy a gap
   between two names that were already adjacent; no existing pair had anything inserted between
   it and a *different* existing pair moved to compensate.
+- Therefore every stored format-1 plan sorts into exactly the sequence it sorted into before, and
+  renders identically. Only a plan containing the two new names is affected, and no such plan
+  existed until this release.
+
+### On the record: why `downmix`/`resample` did not move the integer either
+
+Two more new stage names, this time appended at the very **end** of the canonical order rather
+than inserted in the middle -- the simplest case the contract's own test covers, but worth
+naming for the same reason the two above are: consistency in how this file justifies each
+addition, not just in the outcome.
+
+- No plan written before this release can contain `downmix` or `resample` -- an unknown stage
+  name is rejected, so such a document was never producible.
+- The relative order of every pre-existing name is untouched: `loudness` still precedes `limit`,
+  and every pair before it is exactly as it was. `downmix`/`resample` are added after the last
+  existing name, not between two existing ones, so there is no gap to reason about the way
+  `gate`/`expand`'s insertion needed.
 - Therefore every stored format-1 plan sorts into exactly the sequence it sorted into before, and
   renders identically. Only a plan containing the two new names is affected, and no such plan
   existed until this release.

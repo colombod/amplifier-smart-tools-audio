@@ -5,15 +5,28 @@ function via a registry, and builds a report that is specific enough to be
 useful after a render: gain applied, gain reduction per band, true peak
 before and after, etc. -- not just "eq: done".
 
-Fifteen stages are implemented in this module: cut, strip_silence, gate,
+Seventeen stages are implemented in this module: cut, strip_silence, gate,
 expand, dereverb, deess, eq, eq_match, compress, saturate, reverb, stretch,
-pitch, loudness, limit -- every stage the canonical order
-(contracts/plan.v1.md) names. `apply_plan` does not special-case stage
-names -- ANY stage not in the registry raises `NotImplementedStageError` (a
-`ValueError` subclass), so the caller always gets an honest "not
-implemented yet" rather than a silent no-op or a confusing KeyError.
-aud.lib maps that exception to a `not_implemented` AudError; it is not an
-internal aud bug.
+pitch, loudness, limit, downmix, resample -- every stage the canonical
+order (contracts/plan.v1.md) names. `apply_plan` does not special-case
+stage names -- ANY stage not in the registry raises
+`NotImplementedStageError` (a `ValueError` subclass), so the caller always
+gets an honest "not implemented yet" rather than a silent no-op or a
+confusing KeyError. aud.lib maps that exception to a `not_implemented`
+AudError; it is not an internal aud bug.
+
+Sample-rate tracking: every stage handler has signature `(x, sr, params) ->
+(y, report)` -- `sr` in, no changed `sr` out, because fifteen of the
+seventeen stages never change the rate. `resample` is the one exception,
+and its new rate has nowhere to go through that signature. Rather than
+widen the executor contract for all seventeen stages (a change to every
+existing handler, to serve the one stage that needs it), `apply_plan`'s own
+loop special-cases the single stage name that changes `sr` -- see the loop
+below -- and publishes the final rate in the returned report's top-level
+`sample_rate` key, which `aud.lib.render` reads to decide what to hand
+`_write_audio`. Channel count needs no equivalent tracking: it is a
+property of the array `y` itself, and every stage already receives
+whatever `y` the previous stage returned.
 """
 
 from __future__ import annotations
@@ -23,16 +36,20 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from aud.dsp import channels as _channels
 from aud.dsp import deess as _deess
 from aud.dsp import dereverb as _dereverb
 from aud.dsp import dynamics, eqmatch, limiter, loudness, reverb, saturation, timepitch
 from aud.dsp import edit as _edit
 from aud.dsp import filters as _filters
 from aud.dsp import gate as _gate
+from aud.dsp import resample as _resample_module
 from aud.dsp import resolve as _resolve
+from aud.dsp.edit import CrossfadeExceedsGapError
+from aud.dsp.eqmatch import CurveError
 from aud.schemas import NotImplementedStageError
 
-__all__ = ["MissingDspModuleError", "apply_plan"]
+__all__ = ["MissingDspModuleError", "StageParamError", "apply_plan"]
 
 _EPS = 1e-12
 
@@ -53,6 +70,37 @@ class MissingDspModuleError(ValueError):
         self.stage = stage
         self.needs = needs
         super().__init__(f"Stage '{stage}' needs '{needs}', which is not available in this build: {exc}")
+
+
+class StageParamError(ValueError):
+    """A stage handler rejected one of its own params as out of range or the wrong shape.
+
+    A plan's `params` (`aud.plan.Stage.params`) is an unvalidated dict --
+    format 1 never pinned per-stage param schemas at the `Plan` model level,
+    so a hand-authored plan can carry a param a real caller (the CLI's own
+    per-verb builders in `aud.lib`) would never construct. `apply_plan`'s
+    dispatch loop is the render-time backstop: any bare `ValueError` a stage
+    handler raises for its own params -- not one of the other named boundary
+    exceptions this module and `aud.dsp.edit`/`aud.dsp.eqmatch` already carry
+    forward unchanged -- is caught here and re-raised as this type, with the
+    stage name attached. `aud.lib.render` maps it to `AudError(code=
+    "bad_param")` instead of letting the CLI's catch-all report a caller's
+    typo as an internal aud bug (see AGENTS.md #4).
+
+    Subclasses ValueError, not AudError, for the same reason
+    `MissingDspModuleError`/`NotImplementedStageError` do: this is still
+    inside `dsp/`'s call chain (see AGENTS.md #8), so `AudError` construction
+    stays a job for `aud.lib`, above the boundary. The original message is
+    kept verbatim -- every `dsp/` validation raise already names the field,
+    the value found, and the constraint (see e.g. `aud.dsp.filters` and
+    `aud.dsp.gate`); only the stage name was missing, and that is what this
+    type adds.
+    """
+
+    def __init__(self, stage: str, detail: str) -> None:
+        self.stage = stage
+        self.detail = detail
+        super().__init__(f"'{stage}': {detail}")
 
 
 def _onsets_for_snap(x: np.ndarray, sr: int, snap: str, stage: str) -> list[float] | None:
@@ -498,6 +546,15 @@ def _apply_limit(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.nda
     return y, stats
 
 
+def _apply_downmix(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
+    return _channels.downmix(x, sr, params)
+
+
+def _apply_resample(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.ndarray, dict]:
+    target_hz = params["target_hz"]
+    return _resample_module.resample(x, sr, target_hz)
+
+
 _REGISTRY = {
     "cut": _apply_cut,
     "strip_silence": _apply_strip_silence,
@@ -514,7 +571,15 @@ _REGISTRY = {
     "pitch": _apply_pitch,
     "loudness": _apply_loudness,
     "limit": _apply_limit,
+    "downmix": _apply_downmix,
+    "resample": _apply_resample,
 }
+
+# The one stage whose executor changes the sample rate for every stage
+# after it -- see this module's docstring ("Sample-rate tracking") for why
+# this is a targeted loop special-case rather than a widened executor
+# contract.
+_SAMPLE_RATE_CHANGING_STAGE = "resample"
 
 
 def apply_plan(x: np.ndarray, sr: int, stages: list[_Stage]) -> tuple[np.ndarray, dict]:
@@ -527,16 +592,26 @@ def apply_plan(x: np.ndarray, sr: int, stages: list[_Stage]) -> tuple[np.ndarray
             object exposing `.stage` (str) and `.params` (dict).
 
     Returns:
-        (y, report) where report = {"stages": [per-stage report dict, ...]}.
-        Each per-stage dict always includes "stage" (the stage name) plus
-        whatever specifics that stage's handler records.
+        (y, report) where report = {"stages": [...], "sample_rate": int}.
+        Each per-stage dict in "stages" always includes "stage" (the stage
+        name) plus whatever specifics that stage's handler records.
+        "sample_rate" is `sr` unless a `resample` stage ran, in which case
+        it is that stage's `target_hz` -- see this module's docstring
+        ("Sample-rate tracking"). `aud.lib.render` reads this key to know
+        what rate to write the rendered file at.
 
     Raises:
         ValueError: A stage name is not in the implemented registry. The
             error names the stage explicitly rather than failing silently
             or leaving it as a no-op.
+        StageParamError: A stage handler rejected one of its own params
+            (out of range, wrong shape) -- e.g. a hand-authored plan with
+            an invalid field a real caller could never construct. Carries
+            the stage name; `aud.lib.render` maps it to `AudError(code=
+            "bad_param")`.
     """
     y = np.asarray(x, dtype=np.float64)
+    current_sr = sr
     report: dict[str, Any] = {"stages": []}
 
     for stage in stages:
@@ -545,8 +620,20 @@ def apply_plan(x: np.ndarray, sr: int, stages: list[_Stage]) -> tuple[np.ndarray
         if handler is None:
             raise NotImplementedStageError(name, tuple(_REGISTRY))
         params = stage.params or {}
-        y, stage_report = handler(y, sr, params)
+        try:
+            y, stage_report = handler(y, current_sr, params)
+        except (MissingDspModuleError, CrossfadeExceedsGapError, CurveError):
+            # Already-named boundary exceptions `aud.lib.render` recognises
+            # on their own terms (not_implemented / crossfade_exceeds_gap /
+            # eq_match's own bad_param mapping) -- pass through unchanged
+            # rather than flattening them into a generic StageParamError.
+            raise
+        except ValueError as exc:
+            raise StageParamError(name, str(exc)) from exc
+        if name == _SAMPLE_RATE_CHANGING_STAGE:
+            current_sr = stage_report["target_hz"]
         stage_report = {"stage": name, **stage_report}
         report["stages"].append(stage_report)
 
+    report["sample_rate"] = current_sr
     return y, report
