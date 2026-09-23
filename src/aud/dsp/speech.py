@@ -36,6 +36,7 @@ from typing import Any, Protocol
 import numpy as np
 from scipy import signal
 
+from aud.dsp.channels import fold_to_mono
 from aud.schemas import AudError
 
 __all__ = ["FILLER_WORDS", "detect_fillers", "is_available"]
@@ -238,9 +239,8 @@ def detect_fillers(
 
     vocabulary = tuple(_normalize_word(w) for w in (words or FILLER_WORDS) if w and w.strip())
 
-    mono = np.asarray(x, dtype=np.float64)
-    if mono.ndim == 2:
-        mono = np.mean(mono, axis=1)
+    # Analysis-only mono fold -- see aud.dsp.channels.fold_to_mono's docstring.
+    mono = fold_to_mono(np.asarray(x, dtype=np.float64))
     # faster-whisper's ndarray path always assumes 16 kHz; resample to that
     # rate here so the timestamps it returns are already real seconds, no
     # matter what rate `sr` actually is (see `_resample_to_whisper_rate`

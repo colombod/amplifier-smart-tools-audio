@@ -211,6 +211,42 @@ def _validate_file_config_value(key: str, value: Any, default: Any) -> Any:
     return float(value) if isinstance(default, float) else value
 
 
+_SAMPLE_RATE_POLICY_PRESERVE = "preserve"
+
+
+def _normalize_sample_rate_policy(value: Any, *, source: str) -> str | int:
+    """`"preserve"` or a positive integer Hz -- the one setting whose declared
+
+    type is not fixed (docs/CONFIGURATION.md), so it cannot go through
+    `_coerce_env_value`/`_validate_file_config_value`'s single-type-per-key
+    logic the way every other setting does. Handles all three tiers that
+    can produce a raw value: an argument (already Python-typed, but a str
+    or an int either one), a config-file value (already TOML-typed: a
+    native string or a native integer), and an environment variable
+    (always a string that may or may not parse as an integer).
+
+    Never coerces "preserve" from a near-miss spelling, and never accepts
+    a non-positive or non-integer number -- both are the same
+    "wrong-type-is-fatal" rule every other setting follows, just applied
+    to a setting with two valid shapes instead of one.
+    """
+    if isinstance(value, str) and value == _SAMPLE_RATE_POLICY_PRESERVE:
+        return _SAMPLE_RATE_POLICY_PRESERVE
+    candidate: Any = value
+    if isinstance(candidate, str):
+        try:
+            candidate = int(candidate)
+        except ValueError:
+            candidate = None
+    if isinstance(candidate, int) and not isinstance(candidate, bool) and candidate > 0:
+        return candidate
+    raise AudError(
+        code="bad_config",
+        message=f'sample_rate_policy is {value!r} ({source}); must be "preserve" or a positive integer Hz.',
+        remedy='Set sample_rate_policy to "preserve", or a positive integer Hz, e.g. 48000.',
+    )
+
+
 def config(**overrides: Any) -> dict:
     """Effective settings and which tier each came from.
 
@@ -228,15 +264,25 @@ def config(**overrides: Any) -> dict:
     result: dict[str, dict[str, Any]] = {}
     for key, default in _CONFIG_DEFAULTS.items():
         if overrides.get(key) is not None:
-            result[key] = {"value": overrides[key], "source": "argument"}
+            value = overrides[key]
+            if key == "sample_rate_policy":
+                value = _normalize_sample_rate_policy(value, source="argument")
+            result[key] = {"value": value, "source": "argument"}
             continue
         if key in file_values:
-            value = _validate_file_config_value(key, file_values[key], default)
+            if key == "sample_rate_policy":
+                value = _normalize_sample_rate_policy(file_values[key], source=str(_CONFIG_FILE_PATH))
+            else:
+                value = _validate_file_config_value(key, file_values[key], default)
             result[key] = {"value": value, "source": "config_file"}
             continue
         env_key = _CONFIG_ENV_PREFIX + key.upper()
         if env_key in os.environ:
-            result[key] = {"value": _coerce_env_value(key, default, os.environ[env_key]), "source": "environment"}
+            if key == "sample_rate_policy":
+                value = _normalize_sample_rate_policy(os.environ[env_key], source=env_key)
+            else:
+                value = _coerce_env_value(key, default, os.environ[env_key])
+            result[key] = {"value": value, "source": "environment"}
             continue
         result[key] = {"value": default, "source": "default"}
     return result
@@ -1161,6 +1207,47 @@ def limit(plan: Plan, ceiling_dbtp: float = -1.0) -> Plan:
     return append(plan, "limit", {"ceiling_dbtp": ceiling_dbtp})
 
 
+def downmix(plan: Plan) -> Plan:
+    """Output-format stage: fold a multichannel programme down to one channel.
+
+    Takes no parameters -- the fold rule (arithmetic mean across channels,
+    proven never to exceed [-1.0, 1.0] for in-range input) and the
+    antiphase-detection threshold are fixed, not caller-configurable; see
+    `aud.dsp.channels.downmix`'s docstring for the full reasoning. A no-op
+    at render time if the input is already mono.
+    """
+    return append(plan, "downmix", {})
+
+
+def resample(plan: Plan, target_hz: int) -> Plan:
+    """Output-format stage: convert to a target sample rate.
+
+    `target_hz` must be a positive integer. Resampling uses
+    `scipy.signal.resample_poly`'s polyphase resampler, which applies its
+    own anti-aliasing filter -- see `aud.dsp.resample.resample`'s
+    docstring. A no-op at render time if the input is already at
+    `target_hz`.
+
+    This stage takes precedence over the `sample_rate_policy` setting
+    (docs/CONFIGURATION.md): an explicit `resample` stage in the plan is
+    what the caller asked for, and `render` never applies the config
+    policy on top of it.
+    """
+    if isinstance(target_hz, bool) or not isinstance(target_hz, int):
+        raise AudError(
+            code="bad_param",
+            message=f"resample target_hz must be a positive integer, got {target_hz!r}.",
+            remedy="Use a whole number of Hz, e.g. --hz 48000.",
+        )
+    if target_hz <= 0:
+        raise AudError(
+            code="bad_param",
+            message=f"resample target_hz must be a positive integer, got {target_hz}.",
+            remedy="Use a whole number of Hz greater than 0, e.g. --hz 48000.",
+        )
+    return append(plan, "resample", {"target_hz": target_hz})
+
+
 # ---------------------------------------------------------------------------
 # Sample-touching functions -- import aud.dsp lazily, inside the function body.
 # ---------------------------------------------------------------------------
@@ -1330,6 +1417,7 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
         from aud.dsp import engine, io
     except ImportError as exc:
         raise _not_implemented("render", exc) from exc
+    from aud.dsp import resample as _resample_module
     from aud.dsp.edit import CrossfadeExceedsGapError
     from aud.dsp.engine import MissingDspModuleError
     from aud.dsp.eqmatch import CurveError
@@ -1369,14 +1457,35 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
             remedy="Re-extract the curve from this render's own sample rate, or supply a curve whose "
             "frequencies fit under this file's Nyquist frequency.",
         ) from exc
-    output_subtype = config()["output_subtype"]["value"]
+    # `apply_plan` reports the rate as it stood after every stage ran --
+    # unchanged unless the plan itself carried a `resample` stage (see
+    # dsp/engine.py's "Sample-rate tracking"). Fall back to the file's own
+    # rate for a report that predates this key (never true for a report
+    # this same call just produced, but keeps this read defensive rather
+    # than assuming a key it just wrote).
+    output_sample_rate = report.get("sample_rate", sample_rate)
+
+    settings = config()
+    sample_rate_policy = settings["sample_rate_policy"]["value"]
+    has_explicit_resample_stage = any(stage.stage == "resample" for stage in plan.stages)
+    # An explicit `resample` stage is what the caller asked for; the config
+    # policy never overrides it (docs/CONFIGURATION.md, aud.lib.resample's
+    # docstring). Only when the plan itself is silent on the rate does the
+    # policy get to act -- and "preserve" is itself silence, by design.
+    if not has_explicit_resample_stage and sample_rate_policy != "preserve":
+        rendered, policy_resample_report = _resample_module.resample(rendered, output_sample_rate, sample_rate_policy)
+        output_sample_rate = policy_resample_report["target_hz"]
+        report["sample_rate_policy_applied"] = policy_resample_report
+        report["sample_rate"] = output_sample_rate
+
+    output_subtype = settings["output_subtype"]["value"]
     # An artifact's location is named: resolve to an absolute path BEFORE
     # writing, so the file lands exactly where the returned path says it
     # did, no matter the caller's cwd -- and so the returned path has a
     # stated base rather than being an unresolved echo of whatever `out_path`
     # the caller happened to pass in.
     resolved_out_path = _resolve_path(out_path)
-    _write_audio(io, resolved_out_path, rendered, sample_rate, output_subtype)
+    _write_audio(io, resolved_out_path, rendered, output_sample_rate, output_subtype)
     return {"out_path": resolved_out_path, "report": report}
 
 

@@ -76,7 +76,15 @@ def _get(region: Any, key: str) -> float:
 
 
 def _mono_sum(x: np.ndarray) -> np.ndarray:
-    """The mono sum used by "zero_crossing" -- see contracts/plan.v1.md#snap."""
+    """The mono sum used by "zero_crossing" -- see contracts/plan.v1.md#snap.
+
+    Deliberately NOT `aud.dsp.channels.fold_to_mono` (which averages): only
+    the SIGN of the folded signal matters here (finding where it crosses
+    zero), never its level, so a plain sum -- cheaper than a sum-then-
+    divide -- is the right computation, not the same one spelled
+    differently. See `aud.dsp.channels`'s module docstring, which names
+    this function as the one deliberately-unconsolidated copy.
+    """
     x = np.asarray(x, dtype=np.float64)
     if x.ndim == 1:
         return x

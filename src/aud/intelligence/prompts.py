@@ -28,7 +28,9 @@ no others exist for this decision:
   deess     {"amount_db": float >= 0, "freq_hz": float > 0}
   dereverb  {"amount_db": float >= 0}
   eq        {"hpf": float > 0 or null, "lpf": float > 0 or null,
-             "peaks": [[freq_hz, gain_db, q], ...] or null}
+             "peaks": [[freq_hz, gain_db, q], ...] or null,
+             "shelves": [[type, freq_hz, gain_db, q], ...] or null}
+             -- type is "low" or "high"
   compress  {"bands": [ascending crossover Hz, at least one],
              "ratio": float >= 1.0}
   saturate  {"drive": float >= 0, "mix": float in [0, 1]}
@@ -43,6 +45,19 @@ for a voice; `gate` is for harder cases. Both take their threshold RELATIVE
 to the measured noise floor, so read `noise_floor_dbfs` from the report --
 a larger `threshold_above_floor_db` gates more aggressively. Neither belongs
 in a chain whose noise floor is already low; say so rather than adding one.
+
+Choosing between a `peak` and a `shelf` in `eq`: a `peak` returns to baseline
+on both sides and is the right tool for a defect confined to roughly one
+octave band (a narrow bump or dip, surrounded by bands that are back to
+normal). A `shelf` continues flat out to the edge of the spectrum and is the
+right tool for a broad tilt at the top or bottom of the range -- several
+consecutive high bands all elevated or depressed together (top end: high
+shelf), or several consecutive low bands all elevated or depressed together
+(bottom end: low shelf). Reaching for a narrow peak to fix a broad tilt
+under-corrects the far edge of the tilt; reaching for a shelf to fix one
+isolated band affects neighbours that were never wrong. Judge "narrow" vs
+"broad" from how many consecutive bands in `octave_band_analysis` deviate
+together, not from habit.
 """
 
 
@@ -82,7 +97,34 @@ def system_prompt() -> str:
         "recording -- do not gate it. Under about 25 dB is an audible floor "
         "that the chain is about to amplify: reach for 'expand' (gentler, "
         "usually right for a voice) or 'gate' (harder cases), and cite the "
-        "two numbers and their difference in your reason."
+        "two numbers and their difference in your reason.\n"
+        "- DIAGNOSE TONAL DEFECTS FROM 'octave_band_analysis', NOT from the "
+        "raw 'octave_band_energy_db' absolutes: an absolute dB value tells "
+        "you nothing on its own -- a quiet band is not automatically a "
+        "defect. Use each band's 'rel_median_db' as your PRIMARY signal: it "
+        "is that band's energy relative to the file's own overall median, "
+        "so a positive value means that band sits above the rest of the "
+        "spectrum and a negative value means it sits below. Use "
+        "'neighbour_contrast_db' only as a secondary check, and remember "
+        "its blind spot -- a defect spanning two adjacent bands cancels out "
+        "in that number, because each depressed band's neighbour is the "
+        "other depressed band. Do not let a near-zero "
+        "'neighbour_contrast_db' overrule a clear 'rel_median_db'.\n"
+        "- DO NOT ADD A HIGH-PASS FILTER, OR ANY EQ MOVE, REFLEXIVELY. An "
+        "'hpf', a 'peak', or a 'shelf' is only justified when "
+        "'octave_band_analysis' shows genuine, clearly elevated (or "
+        "depressed) energy in that region via 'rel_median_db' -- never as a "
+        "routine 'clean up the low end' move, and never merely because a "
+        "band happens to be the quietest one (quiet is not excess). If "
+        "every band's 'rel_median_db' is small (roughly within +/-2 dB), "
+        "the spectrum is essentially flat: propose NO 'eq' stage at all. An "
+        "empty, absent 'eq' is the correct, honest answer for a file with "
+        "nothing tonally wrong with it -- do not invent a defect to justify "
+        "having something to say.\n"
+        "- Ground every 'eq' reason in the SIGNED 'rel_median_db' value of "
+        'the band you are acting on (e.g. "500 Hz is +3.4 dB above the '
+        "file's own median, so...\"), never in that band's raw absolute dB "
+        "level alone."
     )
 
 

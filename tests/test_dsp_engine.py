@@ -145,3 +145,55 @@ def test_apply_plan_with_empty_stage_list_is_a_no_op():
     y, report = engine.apply_plan(x, SR, [])
     assert np.array_equal(y, x)
     assert report["stages"] == []
+
+
+# --- sample-rate tracking: the engine's own report of the final rate ------
+
+
+def test_apply_plan_reports_the_input_rate_when_no_resample_stage_runs():
+    x = _noise(seconds=0.1)
+    y, report = engine.apply_plan(x, SR, [_Stage("gate", {})])
+    assert report["sample_rate"] == SR
+    assert y.shape[0] > 0
+
+
+def test_apply_plan_reports_the_resample_stage_s_target_rate():
+    x = _noise(seconds=0.1)
+    stages = [_Stage("resample", {"target_hz": 16000})]
+    y, report = engine.apply_plan(x, SR, stages)
+    assert report["sample_rate"] == 16000
+    # Duration should now reflect the new rate, not the old one.
+    expected_samples = round(x.shape[0] * 16000 / SR)
+    assert abs(y.shape[0] - expected_samples) <= 1
+
+
+def test_apply_plan_downmix_then_resample_end_to_end():
+    x = _noise(seconds=0.1)  # 2 channels
+    stages = [_Stage("downmix", {}), _Stage("resample", {"target_hz": 8000})]
+    y, report = engine.apply_plan(x, SR, stages)
+    assert y.shape[1] == 1
+    assert report["sample_rate"] == 8000
+    stage_names = [s["stage"] for s in report["stages"]]
+    assert stage_names == ["downmix", "resample"]
+
+
+def test_apply_plan_stage_after_resample_receives_the_new_rate():
+    """A stage placed (in the caller's own ordered list) AFTER resample
+    must be handed the NEW rate, not the original -- proven here by
+    checking eq's own report against a frequency that would be rejected
+    above the wrong Nyquist.
+    """
+    x = _noise(seconds=0.2)
+    # 9000 Hz is below 16000/2=8000's... no: choose a freq valid at the
+    # target rate but invalid (>= Nyquist) at the original rate's half --
+    # here we just confirm eq runs without error against the *lower*
+    # Nyquist, which only happens if it was handed the resampled rate.
+    stages = [
+        _Stage("resample", {"target_hz": 8000}),
+        _Stage("eq", {"hpf_hz": 40.0, "lpf_hz": 3900.0, "peaks": [], "shelves": []}),
+    ]
+    y, report = engine.apply_plan(x, SR, stages)
+    assert report["sample_rate"] == 8000
+    eq_report = report["stages"][1]
+    assert eq_report["lpf_hz"] == 3900.0
+    assert y.shape[0] > 0

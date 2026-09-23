@@ -1,7 +1,7 @@
 ---
 smart_tool_format: 1
 name: aud
-version: 0.11.1
+version: 0.12.0
 description: >-
   Anything to do with finishing an audio file the user already has -- .wav, .flac, .aiff, .mp3.
   Reach for it when the ask sounds like "make this sound finished", "this is too quiet for
@@ -15,9 +15,10 @@ description: >-
   against a reference recording, MULTIBAND compression and multiband dynamic range control,
   saturation, controlled ambience, loudness targeting and true-peak brickwall limiting. Every
   CHAIN STAGE (cut, strip-silence, gate, expand, deess, dereverb, eq, eq-match, compress,
-  saturate, reverb, stretch, pitch, loudness, limit) appends to a plan, and one render applies
-  the whole chain in a single pass, so a chain can be inspected and re-run, and the whole job is
-  ONE shell command rather than a round trip per stage. The read-only/reporting verbs (analyze,
+  saturate, reverb, stretch, pitch, loudness, limit, downmix, resample) appends to a plan, and
+  one render applies the whole chain in a single pass, so a chain can be inspected and re-run,
+  and the whole job is ONE shell command rather than a round trip per stage. The
+  read-only/reporting verbs (analyze,
   detect, verify, check, config, manifest) and the plan-lifecycle verbs (plan, preset) do not
   append to a plan themselves -- see the verb table below for which is which. This is mastering
   and cleanup, NOT mixing: it works on a finished stereo or mono programme, not on multitrack
@@ -40,6 +41,8 @@ use_cases:
   - Even out dynamics per frequency band with multiband compression, not one blunt full-band squeeze
   - Retime or re-pitch a programme without changing the other
   - Verify that a finished render actually meets the loudness and ceiling it was asked for
+  - Collapse a stereo file down to mono for a mono-only destination
+  - Deliver a file at a target sample rate, e.g. 48000 Hz, or downsample for a speech model
 platforms:
   - linux
   - macos
@@ -143,7 +146,8 @@ aud detect silence in.wav | aud cut | aud render in.wav out.wav
 so in its report:
 
 `editing (cut, strip-silence) -> repair (de-ess, de-verb) -> tone (EQ, EQ-match) ->
-dynamics (multiband compression) -> character (saturation, ambience) -> loudness -> limiting`
+dynamics (multiband compression) -> character (saturation, ambience) -> loudness -> limiting ->
+output format (downmix, resample)`
 
 **Editing is first, and that is not a preference.** Cutting changes the timeline everything
 downstream measures. Integrated loudness is an average over duration: target −14 LUFS across
@@ -196,6 +200,7 @@ moved, by which rule, and whether a requested snap failed.
 | `saturate` `reverb` | deterministic | character stage |
 | `stretch` `pitch` | deterministic | retime or re-pitch |
 | `loudness` `limit` | deterministic | loudness target and true-peak brickwall ceiling |
+| `downmix` `resample` | deterministic | output-format stage: fold channels to mono, convert to a target sample rate |
 | `render` | deterministic | apply the whole chain in one pass |
 | `verify` | deterministic | measure a render against the targets it was asked for |
 | `preset` | deterministic | named chains for common destinations |

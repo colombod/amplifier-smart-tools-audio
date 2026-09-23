@@ -34,6 +34,24 @@ PLAN_FORMAT = 1
 # do not materially change the overall noise floor, so gate/expand precede them too -- the
 # surgical repairs then work on material whose dead air is already under control.
 #
+# `downmix`/`resample` sit at the very END, immediately before encode.
+# They are output-format concerns, not mastering decisions: every stage
+# before them should see the programme's real channel layout and rate
+# (a de-esser's sibilant band, a compressor's crossovers, and the
+# limiter's oversampling ratio are all defined against the ACTUAL sample
+# rate of the material being processed), so folding channels or changing
+# rate any earlier would make every measurement upstream of that point
+# describe a signal that no longer exists once written -- the same
+# argument contracts/plan.v1.md#why-editing-is-first makes for why `cut`/
+# `strip_silence` sit at the front, mirrored for the two stages that
+# change the medium's shape rather than its timeline. `downmix` precedes
+# `resample` only for efficiency (resampling fewer channels costs less);
+# the two are mathematically commutative order-independent linear
+# operations -- resample_poly's per-channel filter is identical across
+# channels, so folding channels before or after it produces the same
+# result to floating-point precision (see aud.dsp.channels.downmix and
+# aud.dsp.resample.resample's own docstrings).
+#
 # This list is the executable form of contracts/plan.v1.md's canonical order. If they disagree,
 # one of them is lying to a caller.
 STAGE_ORDER: list[str] = [
@@ -52,6 +70,8 @@ STAGE_ORDER: list[str] = [
     "reverb",
     "loudness",
     "limit",
+    "downmix",
+    "resample",
 ]
 
 _STAGE_INDEX = {name: index for index, name in enumerate(STAGE_ORDER)}

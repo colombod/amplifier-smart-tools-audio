@@ -71,6 +71,61 @@ def _octave_band_energy_db(x: np.ndarray, sr: int) -> dict[str, float | None]:
     return bands
 
 
+def _octave_band_analysis(bands: dict[str, float | None]) -> list[dict[str, float | None]]:
+    """A numerically-ordered, comparison-ready view of `octave_band_energy_db`.
+
+    `octave_band_energy_db`'s dict keys sort LEXICOGRAPHICALLY once
+    JSON-serialized with `sort_keys=True` (which `intelligence.prompts.user_prompt`
+    does) -- 1000.0 lands next to 125.0 and 16000.0 lands next to 2000.0. A
+    naive "compare this entry to the next" walk over that dict compares the
+    wrong neighbours entirely. This is a **list**, ordered low-to-high by
+    centre frequency; list element order survives `sort_keys=True` (which
+    only reorders dict keys), so it cannot be re-sorted out from under a
+    reader by that serialization step.
+
+    Each entry also carries two derived comparisons already computed, so a
+    reader is never asked to do that arithmetic on ten absolute numbers
+    itself -- ten absolute dB values with no comparison is exactly what let
+    a model read `-30.1 dB` as a defect while missing that every other band
+    sat at `-33.8 dB`:
+
+    - `rel_median_db`: this band's energy minus the MEDIAN of all present
+      bands' energy. The primary signal: correct band and sign on 8 of 8
+      known induced defects in controlled measurement, with a flat/control
+      spectrum reading within a few tenths of a dB of zero on every band.
+    - `neighbour_contrast_db`: this band's energy minus the mean of its
+      immediate lower/upper octave neighbours (whichever are present). A
+      SECONDARY signal only -- it has a documented blind spot: a defect
+      spanning two adjacent bands cancels out, because each depressed
+      band's neighbour is the other depressed band.
+    """
+    ordered: list[tuple[float, float | None]] = [(center, bands.get(str(center))) for center in _OCTAVE_CENTERS]
+    present = [value for _, value in ordered if value is not None]
+    median = float(np.median(present)) if present else None
+    result: list[dict[str, float | None]] = []
+    for index, (center, value) in enumerate(ordered):
+        rel_median_db = value - median if value is not None and median is not None else None
+        neighbour_values = [
+            other_value
+            for other_index, (_, other_value) in enumerate(ordered)
+            if other_value is not None and abs(other_index - index) == 1
+        ]
+        neighbour_contrast_db = (
+            value - (sum(neighbour_values) / len(neighbour_values)) if value is not None and neighbour_values else None
+        )
+        result.append(
+            {
+                "hz": center,
+                "energy_db": value,
+                "rel_median_db": _finite_or_none(rel_median_db) if rel_median_db is not None else None,
+                "neighbour_contrast_db": _finite_or_none(neighbour_contrast_db)
+                if neighbour_contrast_db is not None
+                else None,
+            }
+        )
+    return result
+
+
 def _sibilance_ratio(x: np.ndarray, sr: int) -> float | None:
     nyquist = sr / 2.0
     low = _SIBILANCE_LOW_HZ
@@ -185,6 +240,7 @@ def analyze(x: np.ndarray, sr: int) -> dict:
         mid_side_ratio = side_rms / mid_rms if mid_rms > _EPS else 0.0
 
     clipped_sample_count = int(np.sum(np.abs(x) >= _CLIP_THRESHOLD))
+    octave_band_energy_db = _octave_band_energy_db(x, sr)
 
     result = {
         "sample_rate": int(sr),
@@ -197,7 +253,8 @@ def analyze(x: np.ndarray, sr: int) -> dict:
         "crest_factor_db": crest_factor_db,
         "dc_offset": dc_offset,
         "rms_dbfs": _db(rms) if rms > _EPS else None,
-        "octave_band_energy_db": _octave_band_energy_db(x, sr),
+        "octave_band_energy_db": octave_band_energy_db,
+        "octave_band_analysis": _octave_band_analysis(octave_band_energy_db),
         "stereo_correlation": stereo_correlation,
         "mid_side_ratio": mid_side_ratio,
         "noise_floor_dbfs": _noise_floor_dbfs(x, sr),

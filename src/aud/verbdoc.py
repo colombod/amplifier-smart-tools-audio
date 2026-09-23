@@ -966,15 +966,95 @@ Failures:
 Example:
   aud plan | aud loudness --target -14 | aud limit --ceiling -1.0 | aud render in.wav out.wav
 """,
+    "downmix": """\
+downmix -- output-format stage: fold a multichannel programme down to one channel
+
+What it does:
+  Appends a downmix stage to the plan on stdin: at render time, every
+  channel is folded to one by taking the arithmetic mean across channels
+  (sum-and-divide, never a plain sum) -- a rule chosen because it can
+  never push a sample outside [-1.0, 1.0] for in-range input, no matter
+  how many channels or how correlated they are. Sits at the very end of
+  canonical order, immediately before 'resample' and before the file is
+  written -- an output-format decision, not a mastering one.
+
+When to reach for it:
+  "This needs to be mono", "collapse this stereo file to one channel",
+  or preparing material for a mono-only destination.
+
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
+Parameters:
+  None. The fold rule and the antiphase-detection threshold are fixed,
+  not caller-configurable.
+
+Result:
+  Appends a 'downmix' stage to the plan and prints the updated plan, raw
+  and unwrapped. The fold only happens at 'aud render' time; the render
+  report for this stage includes 'input_channels', the mean pairwise
+  channel correlation it measured, and 'antiphase_detected' -- true when
+  that correlation is strongly negative, which means the fold has
+  cancelled most of the programme's energy rather than merely combined
+  it. A no-op, reported as such, when the input is already mono.
+
+Failures:
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
+
+Example:
+  aud plan | aud downmix | aud render in.wav out.wav
+""",
+    "resample": """\
+resample -- output-format stage: convert to a target sample rate
+
+What it does:
+  Appends a resample stage to the plan on stdin: at render time, the
+  programme is resampled to --hz using a polyphase resampler with its own
+  anti-aliasing filter (never hand-rolled decimation). Sits at the very
+  end of canonical order, immediately before the file is written -- an
+  output-format decision, not a mastering one. A no-op, reported as such,
+  when the file is already at --hz.
+
+When to reach for it:
+  "Deliver this at 48000", "downsample this to 16k for a speech model",
+  or matching a destination's required sample rate.
+
+Kind:
+  Deterministic. No AI provider, no credential, safe to call freely.
+
+Parameters:
+  --hz INTEGER   Target sample rate in Hz. Required; must be a positive integer.
+
+Result:
+  Appends a 'resample' stage to the plan and prints the updated plan, raw
+  and unwrapped. Resampling only happens at 'aud render' time; the render
+  report for this stage includes 'source_hz', 'target_hz',
+  'input_samples' and 'output_samples'. An explicit 'resample' stage in
+  the plan takes precedence over the 'sample_rate_policy' config setting
+  (docs/CONFIGURATION.md) -- 'render' never applies both.
+
+Failures:
+  bad_param  --hz is not a positive integer.
+  bad_plan   the plan on stdin is not valid JSON, or does not match the
+             plan shape.
+
+Example:
+  aud plan | aud resample --hz 48000 | aud render in.wav out.wav
+""",
     "render": """\
 render -- apply a whole plan to a file in one pass
 
 What it does:
   Reads the plan on stdin, reorders its stages into canonical order
-  (editing -> repair -> tone -> dynamics -> character -> loudness -> limit)
-  regardless of append order, and applies all of them in a single
-  decode/filter/encode pass. Prints a {"result": ...} envelope, not a plan
-  -- it is the end of the pipeline.
+  (editing -> repair -> tone -> dynamics -> character -> loudness -> limit
+  -> output format (downmix, resample)) regardless of append order, and
+  applies all of them in a single decode/filter/encode pass. Prints a
+  {"result": ...} envelope, not a plan -- it is the end of the pipeline.
+  When the plan carries no 'resample' stage, the 'sample_rate_policy'
+  config setting (docs/CONFIGURATION.md) still applies: "preserve"
+  (default) writes at the input's own rate; an integer resamples to it.
+  An explicit 'resample' stage always takes precedence over the setting.
 
 When to reach for it:
   The last verb in every chain. Never render each stage separately: every
@@ -1007,7 +1087,7 @@ Failures:
   not_implemented       a stage name in the plan is not one this build of
                         aud's render engine registers -- not currently
                         reachable for any stage 'aud' itself builds, since
-                        all fifteen documented stages render.
+                        all seventeen documented stages render.
 
 Example:
   aud plan | aud eq --hpf 40 | aud limit --ceiling -1.0 | aud render in.wav out.wav

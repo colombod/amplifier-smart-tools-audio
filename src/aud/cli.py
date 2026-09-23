@@ -45,6 +45,8 @@ STAGE_VERB_NAMES = (
     "pitch",
     "loudness",
     "limit",
+    "downmix",
+    "resample",
 )
 # Verbs whose stdout is the plan document itself, unwrapped. `advise` joins
 # this set (rather than using `master`'s wrapped {"result": ...} envelope)
@@ -229,6 +231,14 @@ def _build_parser() -> _Parser:
     limit_parser = sub.add_parser("limit")
     limit_parser.add_argument("--ceiling", type=float, default=-1.0)
 
+    # Output-format stages: no mastering decision, just the shape/rate the
+    # file is written at. Canonical order puts both at the very end (see
+    # aud.plan.STAGE_ORDER's own comment).
+    sub.add_parser("downmix")  # no parameters -- registered for its own honest --help
+
+    resample_parser = sub.add_parser("resample")
+    resample_parser.add_argument("--hz", dest="target_hz", type=int, required=True)
+
     curve_parser = sub.add_parser("curve")
     curve_sub = curve_parser.add_subparsers(dest="curve_action", required=True)
     curve_extract_parser = curve_sub.add_parser("extract")
@@ -411,6 +421,10 @@ def _dispatch_stage(verb: str, plan: Any, args: argparse.Namespace) -> Any:
         return lib.loudness(plan, target_lufs=args.target)
     if verb == "limit":
         return lib.limit(plan, ceiling_dbtp=args.ceiling)
+    if verb == "downmix":
+        return lib.downmix(plan)
+    if verb == "resample":
+        return lib.resample(plan, target_hz=args.target_hz)
     raise AssertionError(f"unreachable stage verb: {verb}")
 
 
