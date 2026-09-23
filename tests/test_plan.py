@@ -61,6 +61,8 @@ def test_stage_order_is_the_canonical_mastering_chain() -> None:
         "reverb",
         "loudness",
         "limit",
+        "downmix",
+        "resample",
     ]
 
 
@@ -81,6 +83,20 @@ def test_editing_stages_render_before_any_timeline_or_measurement_stage() -> Non
     names = [stage.stage for stage in ordered(plan)]
     assert names[:2] == ["cut", "strip_silence"]
     assert names.index("cut") < names.index("stretch") < names.index("loudness")
+
+
+def test_downmix_and_resample_render_after_every_other_stage() -> None:
+    """Output-format stages sit at the very end -- see
+    contracts/plan.v1.md#why-downmixresample-sit-at-the-very-end.
+    """
+    plan = new_plan()
+    plan = append(plan, "resample", {"target_hz": 48000})
+    plan = append(plan, "eq", {})
+    plan = append(plan, "downmix", {})
+    plan = append(plan, "limit", {"ceiling_dbtp": -1.0})
+    names = [stage.stage for stage in ordered(plan)]
+    assert names[-2:] == ["downmix", "resample"]
+    assert names.index("limit") < names.index("downmix") < names.index("resample")
 
 
 def test_round_trip_write_then_read_is_lossless() -> None:

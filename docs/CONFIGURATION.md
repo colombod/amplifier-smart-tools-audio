@@ -54,7 +54,11 @@ Credentials invert this, for the opposite reason — see below.
 
 **`sample_rate_policy`** — `"preserve"` renders at the input's sample rate. An integer resamples
 to that rate. Preserve is the default because resampling is a signal-processing decision, not a
-convenience, and it should be asked for.
+convenience, and it should be asked for. An explicit `resample` stage in the plan
+(contracts/plan.v1.md#resample) always takes precedence over this setting -- `render` never
+applies both. The setting exists for the common case where the plan does not mention a rate at
+all and the destination still needs one (a config-file-wide "always deliver at 48000" policy,
+say), so the same chain reaches the same rate without every caller adding `resample` by hand.
 
 **`default_ceiling_dbtp`** — the true-peak ceiling the limiter enforces when `--ceiling` is not
 given. `-1.0` follows the EBU R128 recommended maximum true peak. This is a *true* peak in

@@ -55,6 +55,8 @@ from typing import Any
 import numpy as np
 from scipy import signal
 
+from aud.dsp.channels import fold_to_mono
+
 __all__ = ["convolve_ir", "reverb"]
 
 _EPS = 1e-12
@@ -281,7 +283,8 @@ def convolve_ir(
     if ir.shape[1] == n_ch:
         ir_channels = [ir[:, c] for c in range(n_ch)]
     else:
-        ir_mono = ir.mean(axis=1)
+        # Analysis-only mono fold -- see aud.dsp.channels.fold_to_mono's docstring.
+        ir_mono = fold_to_mono(ir)
         ir_channels = [ir_mono for _ in range(n_ch)]
 
     wet_channels = []

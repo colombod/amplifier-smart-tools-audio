@@ -56,6 +56,8 @@ from typing import Any
 import numpy as np
 from scipy import signal
 
+from aud.dsp.channels import fold_to_mono
+
 __all__ = ["CurveError", "apply_curve", "spectrum_profile"]
 
 
@@ -80,8 +82,8 @@ _DEFAULT_FIR_TAPS = 2049
 
 
 def _mono(x: np.ndarray) -> np.ndarray:
-    x = np.asarray(x, dtype=np.float64)
-    return x if x.ndim == 1 else np.mean(x, axis=1)
+    """Analysis-only mono fold -- see aud.dsp.channels.fold_to_mono's docstring."""
+    return fold_to_mono(x)
 
 
 def _band_edges(sr: int, fraction_octave: int) -> list[float]:

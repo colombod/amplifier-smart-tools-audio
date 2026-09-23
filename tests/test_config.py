@@ -127,3 +127,98 @@ def test_cli_config_with_bad_env_value_is_a_clean_bad_config_error(scrubbed_env:
     assert payload["error"]["code"] == "bad_config"
     assert "AUD_OVERSAMPLE" in payload["error"]["message"]
     assert "Traceback" not in proc.stderr
+
+
+# --- sample_rate_policy: the one setting whose type is not fixed ------------
+#
+# "preserve" or a positive integer Hz (docs/CONFIGURATION.md) -- this is
+# wired all the way to aud.lib.render (see tests/test_lib_downmix_resample.py
+# for the render-level proof); these tests guard `config()`'s own
+# normalization of the setting across all three tiers that can produce a
+# raw value.
+
+
+def test_sample_rate_policy_default_is_preserve() -> None:
+    result = lib.config()
+    assert result["sample_rate_policy"] == {"value": "preserve", "source": "default"}
+
+
+def test_sample_rate_policy_accepts_an_integer_argument() -> None:
+    result = lib.config(sample_rate_policy=48000)
+    assert result["sample_rate_policy"] == {"value": 48000, "source": "argument"}
+
+
+def test_sample_rate_policy_accepts_a_numeric_string_argument() -> None:
+    """The CLI's own --sample-rate-policy flag has no `type=int` -- it
+    always hands config() a raw string. A numeric string must still
+    resolve to an integer, not stay a string.
+    """
+    result = lib.config(sample_rate_policy="48000")
+    assert result["sample_rate_policy"] == {"value": 48000, "source": "argument"}
+
+
+def test_sample_rate_policy_rejects_a_non_positive_integer_argument() -> None:
+    with pytest.raises(AudError) as excinfo:
+        lib.config(sample_rate_policy=0)
+    assert excinfo.value.code == "bad_config"
+    assert "sample_rate_policy" in excinfo.value.message
+
+
+def test_sample_rate_policy_rejects_a_non_numeric_non_preserve_argument() -> None:
+    with pytest.raises(AudError) as excinfo:
+        lib.config(sample_rate_policy="fast")
+    assert excinfo.value.code == "bad_config"
+    assert "sample_rate_policy" in excinfo.value.message
+    assert excinfo.value.remedy
+
+
+def test_sample_rate_policy_accepts_an_integer_from_the_config_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text("sample_rate_policy = 48000\n", encoding="utf-8")
+    monkeypatch.setattr(lib, "_CONFIG_FILE_PATH", config_file)
+    result = lib.config()
+    assert result["sample_rate_policy"] == {"value": 48000, "source": "config_file"}
+
+
+def test_sample_rate_policy_accepts_preserve_from_the_config_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('sample_rate_policy = "preserve"\n', encoding="utf-8")
+    monkeypatch.setattr(lib, "_CONFIG_FILE_PATH", config_file)
+    result = lib.config()
+    assert result["sample_rate_policy"] == {"value": "preserve", "source": "config_file"}
+
+
+def test_sample_rate_policy_accepts_an_integer_string_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUD_SAMPLE_RATE_POLICY", "16000")
+    result = lib.config()
+    assert result["sample_rate_policy"] == {"value": 16000, "source": "environment"}
+
+
+def test_sample_rate_policy_rejects_a_bad_environment_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AUD_SAMPLE_RATE_POLICY", "fast")
+    with pytest.raises(AudError) as excinfo:
+        lib.config()
+    assert excinfo.value.code == "bad_config"
+    assert "AUD_SAMPLE_RATE_POLICY" in excinfo.value.message
+
+
+def test_cli_config_with_sample_rate_policy_argument_resolves_to_an_integer(scrubbed_env: dict[str, str]) -> None:
+    proc = _run(["config", "--sample-rate-policy", "48000"], env=scrubbed_env)
+    assert proc.returncode == 0, proc.stderr
+    result = json.loads(proc.stdout)["result"]
+    assert result["sample_rate_policy"] == {"value": 48000, "source": "argument"}
+
+
+def test_cli_config_with_bad_sample_rate_policy_argument_is_a_clean_bad_config_error(
+    scrubbed_env: dict[str, str],
+) -> None:
+    proc = _run(["config", "--sample-rate-policy", "bogus"], env=scrubbed_env)
+    assert proc.returncode != 0
+    assert proc.stdout == ""
+    payload = json.loads(proc.stderr)
+    assert payload["error"]["code"] == "bad_config"
+    assert "sample_rate_policy" in payload["error"]["message"]

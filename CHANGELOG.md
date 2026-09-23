@@ -9,6 +9,28 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+### Added
+
+- **Two new deterministic plan stages: `downmix` and `resample`.** Both are output-format
+  decisions rather than mastering ones, so they sit at the very end of canonical order,
+  immediately before the file is written (`contracts/plan.v1.md#why-downmixresample-sit-at-the-very-end`).
+  - `downmix` folds a multichannel programme to one channel by taking the arithmetic mean across
+    channels (sum-and-divide, never a plain sum) -- provably unable to push a sample outside
+    [-1.0, 1.0] for in-range input. Its render report always includes the mean pairwise channel
+    correlation and an `antiphase_detected` flag, so a caller can tell a good fold from an
+    accidental near-silent one caused by out-of-phase channels, rather than getting a quiet file
+    with no explanation.
+  - `resample` converts to a target sample rate via `scipy.signal.resample_poly`'s polyphase
+    resampler (its own anti-aliasing filter, never hand-rolled decimation).
+  - Consolidated four independent one-line mono-fold copies (`aud.dsp.eqmatch._mono`,
+    `aud.dsp.speech`'s pre-whisper fold, `aud.dsp.reverb`'s IR downmix) into one shared
+    `aud.dsp.channels.fold_to_mono`; `aud.dsp.resolve._mono_sum` is deliberately left alone (it
+    sums rather than averages -- a different computation, not the same one spelled differently).
+- **`sample_rate_policy` (docs/CONFIGURATION.md) is now wired to `render`.** It was previously
+  documented and accepted by `aud config`/`AUD_SAMPLE_RATE_POLICY` but never read at render time.
+  `"preserve"` (default) writes at the input's own rate; an integer resamples the rendered output
+  to that rate. An explicit `resample` stage in the plan always takes precedence.
+
 ## [0.12.0] - 2026-09-21
 
 Three measured defects in `advise`'s diagnosis, found by controlled measurement
