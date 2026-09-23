@@ -42,13 +42,13 @@ _PROVIDER_ENV_VARS = (
     "AZURE_OPENAI_API_KEY",
 )
 
-# name, purpose, install -- for the core DSP dependencies declared in pyproject.toml.
-_CORE_PACKAGES: tuple[tuple[str, str, str], ...] = (
-    ("numpy", "Array math backing every DSP stage.", "https://pypi.org/project/numpy/"),
-    ("scipy", "Filter design and signal processing primitives.", "https://pypi.org/project/scipy/"),
-    ("soundfile", "Reads and writes WAV/FLAC/AIFF via libsndfile.", "https://pypi.org/project/soundfile/"),
-    ("pyloudnorm", "ITU-R BS.1770 loudness measurement.", "https://pypi.org/project/pyloudnorm/"),
-)
+# The core DSP dependencies (also declared in pyproject.toml). Only the
+# package NAMES are hardcoded here -- purpose/install text is read from the
+# manifest at check() time (see below), so this table and SMART_TOOL.md's
+# `requires` list cannot drift apart the way they once did (the manifest
+# declared none of these four at all; see AGENTS.md: "The manifest is the
+# description of record").
+_CORE_PACKAGE_NAMES: tuple[str, ...] = ("numpy", "scipy", "soundfile", "pyloudnorm")
 
 _CONFIG_DEFAULTS: dict[str, Any] = {
     "sample_rate_policy": "preserve",
@@ -86,16 +86,17 @@ def check() -> dict:
 
     requirements: list[dict[str, Any]] = []
     core_ready = True
-    for package_name, purpose, install in _CORE_PACKAGES:
+    for package_name in _CORE_PACKAGE_NAMES:
         available = _module_available(package_name)
         core_ready = core_ready and available
+        package_requirement = manifest_requirements.get(package_name)
         requirements.append(
             {
                 "name": package_name,
                 "state": "satisfied" if available else "absent",
                 "detail": "importable" if available else "failed to import",
-                "purpose": purpose,
-                "install": install,
+                "purpose": package_requirement.purpose if package_requirement else "",
+                "install": package_requirement.install if package_requirement else "",
             }
         )
 
@@ -1419,7 +1420,7 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
         raise _not_implemented("render", exc) from exc
     from aud.dsp import resample as _resample_module
     from aud.dsp.edit import CrossfadeExceedsGapError
-    from aud.dsp.engine import MissingDspModuleError
+    from aud.dsp.engine import MissingDspModuleError, StageParamError
     from aud.dsp.eqmatch import CurveError
     from aud.plan import ordered
 
@@ -1456,6 +1457,19 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
             message=f"eq_match: {exc}",
             remedy="Re-extract the curve from this render's own sample rate, or supply a curve whose "
             "frequencies fit under this file's Nyquist frequency.",
+        ) from exc
+    except StageParamError as exc:
+        # A hand-authored plan can carry a stage param no real caller (the
+        # CLI's own per-verb builders) would ever construct -- e.g. an
+        # out-of-range value edited in by hand. `exc`'s message already
+        # names the field, the value found, and the constraint (every
+        # dsp/ validation raise does -- see AGENTS.md #4); this is a plan
+        # the caller can fix, never an internal aud bug, so it must not
+        # fall through to the CLI's catch-all internal_error.
+        raise AudError(
+            code="bad_param",
+            message=str(exc),
+            remedy="Supply a valid value for this field; see the message above for the constraint, then re-render.",
         ) from exc
     # `apply_plan` reports the rate as it stood after every stage ran --
     # unchanged unless the plan itself carried a `resample` stage (see
