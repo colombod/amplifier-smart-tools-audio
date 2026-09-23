@@ -27,7 +27,6 @@ from aud import lib
 from aud.core.regions import write_regions
 from aud.plan import read_plan, write_plan
 from aud.schemas import AudError
-from aud.verbdoc import VERB_DOCS
 
 STAGE_VERB_NAMES = (
     "cut",
@@ -629,9 +628,13 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["--help"]:
         print(lib.skill())
         return 0
-    if argv[:1] and argv[0] in VERB_DOCS and "--help" in argv[1:]:
-        print(VERB_DOCS[argv[0]])
-        return 0
+    if argv[:1] and "--help" in argv[1:]:
+        # Sourced through aud.lib, not read from aud.verbdoc directly (AGENTS.md
+        # #2): a library consumer gets the identical text via lib.verb_help.
+        verb_doc = lib.verb_help(argv[0])
+        if verb_doc is not None:
+            print(verb_doc)
+            return 0
 
     parser = _build_parser()
     try:
