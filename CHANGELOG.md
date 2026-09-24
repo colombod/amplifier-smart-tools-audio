@@ -25,6 +25,32 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   (float64 machine-epsilon floor is ~-313 dB); `stft_properties`/`check_cola_nola` report
   COLA/NOLA compliance programmatically rather than assuming it from a table -- verified against
   known-failing cases (a symmetric, non-periodic Hann window; Hann x Hann at 50% hop).
+- **`aud.dsp.bands`** -- perceptual band mapping (Hz<->Bark/ERB conversions, band-edge
+  construction, bin->band energy summation), library-only in this step -- no CLI verb, no plan
+  stage, no engine handler. Two Bark realizations (PEAQ/ITU-R BS.1387, closed form both ways;
+  Zwicker & Terhardt 1980, bisected inverse) plus Glasberg & Moore 1990 ERB-rate. `band_edges`'s
+  `scale` parameter has **no default** -- it is stamped into the returned band structure so a
+  caller can never lose track of which scale it got, because 1 Bark is not a fixed multiple of
+  1 ERB (measured here: ~2.8 ERB at 100 Hz, ~1.2 at 1 kHz, ~2.1 at 10 kHz) and the next epic
+  step's dB/Bark spreading slopes depend on getting this right. Measured against the classical
+  Zwicker 24-critical-band table: Zwicker & Terhardt ~0.20 Bark max error, PEAQ ~3.1 Bark (a
+  smooth perceptual-model approximation, not a classical-Bark substitute). The classical table's
+  15.5 kHz (24 Bark) limit is enforced as an explicit `allow_extrapolation` gate rather than
+  silently extrapolated. `bin_band_weights` builds triangular partition-of-unity filters
+  (flattened-end construction, so `sum_b w_b(k) == 1` holds for every bin, in-range or not) in
+  the style RNNoise/DeepFilterNet use (approach only, no code copied); `band_energy` then
+  conserves total energy exactly as a consequence.
+- **Removed the Traunmuller 1990 Bark variant (`bark_traunmuller` / `hz_to_bark_traunmuller` /
+  `bark_traunmuller_to_hz`) before it ever shipped a release or gained a caller.** Its main
+  rational-approximation expression (26.81, 1960, 0.53) and inverse constant (26.28) were
+  confirmed against Traunmuller's own Stockholm University page and by symbolic algebra, but the
+  four low/high-end correction constants (0.15, 0.22, and the 2 / 20.1 Bark branch thresholds)
+  could not be traced to the primary source -- Traunmuller 1990, JASA 88(1):97, is paywalled, and
+  the publisher, ResearchGate, Unpaywall and Semantic Scholar all refused access. Two independent
+  secondary sources (Voicebox at Imperial, phonR/tidynorm) agree on the constants, but nobody has
+  actually read the paper. A partially-verified formula is shipped guesswork; since nothing in
+  the codebase called this variant, it was cheaper to remove the whole thing than to keep
+  carrying an unverified half-version.
 
 ### Fixed
 
