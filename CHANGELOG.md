@@ -9,6 +9,23 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ## [Unreleased]
 
+### Added
+
+- **`aud.dsp.stft`** -- STFT analysis / weighted-overlap-add (WOLA) resynthesis: the transform
+  spine for future spectral processing (masking, denoising, de-essing-by-band, ...), library-only
+  in this step -- no CLI verb, no plan stage, no engine handler. Uses `scipy.signal.ShortTimeFFT`
+  (the legacy `scipy.signal.stft`/`istft` trio was marked legacy in scipy 1.12); `resynthesize`
+  always supplies its own explicit `dual_win` -- the analysis window scaled by the measured
+  constant-overlap-add sum of `window**2` -- rather than `ShortTimeFFT`'s own automatically-solved
+  canonical dual, because the automatic dual is invertible for almost any window and would hide
+  exactly the WOLA failure mode this module needs to surface (a window/hop pair that reconstructs
+  fine alone but fails badly as its own WOLA pair -- e.g. Hann x Hann at 50% hop). `scipy` floor
+  raised `>=1.14` -> `>=1.15`: `ShortTimeFFT.istft` had two correctness bugs fixed in that release.
+  A null (unity-gain) round trip reconstructs to roughly -307 to -309 dB relative to signal peak
+  (float64 machine-epsilon floor is ~-313 dB); `stft_properties`/`check_cola_nola` report
+  COLA/NOLA compliance programmatically rather than assuming it from a table -- verified against
+  known-failing cases (a symmetric, non-periodic Hann window; Hann x Hann at 50% hop).
+
 ### Fixed
 
 - Refresh Google's default to current stable `gemini-3.5-flash-lite` in place of retired
