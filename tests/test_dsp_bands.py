@@ -355,6 +355,46 @@ def test_bark_zwicker_terhardt_to_hz_asymptote_message_has_no_nan_after_finitene
     assert "nan Bark" not in str(excinfo.value)
 
 
+def test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the_asymptote_boundary():
+    """Regression pin for the geometric bracket-expansion loop's comment in
+    `bark_zwicker_terhardt_to_hz`: for the largest representable float64
+    `z` strictly below the asymptote (the worst case the function ever
+    accepts -- `z >= asymptote` is rejected outright by the guard above
+    this loop), expanding from the 50 kHz seed needs exactly 46 doublings
+    before `hi` exceeds it. Because the loop CHECKS before it DOUBLES,
+    observing that as a `break` takes the loop's 47th iteration, not its
+    46th -- a cap of 46 would exit `range(46)` without ever running that
+    47th check and would leave the loop silently exhausted at the wrong
+    `hi`. The comment used to say the loop was "guaranteed to break well
+    inside its cap" without naming this off-by-one; this test pins the
+    actual doubling/iteration counts directly so a change to the formula
+    or the asymptote is caught here, not by a silently-wrong comment.
+    """
+    asymptote = 13.0 * (np.pi / 2.0) + 3.5 * (np.pi / 2.0)
+    z_max = np.nextafter(asymptote, -np.inf)
+
+    hi = 50_000.0
+    doublings = 0
+    break_iteration = None
+    for i in range(200):
+        too_low = bool(bands.hz_to_bark_zwicker_terhardt(np.array(hi)) < z_max)
+        if not too_low:
+            break_iteration = i + 1  # 1-indexed, matches "loop iteration" in the comment
+            break
+        hi *= 2.0
+        doublings += 1
+
+    assert doublings == 46
+    assert break_iteration == 47
+    assert break_iteration < 200, "the 200 cap must retain real headroom over the measured worst case"
+
+    # And the real function actually resolves this boundary z without
+    # error or exhausting its 200-iteration cap.
+    result = bands.bark_zwicker_terhardt_to_hz(z_max)
+    assert np.isfinite(result)
+    assert result > 0.0
+
+
 # --- 7. Bin -> band weights: partition of unity, asserted directly ---
 
 
@@ -421,7 +461,7 @@ def test_nyquist_below_top_band_edge():
 
 @pytest.mark.parametrize(
     ("n_fft", "sr"),
-    [(2048, 48000), (512, 44100), (4096, 96000)],
+    [(2048, 48000), (512, 44100), (4096, 96000), (1023, 48000)],
 )
 def test_bin_hz_matches_k_times_sr_over_n_fft_exactly(n_fft, sr):
     """Assert the bin frequency grid directly against `k * sr / n_fft`,
@@ -434,6 +474,19 @@ def test_bin_hz_matches_k_times_sr_over_n_fft_exactly(n_fft, sr):
     (an off-by-one bin index) and `np.arange(n_bins) * sr / (n_fft - 1)` (an
     off-by-one denominator) -- see this PR's mutation-proof transcripts.
     This test asserts the grid itself, so it catches both directly.
+
+    `(1023, 48000)` is the ODD `n_fft` case: a fourth mutant,
+    `np.linspace(0.0, sr / 2.0, n_bins)`, is exact for every EVEN `n_fft`
+    above (the top bin genuinely sits at Nyquist when `n_fft` is even, so
+    `linspace`'s endpoint-anchored spacing happens to coincide with
+    `k * sr / n_fft`) and only diverges once `n_fft` is odd -- the last bin
+    then sits at `((n_fft-1)/2) * sr / n_fft`, strictly below `sr / 2`. At
+    `n_fft=1023`, `sr=48000` the true last-bin frequency is
+    23976.539589... Hz, not the mutant's 24000.0 Hz -- see this PR's fourth
+    mutation transcript, and
+    `test_bin_band_weights_odd_n_fft_energy_placement_independent_of_grid_helper`
+    below for the same fix asserted through `bin_band_weights`/`band_energy`
+    rather than the grid helper in isolation.
     """
     n_bins = n_fft // 2 + 1
     bin_hz = bands._bin_frequencies_hz(n_fft, sr)
@@ -444,6 +497,70 @@ def test_bin_hz_matches_k_times_sr_over_n_fft_exactly(n_fft, sr):
     assert np.array_equal(bin_hz, expected)
     assert bin_hz[0] == 0.0, "bin 0 must be exactly DC"
     assert bin_hz[-1] == (n_bins - 1) * sr / n_fft
+
+
+def test_bin_band_weights_odd_n_fft_energy_placement_independent_of_grid_helper():
+    """Second, independent check that the odd-`n_fft` grid case above
+    actually propagates into `bin_band_weights`/`band_energy` -- not just
+    that `_bin_frequencies_hz` returns the right array in isolation.
+
+    At `n_fft=1023` (odd), `sr=48000`, bin 511's TRUE frequency is
+    23976.539589... Hz; the `np.linspace(0.0, sr / 2.0, n_bins)` mutant
+    would instead compute it as `sr / 2 == 24000.0` Hz, a ~23.46 Hz gap.
+    Two hand-built bands straddle exactly that gap: centers at 23800 Hz and
+    23990 Hz. Under the TRUE frequency, bin 511 falls inside the interior
+    ramp between the two centers, splitting its energy between both bands;
+    under the mutant's 24000.0 Hz, bin 511 sits past the second center and
+    clips to a full 1.0/0.0 split instead. The two outcomes are not close
+    to each other, so a regression in this integration -- not just in the
+    grid helper -- is caught here.
+    """
+    sr = 48000
+    n_fft = 1023
+    n_bins = n_fft // 2 + 1
+    k = n_bins - 1
+    assert (n_bins, k) == (512, 511)
+
+    true_freq = k * sr / n_fft
+    mutant_freq = sr / 2.0
+    assert true_freq == pytest.approx(23976.539589, abs=1e-5)
+    assert mutant_freq - true_freq == pytest.approx(23.460411, abs=1e-5)
+
+    lo, peak = 23800.0, 23990.0
+    hand_built_bands = {
+        "n_bands": 2,
+        "f_min": 20000.0,
+        "f_max": 24010.0,
+        "centers_hz": np.array([lo, peak]),
+    }
+    weights = bands.bin_band_weights(hand_built_bands, n_fft=n_fft, sr=sr)
+    assert weights.shape == (2, n_bins)
+
+    # Computed from the true frequency directly (not copied from the
+    # implementation) -- what the interior ramp split must equal.
+    expected_band1 = (true_freq - lo) / (peak - lo)
+    expected_band0 = (peak - true_freq) / (peak - lo)
+    assert weights[1, k] == pytest.approx(expected_band1, abs=1e-9)
+    assert weights[0, k] == pytest.approx(expected_band0, abs=1e-9)
+    assert 0.0 < weights[0, k] < 1.0, "true grid must split bin 511 across both bands"
+    assert 0.0 < weights[1, k] < 1.0
+
+    # If the grid were instead sr/2-linspace-based, bin 511 would compute
+    # as `mutant_freq` (24000.0), past band 1's center -- clipped to a full
+    # 1.0/0.0 split, not the partial split just asserted above.
+    mutant_rising = (mutant_freq - lo) / (peak - lo)
+    assert mutant_rising > 1.0, "test setup should put the mutant frequency past band 1's center"
+    assert weights[1, k] != pytest.approx(1.0, abs=1e-6)
+    assert weights[0, k] != pytest.approx(0.0, abs=1e-6)
+
+    _assert_partition_of_unity(weights)
+
+    spectrum = np.zeros(n_bins)
+    spectrum[k] = 1.0
+    per_band = bands.band_energy(spectrum, weights)
+    print(f"\n[bands] odd n_fft={n_fft}: bin {k} true freq={true_freq:.6f} Hz, per-band energy={per_band}")
+    assert per_band[1] == pytest.approx(expected_band1, abs=1e-9)
+    assert per_band[0] == pytest.approx(expected_band0, abs=1e-9)
 
 
 def test_bin_frequencies_use_sr_over_n_fft_not_the_noisereduce_bug():

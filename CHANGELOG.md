@@ -39,7 +39,14 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   silently extrapolated. `bin_band_weights` builds triangular partition-of-unity filters
   (flattened-end construction, so `sum_b w_b(k) == 1` holds for every bin, in-range or not) in
   the style RNNoise/DeepFilterNet use (approach only, no code copied); `band_energy` then
-  conserves total energy exactly as a consequence.
+  conserves total energy exactly as a consequence. Hardened after adversarial review: a
+  non-finite `z` (NaN/inf) passed to `bark_zwicker_terhardt_to_hz` now raises `ValueError`
+  instead of silently converging on a plausible-looking frequency; a `bands` dict whose
+  `n_bands` does not match `len(centers_hz)` is rejected rather than silently mapping the
+  wrong number of bands; and `bin_band_weights` now validates `n_fft` (must be a positive
+  integer) and `sr` (must be positive and finite) instead of accepting `n_fft=0`/negative
+  `n_fft` (all-NaN weights behind a bare `RuntimeWarning`) or `sr<=0` (a silently wrong bin
+  grid).
 - **Removed the Traunmuller 1990 Bark variant (`bark_traunmuller` / `hz_to_bark_traunmuller` /
   `bark_traunmuller_to_hz`) before it ever shipped a release or gained a caller.** Its main
   rational-approximation expression (26.81, 1960, 0.53) and inverse constant (26.28) were

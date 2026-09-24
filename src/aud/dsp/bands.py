@@ -231,10 +231,17 @@ def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int 
     is found to <2^-60 of its width -- a RELATIVE bound, not an absolute
     one. Within the audible range (20 Hz-24 kHz) the bracket stays small, so
     this also reaches `tol` in absolute Hz (dense round-trip: ~3.6e-10 Hz).
-    Near the asymptote the initial bracket itself can be enormous
-    (>1e18 Hz), so the same 60 halvings give only ~1e-10 *relative*
-    precision there: measured ~0.1 Hz absolute error at f=1e9 Hz, eight
-    orders of magnitude looser than `tol=1e-9`.
+    Near the asymptote the forward map itself saturates (both `atan` terms
+    flatten toward their limits), so `hz_to_bark_zwicker_terhardt`'s
+    derivative there is minuscule (~1.7e-14 at f=1e9 Hz, measured): float64
+    rounding noise in evaluating the forward formula, not the number of
+    bisection halvings, is what limits how precisely `z` can pin down `f`
+    there. Measured: the ~0.102 Hz absolute error at f=1e9 Hz is IDENTICAL
+    from `max_iter=60` through `max_iter=2000`, including with `tol=0` --
+    more halvings buy nothing once the bracket has narrowed past what the
+    saturated forward function can resolve at that magnitude. Within the
+    audible range (20 Hz-24 kHz) the forward map is nowhere near saturated,
+    so the bisection reaches `tol` in absolute Hz as stated above.
 
     Raises:
         ValueError: `z` is non-finite (NaN/inf), or at or beyond the
@@ -257,10 +264,17 @@ def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int 
     hi = np.full_like(z, 50_000.0)
     # Geometric bracket expansion. The worst case -- z at the largest
     # representable float64 strictly below `asymptote` -- needs exactly 46
-    # doublings (measured); the guard above already rejects every z that
-    # could need more, so this loop is mathematically guaranteed to
-    # `break` well inside its cap. There is deliberately no "ran out of
-    # doublings" fallback branch here: given the guard, that branch would
+    # doublings (measured) before `hi` exceeds it; because this loop checks
+    # BEFORE it doubles, observing that as a `break` takes the loop's 47th
+    # iteration, not its 46th -- a cap of 46 would exit `range(46)` without
+    # ever running that check. The guard above already rejects every z that
+    # could need more than 46 doublings, so 47 iterations is this loop's
+    # true worst case, and the 200 cap below has ~4x that headroom, not
+    # ~4x the doubling count. See
+    # `test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the_asymptote_boundary`
+    # for a regression pin on the 46/47 figures themselves. There is
+    # deliberately no "ran out of doublings" fallback branch here: given
+    # the guard, that branch would
     # be unreachable and therefore untestable, which is worse than no
     # branch at all -- see AGENTS.md and the review that caught this.
     for _ in range(200):
