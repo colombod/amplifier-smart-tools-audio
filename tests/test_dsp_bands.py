@@ -317,6 +317,44 @@ def test_bark_zwicker_terhardt_to_hz_rejects_z_at_or_beyond_asymptote():
         bands.bark_zwicker_terhardt_to_hz(np.array(30.0))
 
 
+def test_bark_zwicker_terhardt_to_hz_rejects_non_finite_z():
+    """Previously-broken case: `nan >= asymptote` is False, so a NaN `z`
+    silently passed the asymptote guard, then made both bracket checks
+    (`too_low`, `too_high`) false on every iteration -- so bisection never
+    narrowed and `lo` stayed pinned at the geometric-expansion loop's last
+    `hi` value, converging on whatever the 50 kHz seed had grown to (a
+    specific, wrong, plausible-looking frequency) instead of raising. `+inf`
+    hit the asymptote guard by luck (`inf >= asymptote` is True) but for the
+    wrong reason -- confirm both are now rejected up front, explicitly,
+    scalar and embedded in an array."""
+    with pytest.raises(ValueError, match="finite"):
+        bands.bark_zwicker_terhardt_to_hz(float("nan"))
+    with pytest.raises(ValueError, match="finite"):
+        bands.bark_zwicker_terhardt_to_hz(float("inf"))
+    with pytest.raises(ValueError, match="finite"):
+        bands.bark_zwicker_terhardt_to_hz(float("-inf"))
+    with pytest.raises(ValueError, match="finite"):
+        bands.bark_zwicker_terhardt_to_hz(np.array([5.0, float("nan"), 15.0]))
+    # Same guard reachable through the hz_to_bark/bark_to_hz dispatch layer.
+    with pytest.raises(ValueError, match="finite"):
+        bands.bark_to_hz(float("nan"), "bark_zwicker_terhardt")
+    # bark_peaq's closed-form inverse legitimately propagates NaN -> NaN
+    # (no bisection involved) -- must NOT be broken by this guard, since it
+    # lives only in bark_zwicker_terhardt_to_hz.
+    assert np.isnan(bands.bark_to_hz(float("nan"), "bark_peaq"))
+
+
+def test_bark_zwicker_terhardt_to_hz_asymptote_message_has_no_nan_after_finiteness_fix():
+    """Previously: an array containing both a NaN and a genuinely-too-large
+    z made `np.max` propagate NaN into the asymptote error message (`z=nan
+    Bark is at or beyond ...`), hiding the real out-of-range value. Now the
+    finiteness guard fires first and unconditionally, so the asymptote
+    message can never contain a NaN placeholder for a mixed array."""
+    with pytest.raises(ValueError, match="finite") as excinfo:
+        bands.bark_zwicker_terhardt_to_hz(np.array([5.0, float("nan"), 30.0]))
+    assert "nan Bark" not in str(excinfo.value)
+
+
 # --- 7. Bin -> band weights: partition of unity, asserted directly ---
 
 
@@ -379,6 +417,33 @@ def test_nyquist_below_top_band_edge():
     # The very top bands (centered well above Nyquist) get zero weight from
     # every bin that actually exists -- legitimate, not an error.
     assert np.allclose(weights[-1, :], 0.0)
+
+
+@pytest.mark.parametrize(
+    ("n_fft", "sr"),
+    [(2048, 48000), (512, 44100), (4096, 96000)],
+)
+def test_bin_hz_matches_k_times_sr_over_n_fft_exactly(n_fft, sr):
+    """Assert the bin frequency grid directly against `k * sr / n_fft`,
+    exact element-wise comparison -- not inferred indirectly from where
+    energy happens to land in one band at one configuration.
+
+    `test_bin_frequencies_use_sr_over_n_fft_not_the_noisereduce_bug` (below)
+    only fails once the bin-spacing error is large (~2-5%): it was measured
+    to pass unchanged against BOTH `(np.arange(n_bins) + 1) * sr / n_fft`
+    (an off-by-one bin index) and `np.arange(n_bins) * sr / (n_fft - 1)` (an
+    off-by-one denominator) -- see this PR's mutation-proof transcripts.
+    This test asserts the grid itself, so it catches both directly.
+    """
+    n_bins = n_fft // 2 + 1
+    bin_hz = bands._bin_frequencies_hz(n_fft, sr)
+    k = np.arange(n_bins, dtype=np.float64)
+    expected = k * sr / n_fft
+
+    assert bin_hz.shape == (n_bins,)
+    assert np.array_equal(bin_hz, expected)
+    assert bin_hz[0] == 0.0, "bin 0 must be exactly DC"
+    assert bin_hz[-1] == (n_bins - 1) * sr / n_fft
 
 
 def test_bin_frequencies_use_sr_over_n_fft_not_the_noisereduce_bug():
@@ -467,6 +532,52 @@ def test_bin_band_weights_rejects_degenerate_band_collision():
     }
     with pytest.raises(ValueError, match="degenerate"):
         bands.bin_band_weights(degenerate_bands, n_fft=2048, sr=48000)
+
+
+def test_bin_band_weights_rejects_n_bands_centers_mismatch():
+    """Previously: a hand-built `bands` dict with `n_bands` not matching
+    `len(centers_hz)` raised no exception at all when there were TOO MANY
+    centers (it silently returned `(n_bands, n_bins)` weights for the wrong
+    mapping -- partition-of-unity still held exactly, so it looked healthy
+    while being wrong), and raised the wrong exception type (`IndexError`,
+    not the documented `ValueError`) when there were too FEW."""
+    too_many_centers = {
+        "n_bands": 3,
+        "f_min": 20.0,
+        "f_max": 20000.0,
+        "centers_hz": np.linspace(100.0, 15000.0, 10),
+    }
+    with pytest.raises(ValueError, match="n_bands"):
+        bands.bin_band_weights(too_many_centers, n_fft=1024, sr=48000)
+
+    too_few_centers = {
+        "n_bands": 5,
+        "f_min": 20.0,
+        "f_max": 20000.0,
+        "centers_hz": np.array([100.0, 500.0]),
+    }
+    with pytest.raises(ValueError, match="n_bands"):
+        bands.bin_band_weights(too_few_centers, n_fft=1024, sr=48000)
+
+
+@pytest.mark.parametrize("bad_n_fft", [0, -2, -1024])
+def test_bin_band_weights_rejects_bad_n_fft(bad_n_fft):
+    """Previously: `n_fft=0` produced an all-NaN weights array behind a
+    bare `RuntimeWarning` (divide by zero), and a negative `n_fft` produced
+    a silent, empty `(n_bands, 0)` array -- neither raised."""
+    result = bands.band_edges(8, "bark_zwicker_terhardt", f_min=20.0, f_max=15500.0)
+    with pytest.raises(ValueError, match="n_fft"):
+        bands.bin_band_weights(result, n_fft=bad_n_fft, sr=48000)
+
+
+@pytest.mark.parametrize("bad_sr", [0, -48000, float("nan"), float("inf")])
+def test_bin_band_weights_rejects_bad_sr(bad_sr):
+    """Previously: `sr=0` and a negative `sr` were both silently accepted
+    (bin_hz collapses to all-zero, or runs backwards -- neither is a valid
+    sample rate)."""
+    result = bands.band_edges(8, "bark_zwicker_terhardt", f_min=20.0, f_max=15500.0)
+    with pytest.raises(ValueError, match="sr"):
+        bands.bin_band_weights(result, n_fft=1024, sr=bad_sr)
 
 
 # --- 8. Bin -> band energy summation: conserves total energy ---
