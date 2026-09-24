@@ -142,8 +142,15 @@ aud plan \
   | aud render in.wav out.wav
 ```
 
-That is one decode, one filter graph, one encode. Do not run each stage as its own render:
-every extra render is another round of quantisation and another chance to clip.
+That is one processing pass and one encode. When the plan includes a loudness stage,
+`render` re-reads the encoded output and checks the last loudness target with `verify`'s
+0.5 LU tolerance. `report.verification` holds that measurement; `report.warnings` names
+a `loudness_target_missed` or `loudness_unmeasurable` outcome with a remedy. A warning
+retains the output and exits zero, without automatically changing dynamics or targets.
+Without a loudness stage, `verification` is absent and `warnings` is empty, not a claim
+of loudness compliance. `master` carries these fields in its `render` report too.
+Do not run each stage as its own render: every extra render is another round of
+quantisation and another chance to clip.
 
 There are three ways into that one command, for three kinds of caller:
 

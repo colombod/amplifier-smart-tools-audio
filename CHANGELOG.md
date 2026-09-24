@@ -11,6 +11,15 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ### Fixed
 
+- Refresh Google's default to current stable `gemini-3.5-flash-lite` in place of retired
+  `gemini-2.0-flash`. Its default minimal thinking better fits the existing 2,000-token
+  advice cap. Explicit model selections, request settings and stored records are unchanged.
+- `render` now re-reads the final encoded output when a plan targets loudness and exposes
+  verification plus machine-readable warnings for a missed or unmeasurable target. Uses
+  `verify`'s existing 0.5 LU tolerance, honors the last loudness stage, and does not infer
+  a target for plans without one. No automatic compression or other DSP changes.
+  Silence's loudness-stage measurements now serialize as null rather than `-Infinity`.
+
 - **`advise`'s tonal diagnosis no longer anchors to the file's own median when a reference is
   given.** `rel_median_db` (added in 0.12.0) compares each octave band to THIS FILE's own overall
   median -- an anchor the very defect being diagnosed can move, and one dominated by the

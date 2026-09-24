@@ -447,6 +447,24 @@ def test_gemini_api_key_also_selects_the_google_provider(monkeypatch: pytest.Mon
     assert provider == "google"
 
 
+@pytest.mark.parametrize("key_name", ["GOOGLE_API_KEY", "GEMINI_API_KEY"])
+def test_google_supported_default_and_explicit_selections_are_preserved(monkeypatch, key_name) -> None:
+    # Resolution only: never call the provider or pretend to prove live availability.
+    for var in PROVIDER_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("AUD_MODEL", raising=False)
+    monkeypatch.setenv(key_name, "unused-resolution-only")
+    backend, provider, model = resolve_backend()
+    assert isinstance(backend, GoogleBackend)
+    assert provider == "google"
+    assert model == "gemini-3.5-flash-lite"
+
+    monkeypatch.setenv("AUD_MODEL", "gemini-2.0-flash")
+    assert resolve_backend()[2] == "gemini-2.0-flash"
+    assert resolve_backend("user-selected-model")[2] == "user-selected-model"
+    assert resolve_backend("gemini-2.0-flash")[2] == "gemini-2.0-flash"
+
+
 # ---------------------------------------------------------------------------
 # Model-tier-dependent gate/expand behaviour, pinned against REAL recorded
 # advise responses (never a hand-authored plan -- see tests/replay.py and

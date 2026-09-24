@@ -160,6 +160,21 @@ environment variable > a built-in default for whichever provider answered, docum
 place so it is never a bare string buried in call logic. `advise`/`master`'s output names the
 model actually used.
 
+The Google default is `gemini-3.5-flash-lite`, a current stable, low-latency text model.
+Google's [deprecation schedule](https://ai.google.dev/gemini-api/docs/deprecations)
+lists `gemini-2.0-flash` as retired and recommends 3.5 Flash-Lite or 3.8 Flash for new
+projects (checked September 23, 2026). The
+[model documentation](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite)
+lists stable text output and structured-output support. Flash-Lite's
+[default minimal thinking](https://ai.google.dev/gemini-api/docs/generate-content/thinking)
+better fits this lightweight advisor's existing 2,000-token response cap than the
+full Flash models' default medium thinking: thought tokens share that cap.
+No thinking override or token-budget change is sent. `aud` sends text measurements
+to `generateContent`, not audio to a TTS model. Explicit `--model` and `AUD_MODEL`
+values still win, including older model names; stored plans and prior reports are
+not rewritten. Documentation establishes support, not live availability, response
+quality or token-budget sufficiency for a particular request.
+
 ### Precedence — inverted
 
 | Tier | Source |

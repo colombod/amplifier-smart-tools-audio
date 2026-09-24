@@ -1077,10 +1077,21 @@ Result:
   stage applied, in canonical order, with its own measured effect (gain
   applied, gain reduction, true peak before/after, edit_points for
   cut/strip_silence, and so on per stage).
+  With a loudness stage, report.verification re-reads the final encoded
+  output and checks the LAST loudness target against verify's +/-0.5 LU
+  tolerance. report.warnings is a list of {code, message, remedy,
+  target_lufs, measured_lufs, difference_lu, tolerance_lu}. A missed
+  target emits loudness_target_missed; unmeasurable output (e.g. silence)
+  emits loudness_unmeasurable with null measured_lufs/difference_lu and
+  lufs_ok=false. The rendered file is retained; no automatic compression,
+  target change or extra encode is applied. A warning still exits zero.
+  Without a loudness stage, verification is absent and warnings is empty:
+  no target check was requested, not a claim that a default target passed.
+  master exposes these same fields in its render report.
 
 Failures:
   file_not_found        in_path does not exist.
-  audio_decode_error    in_path is not decodable audio.
+  audio_decode_error    in_path or the final output is not decodable audio.
   audio_write_error     out_path cannot be written (permissions, missing
                         directory, unsupported extension).
   bad_plan              the plan on stdin is not valid JSON, or does not
