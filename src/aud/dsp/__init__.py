@@ -13,6 +13,8 @@ Sub-modules:
     limiter     -- true-peak aware lookahead brickwall limiter
     saturation  -- oversampled waveshaping (soft/tape/tube)
     loudness    -- BS.1770 / EBU R128 wrapper (pyloudnorm)
+    stft        -- STFT analysis / WOLA resynthesis (transform spine only --
+                   no masking, ducking, band mapping or gain law)
     analysis    -- honest, numeric-only measurement report
     engine      -- applies an ordered mastering plan (list of stages) in one pass
 """
