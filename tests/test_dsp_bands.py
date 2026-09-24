@@ -274,6 +274,37 @@ def test_bark_extrapolation_not_triggered_within_table_limit():
     assert result["extrapolated"] is False
 
 
+def test_bark_tabulated_limit_hz_is_pinned():
+    """Regression pin for `_BARK_TABULATED_LIMIT_HZ`. Measured: mutating it
+    to `16500.0` (a same-byte-length change, so it cannot be caught by
+    accident via stale-bytecode reasoning -- see AGENTS.md's mutation-sweep
+    method) leaves all 676 existing tests green, because every existing
+    `f_max` used above (15500.0, at-or-below both values, and 20000.0,
+    safely above both) sits on the same side of the real limit and the
+    mutant alike. Pin the constant's own value directly -- the same
+    pattern that closed the bracket-seed gap above -- since a derived
+    expectation cannot police the constant it derives from."""
+    assert bands._BARK_TABULATED_LIMIT_HZ == 15500.0, (
+        "the Bark extrapolation gate's tabulated limit changed; if this is intentional, "
+        "update this pin and the docstrings/messages that cite 15500 Hz / 24 Bark"
+    )
+
+
+@pytest.mark.parametrize("scale", bands.BARK_SCALES)
+def test_bark_extrapolation_gate_brackets_15500hz_tightly(scale):
+    """Behavioural companion to the pin above: bracket the gate tightly
+    enough that a 1000 Hz move of the threshold (in either direction)
+    breaks one side. Fixed literals here, not read from the live
+    constant -- deriving the bracket from `bands._BARK_TABULATED_LIMIT_HZ`
+    would move in lockstep with a mutation to it and catch nothing, the
+    same failure mode the pin above documents for the bracket-seed gap."""
+    result = bands.band_edges(8, scale, f_min=20.0, f_max=15499.0)
+    assert result["extrapolated"] is False, f"{scale}: expected NOT extrapolated at 15499 Hz"
+
+    with pytest.raises(ValueError, match="extrapolation"):
+        bands.band_edges(8, scale, f_min=20.0, f_max=15501.0)
+
+
 def test_erb_has_no_extrapolation_gate_above_15500hz():
     """The task's citation names no tabulated limit for ERB -- confirm the
     ERB path is genuinely ungated, not merely untested."""
@@ -467,6 +498,50 @@ def test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the
     assert break_iteration < bands._BARK_BRACKET_EXPANSION_CAP, (
         "the production expansion cap must retain real headroom over the measured worst case"
     )
+
+
+# --- 6b. The default Bark variant (hz_to_bark/bark_to_hz's dispatch default) is pinned ---
+
+
+def test_default_bark_variant_is_pinned():
+    """Regression pin for `_DEFAULT_BARK_VARIANT`: measured, mutating it to
+    `"bark_zwicker_terhardt"` leaves all 676 existing tests green, because
+    every existing round-trip/table-agreement test states its `variant`
+    explicitly (see section 1/2 above) -- nothing exercises the unqualified
+    default. That default is what every caller of `hz_to_bark`/`bark_to_hz`
+    without an explicit `variant=` actually gets, and the module docstring's
+    "THE SCALE IS NOT COSMETIC" section is explicit that PEAQ's ITU-R
+    BS.1387 spreading-function constants (S_l = 27 dB/Bark, S_u = -24 -
+    230/f_c + 0.2L) are calibrated ON the PEAQ Bark scale and must not be
+    paired with Zwicker & Terhardt bands -- pin the constant's own value
+    directly, the same pattern used for the bracket seed and the
+    tabulated limit above."""
+    assert bands._DEFAULT_BARK_VARIANT == "bark_peaq", (
+        "the default Bark variant changed; if this is intentional, update this pin, "
+        "the callers that rely on an unqualified hz_to_bark/bark_to_hz being PEAQ, and "
+        'the module docstring\'s "THE SCALE IS NOT COSMETIC" section'
+    )
+
+
+def test_unqualified_hz_to_bark_matches_peaq_not_zwicker_terhardt():
+    """Behavioural companion to the pin above: an unqualified `hz_to_bark`
+    call (no `variant=` stated -- the one call site the module docstring
+    warns is exactly where a silently-swapped default would defeat the
+    required-`scale` protection on `band_edges`) must agree with the PEAQ
+    realization and disagree with Zwicker & Terhardt, at a frequency where
+    the two diverge unambiguously. Measured ~4.26 Bark apart at 20000 Hz
+    (PEAQ is a smooth closed-form approximation that diverges from the
+    classical-table-matching Zwicker & Terhardt formula most sharply at
+    the top of the audible range -- see section 2's table-agreement
+    tests)."""
+    f = 20000.0
+    default = float(bands.hz_to_bark(f))
+    peaq = float(bands.hz_to_bark(f, variant="bark_peaq"))
+    zwicker = float(bands.hz_to_bark(f, variant="bark_zwicker_terhardt"))
+
+    assert abs(peaq - zwicker) > 4.0, "expected the two variants to diverge unambiguously at 20 kHz"
+    assert default == pytest.approx(peaq)
+    assert default != pytest.approx(zwicker, abs=1.0)
 
 
 # --- 7. Bin -> band weights: partition of unity, asserted directly ---
