@@ -478,14 +478,25 @@ def _bin_frequencies_hz(n_fft: int, sr: float) -> np.ndarray:
     return np.arange(n_bins, dtype=np.float64) * sr / n_fft
 
 
-def bin_band_weights(bands: dict, n_fft: int, sr: int) -> np.ndarray:
+def bin_band_weights(bands: dict, n_fft: int, sr: float) -> np.ndarray:
     """Triangular partition-of-unity weights mapping each STFT bin to bands.
 
     Args:
         bands: As returned by `band_edges`.
         n_fft: Window/FFT length in samples -- must match whatever produced
             the spectrum this will be applied to (`aud.dsp.stft.analyze`).
-        sr: Sample rate in Hz.
+        sr: Sample rate in Hz. Typed and validated the same way as
+            `aud.dsp.stft`'s own `sr` parameters (see e.g. `analyze`):
+            `stft.py` never rejects a non-integer sample rate either --
+            it types `sr` as `int` but does no runtime check at all and
+            uses it purely arithmetically (`n_fft / sr`, `fs=sr` into
+            `scipy.signal.ShortTimeFFT`). This module's own runtime check
+            below (`isfinite` and `> 0`) already accepts a fractional
+            `sr` and always has; the `int` annotation was the part that
+            was wrong, not the behaviour -- fixed here rather than by
+            narrowing the behaviour, so a caller passing the same
+            (possibly fractional) `sr` to both `stft.analyze` and this
+            function keeps getting the same answer from both.
 
     Returns:
         `(n_bands, n_bins)` array, `n_bins = n_fft // 2 + 1` (the same rfft

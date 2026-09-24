@@ -355,6 +355,13 @@ def test_bark_zwicker_terhardt_to_hz_asymptote_message_has_no_nan_after_finitene
     assert "nan Bark" not in str(excinfo.value)
 
 
+# Measured against the shipped production function (cap=200) at the
+# asymptote boundary -- see the mutation-proof transcript in this PR's
+# report for how this figure was obtained by mutating the PRODUCTION
+# loop's cap (200 -> 45/46/47), not by reimplementing its arithmetic.
+_Z_MAX_BOUNDARY_HZ = 3.5184372088832e18
+
+
 def test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the_asymptote_boundary():
     """Regression pin for the geometric bracket-expansion loop's comment in
     `bark_zwicker_terhardt_to_hz`: for the largest representable float64
@@ -363,16 +370,47 @@ def test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the
     this loop), expanding from the 50 kHz seed needs exactly 46 doublings
     before `hi` exceeds it. Because the loop CHECKS before it DOUBLES,
     observing that as a `break` takes the loop's 47th iteration, not its
-    46th -- a cap of 46 would exit `range(46)` without ever running that
-    47th check and would leave the loop silently exhausted at the wrong
-    `hi`. The comment used to say the loop was "guaranteed to break well
-    inside its cap" without naming this off-by-one; this test pins the
-    actual doubling/iteration counts directly so a change to the formula
-    or the asymptote is caught here, not by a silently-wrong comment.
+    46th.
+
+    Measured by mutating the PRODUCTION loop's cap directly (`range(200)`
+    edited in place to `range(44)`/`range(45)`/`range(46)`/`range(47)`,
+    each run, then restored byte-identical): cap 44 and cap 45 both leave
+    `hi` short of the true crossing point and `bark_zwicker_terhardt_to_hz`
+    returns a wrong result (1.7592186044416e+18 Hz at cap 45, roughly HALF
+    of the correct answer); cap 46 already matches the cap-200 answer
+    exactly (`_Z_MAX_BOUNDARY_HZ` below), and cap 47 changes nothing
+    further. So the 47th iteration's check only *observes* that `hi` is
+    already big enough and breaks -- it does not correct anything, and the
+    FIRST (largest) cap that returns a WRONG answer is 45, not 46. An
+    earlier version of this docstring wrongly claimed a cap of 46 "would
+    leave the loop silently exhausted at the wrong `hi`"; it does not --
+    only caps of 45 or below do. The shipped production comment itself
+    does not make that claim (it only says the 47th check would not run
+    under a cap of 46, which is true) and needs no change.
+
+    The primary assertion below calls the REAL production function, not a
+    copy of its arithmetic -- so a regression that silently shrinks the
+    bracket-expansion cap (e.g. `range(200)` to `range(45)`) is caught
+    here even though it still returns a finite, positive, plausible-
+    looking number. The geometric-expansion-only loop further below is
+    documentation, not the test's teeth: it independently pins the
+    46-doublings/47th-iteration-break figures this docstring and the
+    production comment both cite, using a loop that mirrors ONLY the
+    bracket-expansion half (never the bisection, never the final answer),
+    so a change to the formula or the asymptote is caught by it too.
     """
     asymptote = 13.0 * (np.pi / 2.0) + 3.5 * (np.pi / 2.0)
     z_max = np.nextafter(asymptote, -np.inf)
 
+    # The real product call -- this is the test's teeth. A cap-45 mutant
+    # returns 1.7592186044416e+18 here, which fails this assertion outright.
+    result = bands.bark_zwicker_terhardt_to_hz(z_max)
+    assert result == pytest.approx(_Z_MAX_BOUNDARY_HZ, rel=1e-9)
+
+    # Documentation-only regression pin for the 46/47 figures the comment
+    # in bands.py and this docstring both cite -- NOT the test's teeth
+    # (see AGENTS.md #3b: a test that only reimplements the thing it
+    # checks cannot detect a change in the thing).
     hi = 50_000.0
     doublings = 0
     break_iteration = None
@@ -387,12 +425,6 @@ def test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the
     assert doublings == 46
     assert break_iteration == 47
     assert break_iteration < 200, "the 200 cap must retain real headroom over the measured worst case"
-
-    # And the real function actually resolves this boundary z without
-    # error or exhausting its 200-iteration cap.
-    result = bands.bark_zwicker_terhardt_to_hz(z_max)
-    assert np.isfinite(result)
-    assert result > 0.0
 
 
 # --- 7. Bin -> band weights: partition of unity, asserted directly ---
@@ -628,6 +660,68 @@ def test_bin_frequencies_use_sr_over_n_fft_not_the_noisereduce_bug():
         f"sr/(n_fft/2) bug would put it, since it would compute bin {k}'s frequency as "
         f"{buggy_freq_k:.4f} Hz (bin {k_doubled}'s true frequency, which lands in band {wrong_band})"
     )
+
+
+def test_bin_band_weights_accepts_fractional_sr_without_truncating_it():
+    """`bin_band_weights`'s `sr` is annotated `int`, but its runtime check
+    has always only required `np.isfinite(sr) and sr > 0` -- it silently
+    accepts a fractional sample rate (a resampled or measured rate, e.g.
+    48000.5 Hz) and does real, `sr`-dependent arithmetic with it
+    (`_bin_frequencies_hz`: `k * sr / n_fft`). A mutant that coerces `sr`
+    with `int(sr)` before that arithmetic is invisible to every other test
+    in this file, because every other test's `sr` is already a whole
+    number -- this is the one place a genuinely fractional `sr` is
+    exercised through `bin_band_weights` itself (not just
+    `_bin_frequencies_hz` in isolation, as
+    `test_bin_hz_matches_k_times_sr_over_n_fft_exactly` above does).
+
+    Construction: at `n_fft=2048`, the top bin (`k=1024`) sits at
+    `1024 * sr / 2048 == sr / 2`. At `sr=48000.5` that is 24000.25 Hz;
+    truncating to `int(sr)=48000` would instead place it at exactly
+    24000.0 Hz -- a 0.25 Hz shift. Two hand-built band centers (23990.0,
+    24010.0) straddle BOTH candidate frequencies inside the same interior
+    ramp, so the two hypotheses predict two different, non-close weights
+    (0.5125 vs 0.5 for band 1) rather than the same saturated 0.0/1.0 the
+    "noisereduce"-bug test above needed -- computed independently from the
+    documented triangular-ramp formula, not copied from the implementation.
+    """
+    sr = 48000.5
+    n_fft = 2048
+    n_bins = n_fft // 2 + 1
+    k = n_bins - 1
+    assert (n_bins, k) == (1025, 1024)
+
+    true_freq = k * sr / n_fft
+    truncated_freq = k * int(sr) / n_fft
+    assert true_freq == pytest.approx(24000.25, abs=1e-9)
+    assert truncated_freq == pytest.approx(24000.0, abs=1e-9)
+    assert true_freq != pytest.approx(truncated_freq, abs=1e-6)
+
+    c0, c1 = 23990.0, 24010.0
+    hand_built_bands = {
+        "n_bands": 2,
+        "f_min": 23980.0,
+        "f_max": 24020.0,
+        "centers_hz": np.array([c0, c1]),
+    }
+    weights = bands.bin_band_weights(hand_built_bands, n_fft=n_fft, sr=sr)
+    assert weights.shape == (2, n_bins)
+
+    # Computed from the true fractional frequency directly (not copied
+    # from the implementation) -- what the interior ramp split must equal.
+    expected_band1 = (true_freq - c0) / (c1 - c0)
+    expected_band0 = (c1 - true_freq) / (c1 - c0)
+    assert weights[1, k] == pytest.approx(expected_band1, abs=1e-9)
+    assert weights[0, k] == pytest.approx(expected_band0, abs=1e-9)
+
+    # If `sr` were coerced with `int(sr)` internally, bin k would land at
+    # `truncated_freq` instead, giving a measurably different, non-close split.
+    mutant_band1 = (truncated_freq - c0) / (c1 - c0)
+    assert mutant_band1 == pytest.approx(0.5, abs=1e-9), "test setup sanity check"
+    assert weights[1, k] != pytest.approx(mutant_band1, abs=1e-6)
+    assert weights[0, k] != pytest.approx(1.0 - mutant_band1, abs=1e-6)
+
+    _assert_partition_of_unity(weights)
 
 
 def test_bin_band_weights_rejects_degenerate_band_collision():
