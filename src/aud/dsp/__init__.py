@@ -15,6 +15,9 @@ Sub-modules:
     loudness    -- BS.1770 / EBU R128 wrapper (pyloudnorm)
     stft        -- STFT analysis / WOLA resynthesis (transform spine only --
                    no masking, ducking, band mapping or gain law)
+    bands       -- perceptual band mapping (Hz<->Bark/ERB, band edges,
+                   bin->band energy summation -- no spreading functions,
+                   masking thresholds, gain laws or ducking)
     analysis    -- honest, numeric-only measurement report
     engine      -- applies an ordered mastering plan (list of stages) in one pass
 """
