@@ -53,10 +53,11 @@ happened to expose:
   to ~3 Bark at the top of the audible range (measured below) -- it is a
   smooth perceptual-model approximation, not a classical-Bark substitute.
 - `bark_zwicker_terhardt` -- Zwicker & Terhardt 1980 (JASA 68(5):1523),
-  `z(f) = 13*atan(0.00076f) + 3.5*atan((f/7500)^2)`. This IS the formula the
-  classical 24-critical-band table was derived from, so it is (expectedly)
-  the closest match to that table (~0.20 Bark max error, measured below).
-  It has no closed-form inverse; `bark_zwicker_terhardt_to_hz` bisects.
+  `z(f) = 13*atan(0.00076f) + 3.5*atan((f/7500)^2)`. This formula
+  APPROXIMATES the earlier-published classical 24-critical-band table (not
+  the reverse), so it is (expectedly) the closest match to that table
+  (~0.20 Bark max error, measured below). It has no closed-form inverse;
+  `bark_zwicker_terhardt_to_hz` bisects.
 
 **`band_edges` therefore defaults its callers to nothing**: `scale` has no
 default value at all, so a caller must say which of the two (or
@@ -185,9 +186,10 @@ def hz_to_bark_zwicker_terhardt(f: np.ndarray) -> np.ndarray:
 
         z(f) = 13*atan(0.00076*f) + 3.5*atan((f/7500)**2)
 
-    This is the formula the classical 24-critical-band table was derived
-    from, so it is (measured) the formula that matches that table most
-    closely among the three Bark realizations here -- see module docstring.
+    This formula approximates the earlier-published classical 24-critical-
+    band table (not the reverse), so it is (measured) the formula that
+    matches that table most closely among the three Bark realizations here
+    -- see module docstring.
     Strictly increasing in `f` for `f >= 0`, which is what makes bisection
     in `bark_zwicker_terhardt_to_hz` well-defined.
     """
@@ -212,17 +214,49 @@ def critical_bandwidth_hz(f: np.ndarray) -> np.ndarray:
 def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int = 60) -> np.ndarray:
     """Bark -> Hz, Zwicker & Terhardt 1980, by bisection.
 
-    `hz_to_bark_zwicker_terhardt` has no closed-form inverse. Bisects on
-    `[0, 50_000]` Hz -- comfortably above any `z` this module's own
-    `band_edges` would ever request (z(50 kHz) ~= 25.5 Bark, i.e. above the
-    entire audible range) -- using `hz_to_bark_zwicker_terhardt`'s strict
-    monotonicity. `max_iter=60` halves a 50 kHz bracket to ~4.3e-14 Hz,
-    comfortably inside `tol`; verified by round-trip test to ~3.6e-10 Hz
-    across 20 Hz-24 kHz.
+    `hz_to_bark_zwicker_terhardt` has no closed-form inverse. The formula
+    saturates as `f -> infinity` (both `atan` terms approach `pi/2`), so its
+    range has a hard ceiling of `13*pi/2 + 3.5*pi/2` (~25.918 Bark); a `z` at
+    or beyond that ceiling has no finite Hz value and is rejected outright.
+
+    Below the ceiling, the bisection bracket is expanded geometrically from
+    a 50 kHz seed until it actually covers `z`, then bisected using
+    `hz_to_bark_zwicker_terhardt`'s strict monotonicity. A fixed `[0, 50_000]`
+    Hz bracket used to be hardcoded here on the assumption that no caller
+    would ever request `z` above ~25.5 Bark (the audible range's own
+    ceiling) -- but `band_edges(..., allow_extrapolation=True)` lets a
+    caller ask for `f_max` well above 50 kHz (e.g. 96 kHz, the Nyquist of a
+    192 kHz transfer), and the fixed bracket silently capped every returned
+    edge at ~50 kHz with no exception. `max_iter=60` halves whatever bracket
+    is found to <2^-60 of its width, comfortably inside `tol` for any
+    bracket this module would plausibly need (verified up to ~1e9 Hz); the
+    dense round-trip test still gets ~3.6e-10 Hz precision across 20 Hz-24 kHz.
     """
     z = np.asarray(z, dtype=np.float64)
+
+    # 13*atan(x) -> 13*pi/2 and 3.5*atan(x**2) -> 3.5*pi/2 as f -> infinity.
+    asymptote = 13.0 * (np.pi / 2.0) + 3.5 * (np.pi / 2.0)
+    if np.any(z >= asymptote):
+        raise ValueError(
+            f"z={float(np.max(np.atleast_1d(z)))} Bark is at or beyond the Zwicker & Terhardt "
+            f"formula's asymptote (~{asymptote:.6f} Bark, its limit as f -> infinity); no finite "
+            "Hz value maps to it. Request a lower Bark value (or a lower f_max)."
+        )
+
     lo = np.zeros_like(z)
     hi = np.full_like(z, 50_000.0)
+    for _ in range(200):
+        too_low = hz_to_bark_zwicker_terhardt(hi) < z
+        if not np.any(too_low):
+            break
+        hi = np.where(too_low, hi * 2.0, hi)
+    else:
+        raise ValueError(
+            "bark_zwicker_terhardt_to_hz could not bracket its bisection within 200 bracket "
+            "doublings; the requested z is too close to the formula's asymptote to invert "
+            "reliably in double precision"
+        )
+
     for _ in range(max_iter):
         mid = 0.5 * (lo + hi)
         too_high = hz_to_bark_zwicker_terhardt(mid) > z
@@ -359,12 +393,15 @@ def band_edges(
         }
 
     Raises:
-        ValueError: `n_bands < 1`; `f_min` outside `(0, f_max)`; unknown
-            `scale`; or a Bark `scale` with `f_max` beyond the tabulated
-            limit and `allow_extrapolation=False`.
+        ValueError: `n_bands < 1`; `f_min`/`f_max` non-finite (inf/NaN);
+            `f_min` outside `(0, f_max)`; unknown `scale`; or a Bark `scale`
+            with `f_max` beyond the tabulated limit and
+            `allow_extrapolation=False`.
     """
     if n_bands < 1:
         raise ValueError(f"n_bands must be >= 1; got {n_bands}")
+    if not (np.isfinite(f_min) and np.isfinite(f_max)):
+        raise ValueError(f"f_min/f_max must be finite; got f_min={f_min}, f_max={f_max}")
     if not (0.0 < f_min < f_max):
         raise ValueError(f"f_min/f_max must satisfy 0 < f_min < f_max; got f_min={f_min}, f_max={f_max}")
     forward, inverse = _scale_funcs(scale)
@@ -427,11 +464,12 @@ def bin_band_weights(bands: dict, n_fft: int, sr: int) -> np.ndarray:
     STFT can produce, whether or not `[f_min, f_max]` covers `[0, sr/2]`.
 
     Raises:
-        ValueError: `bands["centers_hz"]` (together with `f_min`/`f_max`)
-            is not strictly increasing -- a degenerate `band_edges` request
-            (e.g. `n_bands` so large, relative to the covered scale span,
-            that two centers collide at float64 precision) that would
-            otherwise silently divide by zero.
+        ValueError: `bands["f_min"]`/`bands["f_max"]`/`bands["centers_hz"]`
+            contain a non-finite value (inf/NaN); or `bands["centers_hz"]`
+            (together with `f_min`/`f_max`) is not strictly increasing -- a
+            degenerate `band_edges` request (e.g. `n_bands` so large,
+            relative to the covered scale span, that two centers collide at
+            float64 precision) that would otherwise silently divide by zero.
     """
     n_bands = bands["n_bands"]
     f_min = bands["f_min"]
@@ -439,6 +477,11 @@ def bin_band_weights(bands: dict, n_fft: int, sr: int) -> np.ndarray:
     centers = np.asarray(bands["centers_hz"], dtype=np.float64)
 
     control = np.concatenate(([f_min], centers, [f_max]))
+    if not np.all(np.isfinite(control)):
+        raise ValueError(
+            f"bands['f_min']/['f_max']/['centers_hz'] must all be finite; got "
+            f"f_min={f_min}, f_max={f_max}, centers_hz={centers}"
+        )
     if np.any(np.diff(control) <= 0):
         raise ValueError(
             "band centers are not strictly increasing between f_min and f_max; "

@@ -217,6 +217,45 @@ def test_band_edges_rejects_bad_n_bands_and_range():
         bands.band_edges(8, "not_a_real_scale")
 
 
+@pytest.mark.parametrize("bad_f_max", [float("inf"), float("nan"), float("-inf")])
+def test_band_edges_rejects_non_finite_f_max(bad_f_max):
+    """A non-finite `f_max` used to bypass the `0 < f_min < f_max` guard for
+    `+inf` specifically (`0 < f_min < inf` is True) and produce NaN edges
+    and NaN weights downstream with no exception -- reject it up front."""
+    with pytest.raises(ValueError, match="finite"):
+        bands.band_edges(8, "erb_glasberg_moore", f_max=bad_f_max, allow_extrapolation=True)
+
+
+@pytest.mark.parametrize("bad_f_min", [float("nan"), float("-inf"), float("inf")])
+def test_band_edges_rejects_non_finite_f_min(bad_f_min):
+    with pytest.raises(ValueError, match="finite"):
+        bands.band_edges(8, "erb_glasberg_moore", f_min=bad_f_min, f_max=20000.0)
+
+
+def test_bin_band_weights_rejects_non_finite_bands_dict():
+    """`bin_band_weights` takes a `bands` dict as documented input, but
+    nothing stops a caller from constructing one directly (bypassing
+    `band_edges`'s own guard) with a non-finite f_max/centers_hz -- it must
+    reject that too, rather than silently produce NaN weights."""
+    degenerate = {
+        "n_bands": 2,
+        "f_min": 20.0,
+        "f_max": float("inf"),
+        "centers_hz": np.array([100.0, 500.0]),
+    }
+    with pytest.raises(ValueError, match="finite"):
+        bands.bin_band_weights(degenerate, n_fft=1024, sr=48000)
+
+    degenerate_centers = {
+        "n_bands": 2,
+        "f_min": 20.0,
+        "f_max": 5000.0,
+        "centers_hz": np.array([100.0, float("nan")]),
+    }
+    with pytest.raises(ValueError, match="finite"):
+        bands.bin_band_weights(degenerate_centers, n_fft=1024, sr=48000)
+
+
 # --- 6. The >15.5 kHz Bark extrapolation gate ---
 
 
@@ -240,6 +279,42 @@ def test_erb_has_no_extrapolation_gate_above_15500hz():
     ERB path is genuinely ungated, not merely untested."""
     result = bands.band_edges(32, "erb_glasberg_moore", f_min=20.0, f_max=20000.0)
     assert result["extrapolated"] is False
+
+
+def test_bark_zwicker_terhardt_extrapolation_reaches_f_max_above_50khz():
+    """Previously-broken case: `bark_zwicker_terhardt_to_hz` used to bisect
+    on a fixed `[0, 50_000]` Hz bracket, so any `f_max` above 50 kHz was
+    silently capped at ~50 kHz instead of reached -- no exception. 96 kHz is
+    the Nyquist of a 192 kHz transfer, a real extrapolation request this
+    module must support once `allow_extrapolation=True` is given."""
+    result = bands.band_edges(32, "bark_zwicker_terhardt", f_max=96000.0, allow_extrapolation=True)
+    assert result["edges_hz"][-1] == pytest.approx(96000.0, abs=1e-4)
+    assert result["extrapolated"] is True
+
+
+def test_bark_zwicker_terhardt_no_collapsed_edges_at_high_band_count_above_50khz():
+    """At 256 bands and f_max=96 kHz, the fixed-50kHz-bracket bug collapsed
+    the top three edges together (all clamped to ~50 kHz) instead of
+    spacing them out to 96 kHz. Edges must stay strictly increasing (hence
+    all distinct) for every band count, not just modest ones."""
+    result = bands.band_edges(256, "bark_zwicker_terhardt", f_max=96000.0, allow_extrapolation=True)
+    edges = result["edges_hz"]
+    assert edges.shape == (257,)
+    assert np.all(np.diff(edges) > 0), "edges must be strictly increasing -- no collapsed/duplicate edges"
+    assert len(np.unique(edges)) == 257
+    assert edges[-1] == pytest.approx(96000.0, abs=1e-4)
+
+
+def test_bark_zwicker_terhardt_to_hz_rejects_z_at_or_beyond_asymptote():
+    """The formula saturates at 13*pi/2 + 3.5*pi/2 (~25.918 Bark) as
+    f -> infinity; no finite Hz value maps to a Bark value at or beyond
+    that ceiling, so it must be rejected rather than returned as some
+    arbitrarily large (and practically meaningless) Hz value."""
+    asymptote = 13.0 * (np.pi / 2.0) + 3.5 * (np.pi / 2.0)
+    with pytest.raises(ValueError, match="asymptote"):
+        bands.bark_zwicker_terhardt_to_hz(np.array(asymptote))
+    with pytest.raises(ValueError, match="asymptote"):
+        bands.bark_zwicker_terhardt_to_hz(np.array(30.0))
 
 
 # --- 7. Bin -> band weights: partition of unity, asserted directly ---
@@ -309,20 +384,68 @@ def test_nyquist_below_top_band_edge():
 def test_bin_frequencies_use_sr_over_n_fft_not_the_noisereduce_bug():
     """Guard against the specific documented mistake: `noisereduce` computes
     bin spacing as `sr/(n_fft/2)`, which is TWICE the true spacing
-    `sr/n_fft`. Confirm this module's bin frequencies (inferred from where
-    partition-of-unity structure changes) match `sr/n_fft`, matching
-    `aud.dsp.stft.stft_properties`'s own `bin_hz` convention."""
+    `sr/n_fft`. This exercises `bin_band_weights`/`band_energy` directly --
+    it does not merely recompute the two candidate spacing constants and
+    compare them to each other, because that tests nothing about the
+    implementation (a doubled bin spacing inside `bin_band_weights` would
+    still leave both constants intact and this test green).
+
+    Construction: bin `k`'s TRUE frequency (`k * sr / n_fft`) sits deep in
+    band 8's triangular peak (weight ~0.998); bin `2k`'s TRUE frequency sits
+    above `f_max`, deep in band 9's flat end region (weight exactly 1.0). If
+    `bin_band_weights` used the `noisereduce` spacing `sr/(n_fft/2)`, bin
+    `k`'s computed frequency would be `2 * (k * sr / n_fft)` -- exactly bin
+    `2k`'s TRUE frequency -- so a spectrum with all its energy in bin `k`
+    would be placed almost entirely into band 9 instead of band 8. Verified
+    (see PR mutation-proof transcript): forcing that exact spacing bug into
+    `bin_band_weights` makes this test fail with `per_band[8] == 0.0` and
+    `per_band[9] == 1.0`, while it passes against the real implementation.
+    """
     sr = 48000
     n_fft = 2048
-    expected_bin_hz = sr / n_fft  # 23.4375 Hz, matches stft_properties
-    # A single-band request spanning exactly one bin's width in Bark-space
-    # is overkill; simpler: directly recompute what bin_band_weights must
-    # have assumed and compare against the two candidate conventions.
-    wrong_bin_hz = sr / (n_fft / 2)
-    assert expected_bin_hz == pytest.approx(23.4375)
-    assert wrong_bin_hz == pytest.approx(46.875)
     n_bins = n_fft // 2 + 1
     assert n_bins == 1025
+    bin_hz_spacing = sr / n_fft  # 23.4375 Hz, matches stft_properties
+    wrong_bin_hz_spacing = sr / (n_fft / 2)  # 46.875 Hz -- the noisereduce bug
+    assert bin_hz_spacing == pytest.approx(23.4375)
+    assert wrong_bin_hz_spacing == pytest.approx(46.875)
+
+    n_bands = 10
+    result = bands.band_edges(n_bands, "erb_glasberg_moore", f_min=20.0, f_max=20000.0)
+    weights = bands.bin_band_weights(result, n_fft=n_fft, sr=sr)
+
+    k = 437
+    k_doubled = 2 * k
+    assert k_doubled < n_bins, "test setup should keep bin 2k in range"
+    true_freq_k = k * bin_hz_spacing
+    true_freq_k_doubled = k_doubled * bin_hz_spacing
+    # What the noisereduce-bug spacing would compute for bin k -- exactly
+    # bin 2k's true frequency, by construction (2 * k * sr/n_fft == k * sr/(n_fft/2)).
+    buggy_freq_k = k * wrong_bin_hz_spacing
+    assert buggy_freq_k == pytest.approx(true_freq_k_doubled)
+    print(
+        f"\n[bands] bin {k} true freq = {true_freq_k:.4f} Hz "
+        f"(buggy spacing would compute {buggy_freq_k:.4f} Hz = bin {k_doubled}'s true freq)"
+    )
+
+    spectrum = np.zeros(n_bins)
+    spectrum[k] = 1.0
+    per_band = bands.band_energy(spectrum, weights)
+    print(f"\n[bands] per-band energy for a spectrum concentrated in bin {k}: {per_band}")
+
+    expected_band = 8  # where bin k's TRUE frequency actually falls
+    wrong_band = 9  # where the noisereduce-bug spacing would misplace it
+    assert expected_band != wrong_band
+    assert per_band[expected_band] == pytest.approx(1.0, abs=0.05), (
+        f"bin {k} (true freq {true_freq_k:.4f} Hz) should land almost entirely in band "
+        f"{expected_band} (center {result['centers_hz'][expected_band]:.2f} Hz) -- a bin-spacing "
+        "error would move this energy to the wrong band and this assertion would catch it"
+    )
+    assert per_band[wrong_band] == pytest.approx(0.0, abs=0.05), (
+        f"bin {k} must NOT be misplaced into band {wrong_band}; that is exactly where the "
+        f"sr/(n_fft/2) bug would put it, since it would compute bin {k}'s frequency as "
+        f"{buggy_freq_k:.4f} Hz (bin {k_doubled}'s true frequency, which lands in band {wrong_band})"
+    )
 
 
 def test_bin_band_weights_rejects_degenerate_band_collision():
