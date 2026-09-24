@@ -211,6 +211,26 @@ def critical_bandwidth_hz(f: np.ndarray) -> np.ndarray:
     return 25.0 + 75.0 * (1.0 + 1.4 * (f / 1000.0) ** 2) ** 0.69
 
 
+# Bisection seed for `bark_zwicker_terhardt_to_hz`'s geometric bracket
+# expansion below: 50 kHz comfortably exceeds every documented request
+# (the audible range, and every extrapolation up to a 192 kHz transfer's
+# 96 kHz Nyquist -- see the function's own docstring) while still keeping
+# the expansion loop's iteration count a meaningful figure rather than
+# padding. Named here -- rather than left as a literal duplicated in the
+# loop below and in tests/test_dsp_bands.py's regression pin -- so that a
+# change to this value changes what that pin measures instead of the test
+# comparing a copy of itself against another copy (AGENTS.md #3b).
+_BARK_BRACKET_SEED_HZ = 50_000.0
+
+# Iteration ceiling for the same expansion loop. The worst case this
+# function ever reaches (see the loop's own comment) takes 47 iterations;
+# this cap is that measured worst case's actual safety margin, not a copy
+# of it -- see
+# test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the_asymptote_boundary's
+# headroom assertion, which reads this constant rather than a literal 200.
+_BARK_BRACKET_EXPANSION_CAP = 200
+
+
 def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int = 60) -> np.ndarray:
     """Bark -> Hz, Zwicker & Terhardt 1980, by bisection.
 
@@ -220,11 +240,12 @@ def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int 
     or beyond that ceiling has no finite Hz value and is rejected outright.
 
     Below the ceiling, the bisection bracket is expanded geometrically from
-    a 50 kHz seed until it actually covers `z`, then bisected using
-    `hz_to_bark_zwicker_terhardt`'s strict monotonicity. A fixed `[0, 50_000]`
-    Hz bracket used to be hardcoded here on the assumption that no caller
-    would ever request `z` above ~25.5 Bark (the audible range's own
-    ceiling) -- but `band_edges(..., allow_extrapolation=True)` lets a
+    a `_BARK_BRACKET_SEED_HZ` (50 kHz) seed until it actually covers `z`,
+    then bisected using `hz_to_bark_zwicker_terhardt`'s strict
+    monotonicity. A fixed `[0, 50_000]` Hz bracket used to be hardcoded
+    here on the assumption that no caller would ever request `z` above
+    ~25.5 Bark (the audible range's own ceiling) -- but
+    `band_edges(..., allow_extrapolation=True)` lets a
     caller ask for `f_max` well above 50 kHz (e.g. 96 kHz, the Nyquist of a
     192 kHz transfer), and the fixed bracket silently capped every returned
     edge at ~50 kHz with no exception. `max_iter=60` halves whatever bracket
@@ -261,7 +282,7 @@ def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int 
         )
 
     lo = np.zeros_like(z)
-    hi = np.full_like(z, 50_000.0)
+    hi = np.full_like(z, _BARK_BRACKET_SEED_HZ)
     # Geometric bracket expansion. The worst case -- z at the largest
     # representable float64 strictly below `asymptote` -- needs exactly 46
     # doublings (measured) before `hi` exceeds it; because this loop checks
@@ -269,15 +290,15 @@ def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int 
     # iteration, not its 46th -- a cap of 46 would exit `range(46)` without
     # ever running that check. The guard above already rejects every z that
     # could need more than 46 doublings, so 47 iterations is this loop's
-    # true worst case, and the 200 cap below has ~4x that headroom, not
-    # ~4x the doubling count. See
+    # true worst case, and `_BARK_BRACKET_EXPANSION_CAP` below has ~4x that
+    # headroom, not ~4x the doubling count. See
     # `test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the_asymptote_boundary`
     # for a regression pin on the 46/47 figures themselves. There is
     # deliberately no "ran out of doublings" fallback branch here: given
     # the guard, that branch would
     # be unreachable and therefore untestable, which is worse than no
     # branch at all -- see AGENTS.md and the review that caught this.
-    for _ in range(200):
+    for _ in range(_BARK_BRACKET_EXPANSION_CAP):
         too_low = hz_to_bark_zwicker_terhardt(hi) < z
         if not np.any(too_low):
             break
@@ -485,18 +506,10 @@ def bin_band_weights(bands: dict, n_fft: int, sr: float) -> np.ndarray:
         bands: As returned by `band_edges`.
         n_fft: Window/FFT length in samples -- must match whatever produced
             the spectrum this will be applied to (`aud.dsp.stft.analyze`).
-        sr: Sample rate in Hz. Typed and validated the same way as
-            `aud.dsp.stft`'s own `sr` parameters (see e.g. `analyze`):
-            `stft.py` never rejects a non-integer sample rate either --
-            it types `sr` as `int` but does no runtime check at all and
-            uses it purely arithmetically (`n_fft / sr`, `fs=sr` into
-            `scipy.signal.ShortTimeFFT`). This module's own runtime check
-            below (`isfinite` and `> 0`) already accepts a fractional
-            `sr` and always has; the `int` annotation was the part that
-            was wrong, not the behaviour -- fixed here rather than by
-            narrowing the behaviour, so a caller passing the same
-            (possibly fractional) `sr` to both `stft.analyze` and this
-            function keeps getting the same answer from both.
+        sr: Sample rate in Hz. Typed as `float`, not `int`: the runtime
+            check below (`isfinite` and `> 0`) has always accepted a
+            fractional `sr`, so `int` was simply the wrong annotation for
+            this function's own behaviour.
 
     Returns:
         `(n_bands, n_bins)` array, `n_bins = n_fft // 2 + 1` (the same rfft

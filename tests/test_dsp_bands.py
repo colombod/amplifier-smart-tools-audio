@@ -355,10 +355,20 @@ def test_bark_zwicker_terhardt_to_hz_asymptote_message_has_no_nan_after_finitene
     assert "nan Bark" not in str(excinfo.value)
 
 
-# Measured against the shipped production function (cap=200) at the
-# asymptote boundary -- see the mutation-proof transcript in this PR's
-# report for how this figure was obtained by mutating the PRODUCTION
-# loop's cap (200 -> 45/46/47), not by reimplementing its arithmetic.
+# Golden boundary value for the CURRENT production seed (50 kHz) and its
+# measured 46-doublings/47th-iteration-break worst case -- see the
+# mutation-proof transcript in this PR's report for how this figure was
+# obtained by mutating the PRODUCTION loop's cap (200 -> 45/46/47), not by
+# reimplementing its arithmetic. This is a fixed literal, not derived from
+# `bands._BARK_BRACKET_SEED_HZ` at test time: deriving it from the live
+# constant would make the expected value move in lockstep with a seed
+# mutation, which is exactly what let seeds 100_000/25_000 slip through
+# undetected in the first place (see the seed pin below, which is what
+# actually closes that gap) -- and it would ALSO let a seed mutation that
+# happens to need the same 46 doublings (e.g. 60_000, measured) move in
+# lockstep too, since both production and this literal would then agree
+# on a "new" wrong answer. A fixed literal has neither failure mode.
+_BARK_BOUNDARY_DOUBLINGS_AT_PRODUCTION_SEED = 46
 _Z_MAX_BOUNDARY_HZ = 3.5184372088832e18
 
 
@@ -367,10 +377,10 @@ def test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the
     `bark_zwicker_terhardt_to_hz`: for the largest representable float64
     `z` strictly below the asymptote (the worst case the function ever
     accepts -- `z >= asymptote` is rejected outright by the guard above
-    this loop), expanding from the 50 kHz seed needs exactly 46 doublings
-    before `hi` exceeds it. Because the loop CHECKS before it DOUBLES,
-    observing that as a `break` takes the loop's 47th iteration, not its
-    46th.
+    this loop), expanding from the production seed needs exactly 46
+    doublings before `hi` exceeds it. Because the loop CHECKS before it
+    DOUBLES, observing that as a `break` takes the loop's 47th iteration,
+    not its 46th.
 
     Measured by mutating the PRODUCTION loop's cap directly (`range(200)`
     edited in place to `range(44)`/`range(45)`/`range(46)`/`range(47)`,
@@ -378,27 +388,51 @@ def test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the
     `hi` short of the true crossing point and `bark_zwicker_terhardt_to_hz`
     returns a wrong result (1.7592186044416e+18 Hz at cap 45, roughly HALF
     of the correct answer); cap 46 already matches the cap-200 answer
-    exactly (`_Z_MAX_BOUNDARY_HZ` below), and cap 47 changes nothing
-    further. So the 47th iteration's check only *observes* that `hi` is
-    already big enough and breaks -- it does not correct anything, and the
-    FIRST (largest) cap that returns a WRONG answer is 45, not 46. An
-    earlier version of this docstring wrongly claimed a cap of 46 "would
-    leave the loop silently exhausted at the wrong `hi`"; it does not --
-    only caps of 45 or below do. The shipped production comment itself
-    does not make that claim (it only says the 47th check would not run
-    under a cap of 46, which is true) and needs no change.
+    exactly, and cap 47 changes nothing further. So the 47th iteration's
+    check only *observes* that `hi` is already big enough and breaks -- it
+    does not correct anything, and the FIRST (largest) cap that returns a
+    WRONG answer is 45, not 46. An earlier version of this docstring
+    wrongly claimed a cap of 46 "would leave the loop silently exhausted
+    at the wrong `hi`"; it does not -- only caps of 45 or below do. The
+    shipped production comment itself does not make that claim (it only
+    says the 47th check would not run under a cap of 46, which is true)
+    and needs no change.
+
+    `_Z_MAX_BOUNDARY_HZ` above is `50_000 * 2**46` -- but it is ALSO
+    `100_000 * 2**45` and `25_000 * 2**47`, so on its own it cannot tell a
+    production seed change apart from the seed staying put: a seed
+    mutation to `100_000` (needing only 45 doublings) or `25_000` (needing
+    47) reaches this exact same float64 value and the boundary assertion
+    below would not notice (measured). The seed pin immediately below
+    closes that gap directly, by pinning the seed's OWN value rather than
+    trying to detect its effect through the boundary arithmetic -- which
+    also covers the seed values (e.g. `60_000`, measured) that happen to
+    need the SAME 46 doublings as production: those change the boundary
+    value (`60_000 * 2**46 != _Z_MAX_BOUNDARY_HZ`) but would just as
+    happily satisfy a boundary check re-derived from the mutated seed, so
+    only a direct pin on the seed's value is proof against every case.
 
     The primary assertion below calls the REAL production function, not a
-    copy of its arithmetic -- so a regression that silently shrinks the
+    copy of its arithmetic, so a regression that silently shrinks the
     bracket-expansion cap (e.g. `range(200)` to `range(45)`) is caught
-    here even though it still returns a finite, positive, plausible-
-    looking number. The geometric-expansion-only loop further below is
-    documentation, not the test's teeth: it independently pins the
-    46-doublings/47th-iteration-break figures this docstring and the
-    production comment both cite, using a loop that mirrors ONLY the
-    bracket-expansion half (never the bisection, never the final answer),
-    so a change to the formula or the asymptote is caught by it too.
+    here even though it still returns a finite, positive,
+    plausible-looking number. The geometric-expansion-only loop further
+    below is documentation, not the test's teeth: it independently pins
+    the 46-doublings/47th-iteration-break figures this docstring and the
+    production comment both cite, starting from the production seed
+    (read, not copied) so a change to the seed, the formula, or the
+    asymptote is caught by it too.
     """
+    # Pin the seed's own value FIRST: a change here is exactly finding 1's
+    # failure mode (a production seed change with a golden boundary value
+    # that cannot detect it), and this catches every variant of it --
+    # including the ones (like 60_000) that still need 46 doublings and so
+    # would otherwise satisfy any check re-derived from the live constant.
+    assert bands._BARK_BRACKET_SEED_HZ == 50_000.0, (
+        "bark_zwicker_terhardt_to_hz's bracket-expansion seed changed; if this is "
+        "intentional, update this pin, _Z_MAX_BOUNDARY_HZ, and their comments together"
+    )
+
     asymptote = 13.0 * (np.pi / 2.0) + 3.5 * (np.pi / 2.0)
     z_max = np.nextafter(asymptote, -np.inf)
 
@@ -410,8 +444,10 @@ def test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the
     # Documentation-only regression pin for the 46/47 figures the comment
     # in bands.py and this docstring both cite -- NOT the test's teeth
     # (see AGENTS.md #3b: a test that only reimplements the thing it
-    # checks cannot detect a change in the thing).
-    hi = 50_000.0
+    # checks cannot detect a change in the thing). Starts from the
+    # PRODUCTION seed (read, not a copied literal) so this loop tracks
+    # whatever the seed pin above already confirmed it to be.
+    hi = bands._BARK_BRACKET_SEED_HZ
     doublings = 0
     break_iteration = None
     for i in range(200):
@@ -422,9 +458,15 @@ def test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the
         hi *= 2.0
         doublings += 1
 
-    assert doublings == 46
-    assert break_iteration == 47
-    assert break_iteration < 200, "the 200 cap must retain real headroom over the measured worst case"
+    assert doublings == _BARK_BOUNDARY_DOUBLINGS_AT_PRODUCTION_SEED
+    assert break_iteration == _BARK_BOUNDARY_DOUBLINGS_AT_PRODUCTION_SEED + 1
+    # Real headroom check against the PRODUCTION cap (read it, not a copy
+    # of the literal 200): a cap-47 mutant (zero headroom over the
+    # measured 47-iteration worst case) makes this fail (47 < 47 is
+    # False) even though the function still returns the correct answer.
+    assert break_iteration < bands._BARK_BRACKET_EXPANSION_CAP, (
+        "the production expansion cap must retain real headroom over the measured worst case"
+    )
 
 
 # --- 7. Bin -> band weights: partition of unity, asserted directly ---
