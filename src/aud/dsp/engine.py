@@ -514,11 +514,13 @@ def _apply_loudness(x: np.ndarray, sr: int, params: dict[str, Any]) -> tuple[np.
     before_lufs = loudness.integrated_lufs(x, sr)
 
     y, applied_gain_db = loudness.normalize(x, sr, target_lufs)
+    after_lufs = loudness.integrated_lufs(y, sr)
 
     return y, {
         "target_lufs": target_lufs,
-        "measured_lufs_before": before_lufs,
-        "measured_lufs_after": loudness.integrated_lufs(y, sr),
+        # Silence is unmeasurable, not JSON's non-standard -Infinity.
+        "measured_lufs_before": before_lufs if math.isfinite(before_lufs) else None,
+        "measured_lufs_after": after_lufs if math.isfinite(after_lufs) else None,
         "applied_gain_db": applied_gain_db,
     }
 

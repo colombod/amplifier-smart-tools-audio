@@ -1444,8 +1444,18 @@ def analyze(path: str, *, reference_path: str | None = None) -> dict:
     )
 
 
+_LOUDNESS_TOLERANCE_LU = 0.5
+
+
 def render(plan: Plan, in_path: str, out_path: str) -> dict:
-    """Apply a whole plan to a file in one decode/filter/encode pass."""
+    """Apply a plan once, then verify the encoded file if it targets loudness.
+
+    `report.verification` uses the last loudness stage's target and the same
+    tolerance as `verify`. `report.warnings` distinguishes a missed target
+    from unmeasurable loudness; neither changes the plan or the audio.
+    Without a loudness stage, no target is inferred from configuration and
+    `verification` is absent (an empty warnings list does not mean verified).
+    """
     try:
         from aud.dsp import engine, io
     except ImportError as exc:
@@ -1532,6 +1542,44 @@ def render(plan: Plan, in_path: str, out_path: str) -> dict:
     # the caller happened to pass in.
     resolved_out_path = _resolve_path(out_path)
     _write_audio(io, resolved_out_path, rendered, output_sample_rate, output_subtype)
+    report["warnings"] = []
+    loudness_stages = [stage for stage in plan.stages if stage.stage == "loudness"]
+    if loudness_stages:
+        # Same-name stages retain append order. The LAST target is the one
+        # actually applied, not the first or a newly resolved config default.
+        target_lufs = loudness_stages[-1].params["target_lufs"]
+        verification = verify(resolved_out_path, target_lufs=target_lufs)
+        report["verification"] = verification
+        if not verification["lufs_ok"]:
+            measured_lufs = verification["measured"]["integrated_lufs"]
+            if measured_lufs is None:
+                code = "loudness_unmeasurable"
+                message = (
+                    f"Final output has no measurable integrated loudness; target {target_lufs:g} LUFS is unverified."
+                )
+                remedy = "Check for silence or insufficient duration in the output before changing gain or dynamics."
+            else:
+                code = "loudness_target_missed"
+                message = (
+                    f"Final output measures {measured_lufs:.2f} LUFS, outside "
+                    f"the {target_lufs:g} LUFS target's +/-{_LOUDNESS_TOLERANCE_LU:g} LU tolerance."
+                )
+                remedy = (
+                    "Review the final output and stage reports. If peak limiting is reducing loudness, "
+                    "consider compression before loudness/limiting, or revise the target or ceiling. "
+                    "Output-format changes can also affect loudness. Re-render and verify after any change."
+                )
+            report["warnings"].append(
+                {
+                    "code": code,
+                    "message": message,
+                    "remedy": remedy,
+                    "target_lufs": target_lufs,
+                    "measured_lufs": measured_lufs,
+                    "difference_lu": None if measured_lufs is None else measured_lufs - target_lufs,
+                    "tolerance_lu": _LOUDNESS_TOLERANCE_LU,
+                }
+            )
     return {"out_path": resolved_out_path, "report": report}
 
 
@@ -1559,7 +1607,7 @@ def verify(path: str, target_lufs: float | None = None, ceiling_dbtp: float | No
     if target_lufs is not None:
         result["target_lufs"] = target_lufs
         measured_lufs = measured.get("integrated_lufs")
-        result["lufs_ok"] = measured_lufs is not None and abs(measured_lufs - target_lufs) <= 0.5
+        result["lufs_ok"] = measured_lufs is not None and abs(measured_lufs - target_lufs) <= _LOUDNESS_TOLERANCE_LU
     if ceiling_dbtp is not None:
         result["ceiling_dbtp"] = ceiling_dbtp
         measured_ceiling = measured.get("true_peak_dbtp")

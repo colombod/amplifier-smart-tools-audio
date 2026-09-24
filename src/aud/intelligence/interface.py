@@ -265,7 +265,9 @@ _PROVIDER_BY_ENV: dict[str, str] = {
 DEFAULT_MODELS: dict[str, str] = {
     "anthropic": "claude-haiku-4-5-20251001",
     "openai": "gpt-4o-mini",
-    "google": "gemini-2.0-flash",
+    # Current stable lightweight text model; minimal thinking by default
+    # fits this advisor's existing 2,000-token response cap. See CONFIGURATION.md.
+    "google": "gemini-3.5-flash-lite",
     "azure_openai": "gpt-4o-mini",
 }
 
