@@ -211,6 +211,26 @@ def critical_bandwidth_hz(f: np.ndarray) -> np.ndarray:
     return 25.0 + 75.0 * (1.0 + 1.4 * (f / 1000.0) ** 2) ** 0.69
 
 
+# Bisection seed for `bark_zwicker_terhardt_to_hz`'s geometric bracket
+# expansion below: 50 kHz comfortably exceeds every documented request
+# (the audible range, and every extrapolation up to a 192 kHz transfer's
+# 96 kHz Nyquist -- see the function's own docstring) while still keeping
+# the expansion loop's iteration count a meaningful figure rather than
+# padding. Named here -- rather than left as a literal duplicated in the
+# loop below and in tests/test_dsp_bands.py's regression pin -- so that a
+# change to this value changes what that pin measures instead of the test
+# comparing a copy of itself against another copy (AGENTS.md #3b).
+_BARK_BRACKET_SEED_HZ = 50_000.0
+
+# Iteration ceiling for the same expansion loop. The worst case this
+# function ever reaches (see the loop's own comment) takes 47 iterations;
+# this cap is that measured worst case's actual safety margin, not a copy
+# of it -- see
+# test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the_asymptote_boundary's
+# headroom assertion, which reads this constant rather than a literal 200.
+_BARK_BRACKET_EXPANSION_CAP = 200
+
+
 def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int = 60) -> np.ndarray:
     """Bark -> Hz, Zwicker & Terhardt 1980, by bisection.
 
@@ -220,19 +240,37 @@ def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int 
     or beyond that ceiling has no finite Hz value and is rejected outright.
 
     Below the ceiling, the bisection bracket is expanded geometrically from
-    a 50 kHz seed until it actually covers `z`, then bisected using
-    `hz_to_bark_zwicker_terhardt`'s strict monotonicity. A fixed `[0, 50_000]`
-    Hz bracket used to be hardcoded here on the assumption that no caller
-    would ever request `z` above ~25.5 Bark (the audible range's own
-    ceiling) -- but `band_edges(..., allow_extrapolation=True)` lets a
+    a `_BARK_BRACKET_SEED_HZ` (50 kHz) seed until it actually covers `z`,
+    then bisected using `hz_to_bark_zwicker_terhardt`'s strict
+    monotonicity. A fixed `[0, 50_000]` Hz bracket used to be hardcoded
+    here on the assumption that no caller would ever request `z` above
+    ~25.5 Bark (the audible range's own ceiling) -- but
+    `band_edges(..., allow_extrapolation=True)` lets a
     caller ask for `f_max` well above 50 kHz (e.g. 96 kHz, the Nyquist of a
     192 kHz transfer), and the fixed bracket silently capped every returned
     edge at ~50 kHz with no exception. `max_iter=60` halves whatever bracket
-    is found to <2^-60 of its width, comfortably inside `tol` for any
-    bracket this module would plausibly need (verified up to ~1e9 Hz); the
-    dense round-trip test still gets ~3.6e-10 Hz precision across 20 Hz-24 kHz.
+    is found to <2^-60 of its width -- a RELATIVE bound, not an absolute
+    one. Within the audible range (20 Hz-24 kHz) the bracket stays small, so
+    this also reaches `tol` in absolute Hz (dense round-trip: ~3.6e-10 Hz).
+    Near the asymptote the forward map itself saturates (both `atan` terms
+    flatten toward their limits), so `hz_to_bark_zwicker_terhardt`'s
+    derivative there is minuscule (~1.7e-14 at f=1e9 Hz, measured): float64
+    rounding noise in evaluating the forward formula, not the number of
+    bisection halvings, is what limits how precisely `z` can pin down `f`
+    there. Measured: the ~0.102 Hz absolute error at f=1e9 Hz is IDENTICAL
+    from `max_iter=60` through `max_iter=2000`, including with `tol=0` --
+    more halvings buy nothing once the bracket has narrowed past what the
+    saturated forward function can resolve at that magnitude. Within the
+    audible range (20 Hz-24 kHz) the forward map is nowhere near saturated,
+    so the bisection reaches `tol` in absolute Hz as stated above.
+
+    Raises:
+        ValueError: `z` is non-finite (NaN/inf), or at or beyond the
+            formula's asymptote (see above).
     """
     z = np.asarray(z, dtype=np.float64)
+    if not np.all(np.isfinite(z)):
+        raise ValueError(f"z must be finite; got z={z}")
 
     # 13*atan(x) -> 13*pi/2 and 3.5*atan(x**2) -> 3.5*pi/2 as f -> infinity.
     asymptote = 13.0 * (np.pi / 2.0) + 3.5 * (np.pi / 2.0)
@@ -244,18 +282,27 @@ def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int 
         )
 
     lo = np.zeros_like(z)
-    hi = np.full_like(z, 50_000.0)
-    for _ in range(200):
+    hi = np.full_like(z, _BARK_BRACKET_SEED_HZ)
+    # Geometric bracket expansion. The worst case -- z at the largest
+    # representable float64 strictly below `asymptote` -- needs exactly 46
+    # doublings (measured) before `hi` exceeds it; because this loop checks
+    # BEFORE it doubles, observing that as a `break` takes the loop's 47th
+    # iteration, not its 46th -- a cap of 46 would exit `range(46)` without
+    # ever running that check. The guard above already rejects every z that
+    # could need more than 46 doublings, so 47 iterations is this loop's
+    # true worst case, and `_BARK_BRACKET_EXPANSION_CAP` below has ~4x that
+    # headroom, not ~4x the doubling count. See
+    # `test_bark_zwicker_terhardt_to_hz_bracket_expansion_needs_46_doublings_at_the_asymptote_boundary`
+    # for a regression pin on the 46/47 figures themselves. There is
+    # deliberately no "ran out of doublings" fallback branch here: given
+    # the guard, that branch would
+    # be unreachable and therefore untestable, which is worse than no
+    # branch at all -- see AGENTS.md and the review that caught this.
+    for _ in range(_BARK_BRACKET_EXPANSION_CAP):
         too_low = hz_to_bark_zwicker_terhardt(hi) < z
         if not np.any(too_low):
             break
         hi = np.where(too_low, hi * 2.0, hi)
-    else:
-        raise ValueError(
-            "bark_zwicker_terhardt_to_hz could not bracket its bisection within 200 bracket "
-            "doublings; the requested z is too close to the formula's asymptote to invert "
-            "reliably in double precision"
-        )
 
     for _ in range(max_iter):
         mid = 0.5 * (lo + hi)
@@ -434,14 +481,35 @@ def band_edges(
     }
 
 
-def bin_band_weights(bands: dict, n_fft: int, sr: int) -> np.ndarray:
+def _bin_frequencies_hz(n_fft: int, sr: float) -> np.ndarray:
+    """The rfft bin frequency grid `bin_band_weights` maps onto bands: bin
+    `k` sits at `k * sr / n_fft`, `n_bins = n_fft // 2 + 1` -- the same
+    convention as `aud.dsp.stft.analyze` (`stft_properties`'s
+    `bin_hz = sr / n_fft`; see module docstring for the `noisereduce`
+    `sr/(n_fft/2)` bug this deliberately does not reproduce).
+
+    Factored out of `bin_band_weights` so it can be asserted directly in
+    tests (element-wise against `k * sr / n_fft`) rather than only inferred
+    indirectly from where energy lands in one band at one configuration --
+    that indirect check was measured to pass unchanged against an
+    off-by-one bin index AND an off-by-one denominator (see
+    tests/test_dsp_bands.py).
+    """
+    n_bins = n_fft // 2 + 1
+    return np.arange(n_bins, dtype=np.float64) * sr / n_fft
+
+
+def bin_band_weights(bands: dict, n_fft: int, sr: float) -> np.ndarray:
     """Triangular partition-of-unity weights mapping each STFT bin to bands.
 
     Args:
         bands: As returned by `band_edges`.
         n_fft: Window/FFT length in samples -- must match whatever produced
             the spectrum this will be applied to (`aud.dsp.stft.analyze`).
-        sr: Sample rate in Hz.
+        sr: Sample rate in Hz. Typed as `float`, not `int`: the runtime
+            check below (`isfinite` and `> 0`) has always accepted a
+            fractional `sr`, so `int` was simply the wrong annotation for
+            this function's own behaviour.
 
     Returns:
         `(n_bands, n_bins)` array, `n_bins = n_fft // 2 + 1` (the same rfft
@@ -462,19 +530,40 @@ def bin_band_weights(bands: dict, n_fft: int, sr: int) -> np.ndarray:
     segments (and everything beyond `f_min`/`f_max`) sum to 1 as well, with
     no separate clamping step required -- so this holds for every bin the
     STFT can produce, whether or not `[f_min, f_max]` covers `[0, sr/2]`.
+    One consequence of the flattened ends: a caller cannot tell that flat-
+    region energy apart from genuine in-band energy, so DC offset (bin 0)
+    or ultrasonic content (above the last center) reads as full-strength
+    band-0/band-N energy indistinguishable from a real signal there.
 
     Raises:
-        ValueError: `bands["f_min"]`/`bands["f_max"]`/`bands["centers_hz"]`
-            contain a non-finite value (inf/NaN); or `bands["centers_hz"]`
-            (together with `f_min`/`f_max`) is not strictly increasing -- a
-            degenerate `band_edges` request (e.g. `n_bands` so large,
-            relative to the covered scale span, that two centers collide at
-            float64 precision) that would otherwise silently divide by zero.
+        ValueError: `n_fft` is not a positive integer, or `sr` is not a
+            positive finite number; `bands["n_bands"]` does not match
+            `len(bands["centers_hz"])` (a hand-built or hand-edited `bands`
+            dict with mismatched fields, which would otherwise silently
+            produce weights for the wrong number of bands, or an `IndexError`
+            instead of a documented `ValueError` when centers are too few);
+            `bands["f_min"]`/`bands["f_max"]`/`bands["centers_hz"]` contain a
+            non-finite value (inf/NaN); or `bands["centers_hz"]` (together
+            with `f_min`/`f_max`) is not strictly increasing -- a degenerate
+            `band_edges` request (e.g. `n_bands` so large, relative to the
+            covered scale span, that two centers collide at float64
+            precision) that would otherwise silently divide by zero.
     """
+    if not isinstance(n_fft, (int, np.integer)) or n_fft <= 0:
+        raise ValueError(f"n_fft must be a positive integer; got n_fft={n_fft!r}")
+    if not (np.isfinite(sr) and sr > 0):
+        raise ValueError(f"sr must be a positive finite number; got sr={sr!r}")
+
     n_bands = bands["n_bands"]
     f_min = bands["f_min"]
     f_max = bands["f_max"]
     centers = np.asarray(bands["centers_hz"], dtype=np.float64)
+
+    if len(centers) != n_bands:
+        raise ValueError(
+            f"bands['n_bands']={n_bands} does not match len(bands['centers_hz'])={len(centers)}; "
+            "a bands dict must have exactly n_bands centers"
+        )
 
     control = np.concatenate(([f_min], centers, [f_max]))
     if not np.all(np.isfinite(control)):
@@ -489,8 +578,8 @@ def bin_band_weights(bands: dict, n_fft: int, sr: int) -> np.ndarray:
             "(centers have collided at float64 precision)"
         )
 
-    n_bins = n_fft // 2 + 1
-    bin_hz = np.arange(n_bins, dtype=np.float64) * sr / n_fft
+    bin_hz = _bin_frequencies_hz(n_fft, sr)
+    n_bins = bin_hz.shape[0]
 
     weights = np.zeros((n_bands, n_bins), dtype=np.float64)
     for i in range(n_bands):
