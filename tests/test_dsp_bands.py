@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from scipy.optimize import brentq
 
 from aud.dsp import bands
 
@@ -201,6 +202,149 @@ def test_band_edges_monotonic_nonoverlapping_gapless(scale, n_bands):
     assert result["scale"] == scale
 
 
+# --- 5a. Band edges are NOT invariant under scale substitution (defect class:
+# the oracle is the input, one layer out from section 2's scalar-formula pin) ---
+
+
+def test_band_edges_bark_variants_produce_materially_different_edges():
+    """Ninth instance of the defect class this file has been closing all along,
+    one layer further out than the previous eight: `band_edges` computes
+    `edges_hz = inverse(linspace(forward(f_min), forward(f_max), n_bands + 1))`.
+    Every assertion `test_band_edges_monotonic_nonoverlapping_gapless` (above)
+    makes -- edges strictly increasing, `edges[0] == f_min`, `edges[-1] == f_max`
+    -- is `inverse(forward(x)) == x`, true for ANY monotone invertible pair,
+    including the identity map `(lambda f: f, lambda z: z)`. Measured directly
+    (see PR mutation-proof transcript): rebinding both Bark entries in
+    `_ALL_SCALES` to identity leaves that test -- and all 683 other tests in
+    this file at the time this was found -- green; `hz_to_bark(1000)` still
+    reports the correct 8.51 Bark, because that scalar path dispatches through
+    the SEPARATE `_BARK_VARIANTS` table (bands.py:353), not `_ALL_SCALES`
+    (bands.py:360, what `_scale_funcs`/`band_edges` actually use, bands.py:454).
+
+    This test (and the two hand-computed-edge tests below) close the gap the
+    way `test_agreement_with_zwicker_24_band_table` already closes it for the
+    SCALAR formula in section 2: pin `band_edges` itself against an
+    independent, external number, because agreement of the scalar
+    `hz_to_bark`/`bark_to_hz` functions proves nothing about what `band_edges`
+    dispatches to.
+
+    The two Bark realizations are independent formulas (PEAQ:
+    `z=7*asinh(f/650)`; Zwicker & Terhardt: `z=13*atan(0.00076f) +
+    3.5*atan((f/7500)**2)`) that coincide only at the shared endpoints (both
+    round-trip the same `f_min`/`f_max` by construction -- asserted explicitly
+    below) and diverge steadily in between; see the module docstring's own
+    measured dE/dz figures and `test_agreement_with_zwicker_24_band_table`'s
+    ~3 Bark PEAQ/table gap at the high end. If `band_edges` ever collapsed
+    both variants onto the same table (identity map, or one variant
+    copy-pasted onto the other's `_ALL_SCALES` entry), every interior edge
+    would coincide too, not just the endpoints.
+
+    Measured (see PR mutation-proof transcript): interior-edge separation
+    between the two variants over 20 Hz-15000 Hz at 8 bands ranges from
+    ~17.16 Hz (band-edge index 1) to ~1758.58 Hz (index 7). Asserting on
+    index 7 with a 1000 Hz threshold is a large, unmistakable margin --
+    comfortably clear of the ~17 Hz smallest interior separation (so it
+    isn't fragile to a future formula/tolerance tweak in either variant)
+    while still requiring genuine divergence, not float noise.
+    """
+    n_bands = 8
+    peaq = bands.band_edges(n_bands, "bark_peaq", f_min=20.0, f_max=15000.0)
+    zt = bands.band_edges(n_bands, "bark_zwicker_terhardt", f_min=20.0, f_max=15000.0)
+
+    # Endpoints coincide by construction (both round-trip the same f_min/f_max)
+    # -- stated explicitly so the interior assertion below reads as the part
+    # carrying the actual signal, not an oversight.
+    assert peaq["edges_hz"][0] == pytest.approx(zt["edges_hz"][0], abs=1e-6)
+    assert peaq["edges_hz"][-1] == pytest.approx(zt["edges_hz"][-1], abs=1e-6)
+
+    diff = np.abs(peaq["edges_hz"] - zt["edges_hz"])
+    print(f"\n[bands] bark_peaq vs bark_zwicker_terhardt edge separation (8 bands, 20-15000 Hz): {diff}")
+    assert diff[7] > 1000.0, (
+        "bark_peaq and bark_zwicker_terhardt band_edges must diverge materially in the "
+        "interior -- if they coincide, band_edges is dispatching both variants through "
+        "the same (or a collapsed/identity) scale function, even though the standalone "
+        "hz_to_bark/bark_to_hz scalar functions may still be correct"
+    )
+
+
+def test_band_edges_bark_peaq_interior_edge_matches_hand_computed_formula():
+    """An INTERIOR edge, not an endpoint -- endpoints round-trip
+    `inverse(forward(f_min/f_max))` by construction and prove nothing (see the
+    test above). Computed independently from the PEAQ/ITU-R BS.1387 formula
+    itself (`z=7*asinh(f/650)`, closed form both ways -- see module docstring),
+    using bare `numpy` arithmetic written directly in this test, NOT by calling
+    `bands.hz_to_bark_peaq`/`bands.bark_peaq_to_hz` -- calling the module's own
+    functions to build the expected value would just reproduce whatever
+    `band_edges` is broken to call, the exact defect this test exists to catch.
+
+    n_bands=4, f_min=20 Hz, f_max=15000 Hz, worked by hand from the formula:
+        z_min = 7*asinh(20/650)    = 0.2153506441174644
+        z_max = 7*asinh(15000/650) = 26.827145883834454
+        z[2]  = z_min + 2*(z_max - z_min)/4 = 13.52124826397596   (the middle edge)
+        edge[2]_hz = 650*sinh(z[2]/7)       = 2195.5942813204097 Hz
+
+    Kills: both Bark names in `_ALL_SCALES` rebound to identity (linear-Hz
+    collapse -- would compute edge[2] as the linear-Hz midpoint, ~7510 Hz, not
+    ~2195.59 Hz); `bark_peaq`'s `_ALL_SCALES` entry rebound to the Zwicker &
+    Terhardt or ERB pair (this variant's own edge would then follow the wrong
+    formula's curve -- measured ~1705.96 Hz and ~1717.81 Hz respectively for
+    this exact request, both far from ~2195.59 Hz).
+    """
+    z_min = 7.0 * np.arcsinh(20.0 / 650.0)
+    z_max = 7.0 * np.arcsinh(15000.0 / 650.0)
+    z_2 = z_min + 2 * (z_max - z_min) / 4
+    expected_edge2_hz = 650.0 * np.sinh(z_2 / 7.0)
+    assert expected_edge2_hz == pytest.approx(2195.5942813204097, abs=1e-6)
+
+    result = bands.band_edges(4, "bark_peaq", f_min=20.0, f_max=15000.0)
+    assert result["edges_hz"][2] == pytest.approx(expected_edge2_hz, abs=1e-6)
+
+
+def test_band_edges_bark_zwicker_terhardt_interior_edge_matches_hand_computed_formula():
+    """Same defect, same fix, for `bark_zwicker_terhardt` -- which has NO
+    closed-form inverse (see module docstring), so the interior edge's Hz
+    value is found by an INDEPENDENT root-solve (`scipy.optimize.brentq`,
+    production uses its own hand-rolled bisection in
+    `bark_zwicker_terhardt_to_hz`) against the published forward formula
+    written directly here, not by calling
+    `bands.hz_to_bark_zwicker_terhardt`/`bands.bark_zwicker_terhardt_to_hz` --
+    so this test does not merely re-run the code under test with different
+    variable names.
+
+    n_bands=4, f_min=20 Hz, f_max=15000 Hz, published formula
+    `z(f) = 13*atan(0.00076*f) + 3.5*atan((f/7500)**2)`, worked by hand:
+        z_min = z(20)    = 0.19760967316343087
+        z_max = z(15000) = 23.923274640740683
+        z[2]  = z_min + 2*(z_max - z_min)/4 = 12.060442156952057   (the middle edge)
+        edge[2]_hz = brentq(f -> z(f) - z[2], bracket=[0, 50000]) = 1705.9622286162764 Hz
+    (Production's own bisection, `bands.bark_zwicker_terhardt_to_hz`, returns
+    1705.9622286165422 Hz for the same request -- a ~2.7e-10 Hz difference
+    from this independent solver's own tolerance, well inside the `abs=1e-4`
+    margin asserted below; the two solvers are not expected to agree to the
+    same tolerance, only to the same formula.)
+
+    Kills: both Bark names in `_ALL_SCALES` rebound to identity (linear-Hz
+    collapse); `bark_zwicker_terhardt`'s `_ALL_SCALES` entry rebound to the
+    PEAQ pair -- the exact copy-paste bug `test_agreement_with_zwicker_24_band_table`
+    cannot see, since that test calls `hz_to_bark`, the SCALAR dispatch through
+    `_BARK_VARIANTS` (bands.py:353), never `band_edges`'s `_ALL_SCALES` path
+    (bands.py:360) (measured ~2195.59 Hz under that mutant for this exact
+    request, far from ~1705.96 Hz).
+    """
+
+    def z_zt(f):
+        return 13.0 * np.arctan(0.00076 * f) + 3.5 * np.arctan((f / 7500.0) ** 2)
+
+    z_min = z_zt(20.0)
+    z_max = z_zt(15000.0)
+    z_2 = z_min + 2 * (z_max - z_min) / 4
+    expected_edge2_hz = brentq(lambda f: z_zt(f) - z_2, 0.0, 50_000.0, xtol=1e-10, rtol=1e-14)
+    assert expected_edge2_hz == pytest.approx(1705.9622286162764, abs=1e-6)
+
+    result = bands.band_edges(4, "bark_zwicker_terhardt", f_min=20.0, f_max=15000.0)
+    assert result["edges_hz"][2] == pytest.approx(expected_edge2_hz, abs=1e-4)
+
+
 def test_band_edges_scale_is_required_not_defaulted():
     """`scale` has no default -- calling positionally without it must fail,
     not silently pick one (see module docstring's "not cosmetic" section)."""
@@ -288,6 +432,99 @@ def test_bark_tabulated_limit_hz_is_pinned():
         "the Bark extrapolation gate's tabulated limit changed; if this is intentional, "
         "update this pin and the docstrings/messages that cite 15500 Hz / 24 Bark"
     )
+
+
+# --- 6a. Scale membership lists are pinned against fixed literals ---
+
+
+def test_scale_membership_lists_are_pinned():
+    """Regression pin for `SCALES`, `BARK_SCALES`, and `ERB_SCALES`.
+
+    `band_edges`'s extrapolation gate (bands.py:456) is a conjunction:
+    `scale in BARK_SCALES and f_max > _BARK_TABULATED_LIMIT_HZ`. The pin
+    above covers the RIGHT operand; these three lists are the LEFT
+    operand, and until now they were unpinned -- each derives straight
+    from this module's own dispatch dicts (`tuple(_BARK_VARIANTS.keys())`
+    etc.), the thing `band_edges` is being checked against.
+
+    Measured: editing `_BARK_VARIANTS` (bands.py) to drop `"bark_peaq"`
+    leaves `BARK_SCALES = ("bark_zwicker_terhardt",)`, and
+    `band_edges(32, "bark_peaq", f_max=20000.0)` then silently ACCEPTS
+    with `extrapolated=False` -- the gate is gone for that scale, not
+    just mistuned. And the suite does not merely miss this: it reports
+    *fewer* tests, not a red one, because `@pytest.mark.parametrize("scale",
+    bands.BARK_SCALES)` two lines below (and the shared `f_max` branch in
+    `test_band_edges_monotonic_nonoverlapping_gapless` above) derive their
+    own coverage from the same shrunk list -- 82 passed drops to 80 in this
+    file (681 to 679 overall), a quieter suite reported as a fully green one.
+    Pin the lists' own values directly, the same pattern used for the
+    tabulated-limit constant above: a derived expectation cannot police the
+    thing it derives from.
+
+    Note what stays UNPINNED on purpose: the `@pytest.mark.parametrize(...,
+    bands.BARK_SCALES)` marks themselves, here and below, still read the
+    live constant. A real new Bark/ERB variant added to `_BARK_VARIANTS`/
+    `_ERB_VARIANTS` should pick up parametrized coverage for free; only
+    silent *removal* is the failure mode this pin closes.
+
+    Order is pinned too, as plain tuple equality -- the same idiom as
+    every other pin in this file, not a new comparison style invented for
+    these three. Order is not independently load-bearing anywhere in this
+    package (grepped: nothing indexes `SCALES`/`BARK_SCALES`/`ERB_SCALES`
+    positionally, only `in` membership and iteration), so a deliberate,
+    harmless reorder of the `_BARK_VARIANTS`/`_ERB_VARIANTS` dict literals
+    would trip this assertion without being a real regression -- exactly
+    the same "if this is intentional, update this pin" case every sibling
+    pin in this file already carries. It is pinned anyway, at zero extra
+    cost over a membership-only check, because the order IS part of what a
+    caller/reader actually observes: the module comment directly above
+    `SCALES`'s definition documents "Bark realizations followed by ERB",
+    and `_scale_funcs`'s unknown-scale message
+    (`f"choose one of {SCALES}"`, bands.py:374) presents the names in this
+    exact order. An order-insensitive (set/sorted) comparison was
+    considered and rejected: it would silently pass a reorder that changes
+    what that error message shows, for no simplicity gain over `==`.
+    """
+    assert bands.SCALES == ("bark_peaq", "bark_zwicker_terhardt", "erb_glasberg_moore"), (
+        "SCALES's membership or order changed; if this is intentional, update this pin and "
+        'check every `@pytest.mark.parametrize("scale", bands.SCALES)` case in this file '
+        "still covers what you expect"
+    )
+    assert bands.BARK_SCALES == ("bark_peaq", "bark_zwicker_terhardt"), (
+        "BARK_SCALES's membership or order changed; if this is intentional, update this pin and "
+        'check every `@pytest.mark.parametrize("scale", bands.BARK_SCALES)` case in this file '
+        "still covers what you expect"
+    )
+    assert bands.ERB_SCALES == ("erb_glasberg_moore",), (
+        "ERB_SCALES's membership changed; if this is intentional, update this pin"
+    )
+
+
+def test_bands_dunder_all_is_pinned():
+    """Same class of gap, minor stakes: `__all__` is a hand-maintained list
+    that can drift from the module's actual public names independently of
+    the tuples above. Measured: dropping `"BARK_SCALES"` from `bands.py`'s
+    `__all__` leaves all 681 tests green (nothing in this suite imports via
+    `from aud.dsp.bands import *`). Pin the export list itself so a silent
+    drop is visible; not worth new machinery beyond this literal comparison."""
+    assert bands.__all__ == [
+        "BARK_SCALES",
+        "ERB_SCALES",
+        "SCALES",
+        "band_edges",
+        "band_energy",
+        "bark_peaq_to_hz",
+        "bark_to_hz",
+        "bark_zwicker_terhardt_to_hz",
+        "bin_band_weights",
+        "critical_bandwidth_hz",
+        "erb_bandwidth_hz",
+        "erb_rate_to_hz",
+        "hz_to_bark",
+        "hz_to_bark_peaq",
+        "hz_to_bark_zwicker_terhardt",
+        "hz_to_erb_rate",
+    ], "bands.__all__ changed; if this is intentional, update this pin"
 
 
 @pytest.mark.parametrize("scale", bands.BARK_SCALES)
