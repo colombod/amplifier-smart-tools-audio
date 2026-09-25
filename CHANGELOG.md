@@ -58,6 +58,20 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   actually read the paper. A partially-verified formula is shipped guesswork; since nothing in
   the codebase called this variant, it was cheaper to remove the whole thing than to keep
   carrying an unverified half-version.
+- **`docs/DESIGN-ENVELOPE.md`** -- the MIT-shippable design envelope for the masking/ducking
+  work: an AVOID-list of patented formulations (with patent numbers) and an ALLOW-list of
+  long-published standards (with citations and publication dates), plus an explicit statement
+  that it is design rationale and **not** a legal clearance. Enforced rather than merely
+  documented, by `tests/test_design_envelope_enforcement.py`: the build fails if a forbidden
+  term -- `partial_loudness`, `loudness_loss`, "phon"/"phons" used as a UNIT, or the
+  alone-vs-in-mix loudness comparison in either word order -- appears anywhere in `src/`,
+  naming the file, line, term, reason and the envelope document. A deliberate exception
+  requires an inline `# DESIGN-ENVELOPE-EXCEPTION: <reason>` marker on the flagged line
+  itself. The constraint a contributor is most likely to trip over: BS.1387's
+  `S_l = 27 dB/Bark` / `S_u = -24 - 230/f_c + 0.2*L` belong to the **FFT-based** ear model
+  only -- the filter-bank model in the same standard uses 31 dB/Bark and
+  `s = min(-4, -24 - 230/f_c + 0.2*L)` -- so the ear model must be named whenever those
+  constants are quoted.
 
 ### Fixed
 
@@ -172,6 +186,34 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
     that proves the guard is not simply rejecting every cut (a cut on the `boxy` fixture's *excess*
     500 Hz band passes untouched), a boost-in-deficient-band control, and the no-reference/no-
     measurements no-op cases.
+- **`docs/DESIGN-ENVELOPE.md` no longer claims the envelope itself is mechanically checked.**
+  "This is checkable by reading the code, so it is checked, not asserted" was false as written:
+  `tests/test_design_envelope_enforcement.py` is a *vocabulary* guard over `src/`, so a function
+  computing the exact patented shape under neutral names (`db_solo - db_together`) passes it
+  cleanly. Forbidden **terms** are mechanically enforced; the **semantic** constraint is not
+  mechanically checkable and rests on review -- now consistent with what the document already
+  said at the top ("can only catch *terms*; it cannot catch *intent*"). A new dependency-licence
+  section records the user ruling of 2026-09-25 (dependencies must be **MIT-compatible**) and the
+  audit behind it: all 20 resolved distributions provably permissive, copyleft 0, unknown 0, and
+  `pedalboard`/`matchering`/`rubberband`/`librosa`/`essentia` absent by name. The criterion is
+  MIT-*compatibility*, not absence of the string "GPL", because `numpy.libs/`/`scipy.libs/` ship
+  `libgfortran` (GPL-3.0-or-later WITH GCC-exception-3.1) and `libquadmath` (LGPL-2.1-or-later),
+  both MIT-compatible as used -- a keyword check would condemn this project's own DSP foundation.
+  Recorded as an **audit, not an enforced check** (nothing reads `pyproject.toml`, `uv.lock` or
+  `importlib.metadata`); enforcement is tracked as work item `smart_tools-c53`.
+- **`docs/DESIGN-ENVELOPE.md`'s libquadmath justification no longer overstates LGPL-2.1.**
+  "Dynamic linking under LGPL-2.1 imposes no copyleft obligation on the linking program" reached
+  the right conclusion by too broad a statement: read plainly it asserts *no obligations at all*,
+  and **section 6 does impose notice and source/relink conditions on whoever distributes a
+  combined work.** The claim is narrowed to what is actually true -- the linking program is not
+  relicensed -- and the clause that makes the position solid is now stated: **this project does
+  not redistribute those binaries** (pip/uv fetches the numpy and scipy wheels from PyPI), so the
+  section 6 obligations sit with numpy and scipy, not with `aud`. Also recorded, because it is why
+  the two rows need different reasoning rather than one shared argument: libquadmath does **not**
+  carry the GCC Runtime Library Exception that covers libgfortran, so its row rests on dynamic
+  linking plus non-redistribution alone and is the weaker of the two. The libgfortran reasoning is
+  unchanged and needed no change; the measured audit numbers and bundled-runtime sizes are
+  untouched.
 
 ### Added
 
