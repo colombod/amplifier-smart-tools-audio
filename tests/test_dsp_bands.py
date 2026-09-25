@@ -162,8 +162,12 @@ def test_erb_per_bark_ratio_varies_with_frequency(f, expected_erb_per_bark):
     per-Bark slope (e.g. the next epic step's dB/Bark spreading skirts) is
     NOT a fixed multiple of ERB -- the ratio itself changes with frequency.
     Measured here as a central-difference derivative ratio (dE/dz, ERB per
-    Bark) using the Zwicker&Terhardt Bark map against Glasberg-Moore ERB-rate,
-    against the task's stated approximate reference ratios.
+    Bark) using the Zwicker&Terhardt Bark map against Glasberg-Moore ERB-rate.
+    2.8 (100 Hz) and 1.2 (1000 Hz) are the task's stated approximate reference
+    figures, matching measurement to 2.63% and 1.32%. 1.95 (10000 Hz) is
+    measured from this implementation (1.944560), agreeing with this module's
+    own "~1.9-2.0" and departing from the task's stated 2.1, which is 7.40%
+    off measurement.
     """
     h = 1e-3
 
@@ -176,7 +180,8 @@ def test_erb_per_bark_ratio_varies_with_frequency(f, expected_erb_per_bark):
     erb_per_bark = float(d_erb(f) / d_bark(f))
     print(f"\n[bands] at {f} Hz: 1 Bark ~= {erb_per_bark:.2f} ERB (expected ~{expected_erb_per_bark})")
     # A loose tolerance: this is a local-derivative sanity check, not a
-    # precise reproduction of the task's own approximate figures.
+    # precise reproduction. 2.8 and 1.2 are the task's stated figures; 1.95
+    # is measured from this implementation, not task-stated.
     assert erb_per_bark == pytest.approx(expected_erb_per_bark, rel=0.25)
 
 
