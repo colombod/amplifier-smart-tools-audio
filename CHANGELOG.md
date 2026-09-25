@@ -153,6 +153,21 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
     that proves the guard is not simply rejecting every cut (a cut on the `boxy` fixture's *excess*
     500 Hz band passes untouched), a boost-in-deficient-band control, and the no-reference/no-
     measurements no-op cases.
+- **`docs/DESIGN-ENVELOPE.md` no longer claims the envelope itself is mechanically checked.**
+  "This is checkable by reading the code, so it is checked, not asserted" was false as written:
+  `tests/test_design_envelope_enforcement.py` is a *vocabulary* guard over `src/`, so a function
+  computing the exact patented shape under neutral names (`db_solo - db_together`) passes it
+  cleanly. Forbidden **terms** are mechanically enforced; the **semantic** constraint is not
+  mechanically checkable and rests on review -- now consistent with what the document already
+  said at the top ("can only catch *terms*; it cannot catch *intent*"). A new dependency-licence
+  section records the user ruling of 2026-09-25 (dependencies must be **MIT-compatible**) and the
+  audit behind it: all 20 resolved distributions provably permissive, copyleft 0, unknown 0, and
+  `pedalboard`/`matchering`/`rubberband`/`librosa`/`essentia` absent by name. The criterion is
+  MIT-*compatibility*, not absence of the string "GPL", because `numpy.libs/`/`scipy.libs/` ship
+  `libgfortran` (GPL-3.0-or-later WITH GCC-exception-3.1) and `libquadmath` (LGPL-2.1-or-later),
+  both MIT-compatible as used -- a keyword check would condemn this project's own DSP foundation.
+  Recorded as an **audit, not an enforced check** (nothing reads `pyproject.toml`, `uv.lock` or
+  `importlib.metadata`); enforcement is tracked as work item `smart_tools-c53`.
 
 ### Added
 

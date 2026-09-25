@@ -158,6 +158,55 @@ reference *implementation* is copyleft. Do not read, port, or paraphrase code fr
 | spectralcarve (best match: `rcptr2/gabcis-spectralcarve-pro`) | AGPL-3 | Same caveat: identity match is an assumption, recorded rather than implicit. |
 | MPEG-1 `dist10` reference code (ISO/IEC 11172-3 / ISO 13818-3 "Distribution 10", 1997) | No licence grant | Carries **no explicit grant of rights to copy, modify or redistribute**; provided without fee "as is," with warranty and non-infringement disclaimers. Fraunhofer's own included note says the files "have not officially been released for public distribution." Use the **specification only**; do not copy the reference code. |
 
+## Dependency licences (the third axis, and an audit rather than a check)
+
+**User ruling, 2026-09-25, verbatim: "we MUST ONLY HAVE DEPENDENCIES COMPATIBLE WITH MIT
+LICENSE".**
+
+The criterion is **MIT-compatibility**, not absence of the string "GPL" -- and that
+distinction is load-bearing, not pedantic. A keyword check would fail on numpy and scipy,
+this project's own DSP foundation, for the bundled GCC runtime libraries described below.
+
+**Measured state, audited 2026-09-25** -- an untruncated scan of every licence field and OSI
+classifier across all 20 resolved distributions: **copyleft 0, unknown 0, provably permissive
+20.**
+
+| Licence | Distributions |
+|---|---|
+| MIT | aud, pydantic, pydantic_core, pyyaml, pyloudnorm, pytest, pluggy, iniconfig, ruff, future, annotated-types, typing-inspection |
+| MIT-0 | cffi |
+| BSD-3-Clause | numpy, scipy, soundfile, pycparser |
+| BSD-2-Clause | pygments |
+| Apache-2.0 OR BSD-2-Clause | packaging |
+| PSF-2.0 | typing_extensions |
+
+**Absent by name**, confirmed: `pedalboard`, `matchering`, `rubberband`, `librosa`,
+`essentia`, `pyrubberband`, `soundstretch`.
+
+**Bundled runtimes -- present on disk in the wheels, and not visible in any metadata field.**
+`scipy.libs/` and `numpy.libs/` ship:
+
+| Bundled library | Size | Licence | Why it is MIT-compatible as used |
+|---|---|---|---|
+| `libgfortran-*.so.5.0.0` | 2767 KB (also a 2651 KB variant in scipy) | **GPL-3.0-or-later WITH GCC-exception-3.1** | The GCC Runtime Library Exception exists precisely to permit GCC runtime libraries to be carried into a program under any licence, including proprietary, without propagating GPL terms to it. |
+| `libquadmath-*.so.0.0.0` | 265 KB / 245 KB | **LGPL-2.1-or-later** | Dynamic linking under LGPL-2.1 imposes no copyleft obligation on the linking program. |
+| `libscipy_openblas*.so` | ~24 MB | BSD-3-Clause | Permissive outright. |
+
+Both copyleft-family entries are MIT-compatible **as used**. That is the whole reason the
+criterion is stated as MIT-compatibility: the honest answer here is "GPL-3.0-or-later is
+present on disk and is fine," which a string match cannot reach.
+
+**The method trap, recorded because it nearly produced a false clean result.** A first audit
+truncated licence strings to 45 characters and reported a clean tree, **missing the bundled
+runtimes entirely** -- because scipy's `License` field is **47,559 characters**: the BSD text
+plus a bundled-third-party section. A length-capped lexical scan of licence metadata is
+unreliable; read the whole field.
+
+**This is an audit, not an enforced check.** Nothing in the build fails if an incompatible
+dependency is added tomorrow. The vocabulary guard described below reads `src/` only -- it
+does not read `pyproject.toml`, `uv.lock` or `importlib.metadata`, and it will not notice a
+dependency at all. Enforcement is tracked as work item `smart_tools-c53`.
+
 ## What Step 6's metric must demonstrably do
 
 The collision/masking metric must operate in the **energy domain**: linear power, band
@@ -166,7 +215,20 @@ energies (`E_{m,k}`), and a spreading matrix (`S`) applied in linear power. It m
 US11469731B2 sense -- see above, "comparing" is broader than "difference") between a
 source's loudness alone and its loudness in the presence of / within the mix.
 
-This is checkable by reading the code, so it is checked, not asserted:
+**The forbidden *terms* are mechanically enforced; the semantic constraint above is not
+mechanically checkable and rests on review.** What runs is a vocabulary guard, not a semantic
+one: a function that computes the exact patented shape under neutral names passes it cleanly --
+
+```python
+def _masking_penalty(db_solo: float, db_together: float) -> float:
+    return db_solo - db_together
+```
+
+-- so nothing but a reviewer stands between that code and the codebase. This is the same limit
+stated at the top of this document (the check "can only catch *terms*; it cannot catch
+*intent*"), restated here where the check itself is described, so the two readings cannot
+drift apart.
+
 **`tests/test_design_envelope_enforcement.py`** scans every `.py` file under `src/` for the
 forbidden vocabulary (`partial_loudness`, `loudness_loss`, `phon`/`phons` as a unit, and the
 alone-vs-in-mix/isolation-vs-presence comparison naming), across identifier and prose
