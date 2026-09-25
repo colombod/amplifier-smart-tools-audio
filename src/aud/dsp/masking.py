@@ -225,12 +225,25 @@ implicit)
   a port. 120+ dB SPL is itself outside any realistic playback level (well
   past instantaneous hearing-damage thresholds), so the reachability
   condition is stated here rather than guarded against defensively.
-- **`apply_absolute_threshold=True` (the default) declares essentially
-  everything above ~15 kHz "masked" at any realistic calibration**, because
-  `threshold_in_quiet` grows very steeply there (measured: 65.9 dB SPL at
-  16 kHz, 160.3 dB SPL at 20 kHz -- see `threshold_in_quiet`'s own
-  docstring). DECISION: keep the default `True`. For this module's
-  ducking use case the direction is SAFE, unlike the eq. 24 masking-offset
+- **`apply_absolute_threshold=True` (the default) declares everything above
+  a CALIBRATION-DEPENDENT crossover frequency "masked" -- that frequency is
+  NOT a fixed "~15 kHz"; it moves with `playback_level_db_spl`, and stating
+  one number without the calibration hides that.** Measured directly (32
+  PEAQ-scale bands spanning 20 Hz-20 kHz -- this module's own reference band
+  count -- comparing `threshold_in_quiet`'s floor against the eq. 24-offset
+  masking threshold of the loudest possible masker, 0 dBFS in every OTHER
+  band, the most masking-favorable case obtainable): the absolute-threshold
+  floor DOMINATES above roughly 16.0 kHz at `playback_level_db_spl=70`,
+  rising to roughly 17.8 kHz at `playback_level_db_spl=100` (both converge,
+  in the many-band limit, to ~16.06 kHz and ~17.89 kHz respectively -- the
+  32-band figures above already sit within ~120 Hz of that limit). For
+  context, `threshold_in_quiet(15 kHz)` is only 51.0 dB SPL -- far below any
+  realistic calibration, so "~15 kHz" was measurably wrong, not merely
+  imprecise: at every playback level tested, the true crossover sits above
+  16 kHz, never at 15 kHz. `threshold_in_quiet` grows very steeply above
+  that (measured: 65.9 dB SPL at 16 kHz, 160.3 dB SPL at 20 kHz -- see
+  `threshold_in_quiet`'s own docstring). DECISION: keep the default `True`.
+  For this module's ducking use case the direction is SAFE, unlike the eq. 24 masking-offset
   omission this PR fixes: content genuinely above the threshold of hearing
   at these frequencies is, by definition, inaudible regardless of any
   masker, so reporting it as "masked" (safe to duck) cannot itself cause
@@ -524,6 +537,11 @@ def spreading_function_peaq(
     frequency-domain masking model -- see module docstring for the full
     citation and the asymmetric-slope model this implements.
 
+    Known deviation: this spreads UNWEIGHTED band power (no outer/middle-ear
+    `W[k]` weighting applied first), which over-predicts masking almost
+    everywhere -- see module docstring's "Known deviation" section for the
+    measured per-frequency table.
+
     Args:
         band_power: `(n_bands, ...)`, linear power (as `aud.dsp.bands.
             band_energy` returns; 0 dBFS full-scale sine == 1.0), matching
@@ -608,6 +626,11 @@ def masking_threshold(
     `MAX(spread_pattern, Tq)` (Sec. II.C; see module docstring's citation
     for `threshold_in_quiet`), applied to the OFFSET-WEIGHTED pattern, not
     the raw excitation.
+
+    Known deviation: inherited from `spreading_function_peaq` -- the spread
+    excitation this thresholds is UNWEIGHTED band power (no outer/middle-ear
+    `W[k]` applied first), which over-predicts masking almost everywhere --
+    see module docstring's "Known deviation" section for the measured table.
 
     Args:
         band_power, bands, playback_level_db_spl, exponent: See
