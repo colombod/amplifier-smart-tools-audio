@@ -467,6 +467,11 @@ stated in §7: a top-level `import faster_whisper` would make every deterministi
 tool depend on an *optional* extra being installed, which is precisely the property the tool
 claims not to have.
 
+**Before adding a masking/collision metric under `dsp/`**, read
+[DESIGN-ENVELOPE.md](DESIGN-ENVELOPE.md): it names the specific patented loudness
+formulations that are off-limits and the energy-domain approach required instead, and an
+enforced test fails the build if the forbidden vocabulary appears in `src/`.
+
 > **Status.** The two document contracts, the canonical order, the verb surface and the
 > edit-point resolution design (§2c) were in place as of 0.3.0, ahead of the signal processing
 > behind them. That gap is closed: `dsp/detect`, `dsp/resolve`, `dsp/edit`, `core/regions` and
