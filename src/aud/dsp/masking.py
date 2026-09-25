@@ -114,7 +114,15 @@ levels the deviation is real and substantial, not a rounding-level effect
     1e-4                52.0 dB SPL                          0.81
     1e-6                32.0 dB SPL                          0.34
     1e-9                 2.0 dB SPL                          0.013
-    (exact Bs reference) ~-92 dB SPL                         0.0 (exact)
+    (exact Bs reference)  0.0 dB SPL                         0.0 (exact)
+
+(Corrected from an earlier draft of this docstring that said "~-92 dB SPL"
+for the exact-reference row: the reference is defined as the level at which
+`normalised_power * calibration == 1.0` -- i.e. `10*log10(1.0) == 0` dB SPL
+exactly, by construction, not approximately, and not -92. Verified directly:
+`reference_normalised_power = 1.0 / calibration`, so
+`reference_normalised_power * calibration` is `1.0` for any
+`playback_level_db_spl`, not just 92.)
 
 This is real, intrinsic behaviour of a level-dependent spreading model
 applied across a wide dynamic range from a fixed low-level reference -- NOT
@@ -136,14 +144,111 @@ pins that the (large, real) deviation at realistic levels stays within a
 generous, measured envelope -- catching a genuine blow-up/regression -- while
 the Kabal-oracle test above is what actually rules out a silent scaling defect.
 
+Known deviation: outer/middle-ear weighting and internal noise are NOT
+applied before the level-dependent upper slope -- measured impact
+------------------------------------------------------------------------
+ITU-R BS.1387's FFT-based ear model (Annex 2 Sec 2.1) applies TWO stages
+BEFORE frequency-domain spreading that this module does not implement:
+Sec 2.1.4 "Outer and middle ear" (a fixed, frequency-dependent weighting
+`W[k]` applied to each FFT bin before grouping into critical bands, eq. 7)
+and Sec 2.1.6 "Adding internal noise" (a fixed per-band additive term,
+eq. 18, `0.4*3.64*(f/1000)^-0.8` dB SPL). `spreading_function_peaq` instead
+spreads `band_power` exactly as received from `aud.dsp.bands.band_energy`
+-- unweighted, with no internal-noise floor added.
+
+This is a DELIBERATE, documented simplification, not an oversight:
+`aud.dsp.masking` operates purely on already-grouped per-band energy (see
+this module's own scope note below and `aud.dsp.bands`'s own docstring --
+"does NOT implement spreading functions" there either). Applying `W[k]`
+correctly requires per-FFT-bin weighting BEFORE the bin->band summation
+`aud.dsp.bands.band_energy` performs; retrofitting it here, after the fact,
+on already-summed band energy, would only be a coarser band-centre-only
+approximation of the real per-bin integral -- not obviously better than
+documenting the gap, and it would silently mix "the real thing" and "an
+approximation of the real thing" under one name. Implementing it properly
+is future work at the `aud.dsp.bands`/`aud.dsp.stft` layer, not this
+module.
+
+Because the upper slope's level-dependent term is `+0.2*L` and `L` is
+computed here directly from the UNWEIGHTED band power, the omission of
+`W[k]` shifts `L` by approximately `W[k]` itself (for signal levels well
+above the internal-noise floor, where the additive noise term is
+negligible) -- making the upper slope's level term wrong by roughly
+`0.2*W[k]` dB/Bark. `W[k]` (ITU-R BS.1387 eq. 7 / Kabal eq. 6:
+`W_dB(f) = -0.6*3.64*(f/1000)^-0.8 + 6.5*exp(-0.6*(f/1000-3.3)^2) -
+0.001*(f/1000)^3.6`) is NEGATIVE almost everywhere (the ear is less
+sensitive than the 1 kHz reference at most frequencies), so this module's
+slope is correspondingly too SHALLOW (masking over-predicted -- the same
+unsafe-for-a-ducker direction as the missing eq. 24 offset, see "Known
+deviation" below) almost everywhere, and too STEEP only in the narrow
+~2-5 kHz region where `W[k]` is positive. Measured directly against eq. 7
+above (re-derived and independently cross-checked against Kabal's own
+worked checkpoints -- `W(1 kHz) = -1.9` dB and peak `+5.6` dB near 3.3 kHz,
+both reproduced to 3 significant figures by this same formula):
+
+    f            W[k]        0.2*W[k]  (the missing slope correction, dB/Bark)
+    50 Hz       -23.98 dB     -4.80
+    80 Hz       -16.46 dB     -3.29
+    100 Hz      -13.77 dB     -2.75   (matches the ~2.8 dB/Bark figure this
+                                       deviation was originally measured at)
+    200 Hz       -7.89 dB     -1.58
+    500 Hz       -3.74 dB     -0.75
+    1000 Hz      -1.91 dB     -0.38
+    2000 Hz      +1.09 dB     +0.22
+    3300 Hz      +5.59 dB     +1.12   (the one region where this module's
+                                       slope is too STEEP, not too shallow)
+    5000 Hz      +0.22 dB     +0.04
+    8000 Hz      -2.20 dB     -0.44
+    10000 Hz     -4.33 dB     -0.87
+    15000 Hz    -17.39 dB     -3.48
+    18000 Hz    -33.25 dB     -6.65
+
+A caller needing PEAQ-exact slopes at bass or high-treble frequencies
+should be aware of this; a caller only needing the asymmetry itself
+(upward masking reaches further than downward) and approximate slope
+magnitudes in the 1-5 kHz region is well served by the current
+implementation.
+
+Two further behaviours, decided and documented (not silently left
+implicit)
+--------------------------------------------------------------------------
+- **The upper slope can turn POSITIVE at extreme levels, and this module
+  does NOT clamp it.** `S_u = -24 - 230/f_c + 0.2*L` is positive whenever
+  `L > 120 + 1150/f_c` dB SPL -- reachable, at the default calibration,
+  only when `playback_level_db_spl` itself is set above roughly 120 dB SPL
+  (since normalised `band_power` is capped at 1.0 == `playback_level_db_spl`
+  dB SPL). DECISION: leave it unclamped. This is faithful to the FFT-based
+  ear model this module ports (Kabal's `PQ_SpreadCB`, Appendix F.4, has no
+  clamp); BS.1387's OTHER (filter-bank-based) ear model does clamp its
+  spreading kernel, but this module implements the FFT-based one, and
+  mixing a clamp from the other model in would be an uncited addition, not
+  a port. 120+ dB SPL is itself outside any realistic playback level (well
+  past instantaneous hearing-damage thresholds), so the reachability
+  condition is stated here rather than guarded against defensively.
+- **`apply_absolute_threshold=True` (the default) declares essentially
+  everything above ~15 kHz "masked" at any realistic calibration**, because
+  `threshold_in_quiet` grows very steeply there (measured: 65.9 dB SPL at
+  16 kHz, 160.3 dB SPL at 20 kHz -- see `threshold_in_quiet`'s own
+  docstring). DECISION: keep the default `True`. For this module's
+  ducking use case the direction is SAFE, unlike the eq. 24 masking-offset
+  omission this PR fixes: content genuinely above the threshold of hearing
+  at these frequencies is, by definition, inaudible regardless of any
+  masker, so reporting it as "masked" (safe to duck) cannot itself cause
+  audible artifacts. This is a different failure mode from over-predicting
+  masking of clearly audible mid-range content, which IS unsafe -- the
+  reason Blocker 1 in this module's own history was a correctness bug and
+  this default is not.
+
 What is NOT implemented (documented, not silently dropped)
 ----------------------------------------------------------
-- PEAQ's own further pattern-adaptation, internal-ear-noise, and
-  time-domain (forward-masking) smoothing stages are NOT implemented here
-  -- they are part of PEAQ's *quality assessment* pipeline, not needed to
-  produce a per-frame masking profile for a ducker. The design note for
-  this epic explicitly scopes Step 5 to "Implement PEAQ spreading and
-  STOP."
+- PEAQ's own further pattern-adaptation, and time-domain (forward-masking)
+  smoothing stages are NOT implemented here -- they are part of PEAQ's
+  *quality assessment* pipeline, not needed to produce a per-frame masking
+  profile for a ducker. The design note for this epic explicitly scopes
+  Step 5 to "Implement PEAQ spreading and STOP." (Outer/middle-ear
+  weighting and internal noise are ALSO not implemented -- see "Known
+  deviation" above, which is the one item in this list with a measured
+  numeric impact rather than being purely out of scope.)
 - Multi-masker combination uses PEAQ's own 0.4-power law rather than a
   simple linear (energy) sum. This is the CONSERVATIVE choice for a ducker
   (it under-predicts combined masking relative to measured "excess
@@ -212,8 +317,39 @@ _TQ_RESONANCE_CENTRE_KHZ = 3.3
 _TQ_RESONANCE_WIDTH = 0.6
 _TQ_HIGH_FREQ_COEFF = 1.0e-3
 
+#: ITU-R BS.1387 Annex 2 Sec 2.1.9 "Masking threshold", eq. 24: the masking
+#: threshold sits this many dB BELOW the (spread) excitation pattern, as a
+#: piecewise-linear function of Bark distance from the first band
+#: (`k * res`, 0-indexed band number `k` times the uniform Bark spacing
+#: `res` == this module's `dz`):
+#:     m[k]_dB = 3.0               for k*res <= 12
+#:             = 0.25 * (k*res)    for k*res >  12
+#: Independently confirmed (this session) against P. Kabal's report eq. 112
+#: (same piecewise formula, same 3.0/0.25/12 constants) and against the
+#: standard's own PDF text (Rec. ITU-R BS.1387, Annex 2 Sec 2.1.9, eq. 24 --
+#: literally the section and equation numbers this comment cites, not a
+#: paraphrase). Kabal's eq. 112 states the breakpoint occurs at `z_L + 12`
+#: Bark, where `z_L = B(f_L)` is the Bark value of the lowest band EDGE
+#: (Kabal Appendix F "zL = B(fL)"); since bands are uniformly Bark-spaced
+#: starting at that edge, band k's own Bark offset from z_L is exactly
+#: `k*res` -- matching the eq. 24 condition on `k*res` directly, with no
+#: separate `z_L` term needed here.
+#: THIS WAS THE MISSING PIECE (a real correctness bug, not a style
+#: preference): without it, `masking_threshold` returned the raw spread
+#: excitation UNCHANGED (threshold-minus-excitation measured at exactly
+#: 0.00 dB at every band), i.e. 3.0-6.75 dB too permissive -- the UNSAFE
+#: direction for a ducker, since it means concluding material is masked
+#: when BS.1387's own model says it is not.
+_MASKING_OFFSET_FLOOR_DB = 3.0
+_MASKING_OFFSET_BREAKPOINT_BARK = 12.0
+_MASKING_OFFSET_SLOPE_DB_PER_BARK = 0.25
+
 #: Above this frequency, `_TQ_HIGH_FREQ_COEFF * (f/1000)**4` diverges to
-#: physically-meaningless values (>100 dB by 16 kHz, >1000 dB by 40 kHz --
+#: physically-meaningless values (~66 dB by 16 kHz, >1000 dB by 40 kHz --
+#: MEASURED: the term alone is 65.536 dB at 16 kHz and 2560.0 dB at 40 kHz;
+#: full Tq(16 kHz) is 65.9 dB, matching the checkpoint in
+#: `tests/test_dsp_masking.py`. An earlier draft of this comment said
+#: ">100 dB by 16 kHz", which is wrong by roughly 35 dB -- corrected here;
 #: see module docstring). `threshold_in_quiet` clips its input frequency at
 #: this ceiling before evaluating the formula; it does not extrapolate past
 #: it. Matches `aud.dsp.bands.band_edges`'s own default `f_max`, the
@@ -365,6 +501,19 @@ def _spread_power_domain(power: np.ndarray, centers_hz: np.ndarray, dz: float, e
     return spread
 
 
+def _masking_offset_db(n_bands: int, dz: float) -> np.ndarray:
+    """ITU-R BS.1387 Sec 2.1.9 eq. 24 -- see `_MASKING_OFFSET_FLOOR_DB`'s own
+    comment for the full citation. Returns `m[k]` in dB, shape `(n_bands,)`,
+    for 0-indexed band number `k = 0 .. n_bands-1`.
+    """
+    bark_offset_from_first_band = np.arange(n_bands, dtype=np.float64) * dz
+    return np.where(
+        bark_offset_from_first_band <= _MASKING_OFFSET_BREAKPOINT_BARK,
+        _MASKING_OFFSET_FLOOR_DB,
+        _MASKING_OFFSET_SLOPE_DB_PER_BARK * bark_offset_from_first_band,
+    )
+
+
 def spreading_function_peaq(
     band_power: np.ndarray,
     bands: dict,
@@ -403,8 +552,10 @@ def spreading_function_peaq(
         ValueError: `bands` is not PEAQ-scale or has fewer than 2 bands
             (see `_validate_peaq_bands`); `band_power`'s leading axis does
             not match `bands["n_bands"]`; `band_power` is negative,
-            non-finite, or contains an exact zero (an exact zero raises
-            `0**negative` inside the recurrence -- see the raised message).
+            non-finite, or contains an exact zero (an exact zero is
+            rejected as a semantically degenerate masker level, NOT because
+            of a numerical domain error -- see the raised message, and the
+            correction of this exact claim in an earlier draft).
     """
     centers_hz, dz = _validate_peaq_bands(bands)
     band_power = np.asarray(band_power, dtype=np.float64)
@@ -417,9 +568,14 @@ def spreading_function_peaq(
         raise ValueError("band_power must be non-negative (it is a power/energy quantity)")
     if np.any(band_power == 0):
         raise ValueError(
-            "band_power must be strictly positive: the spreading recurrence raises each band's power to a "
-            "negative exponent internally (the upper-slope level dependence), which is undefined at exactly "
-            "zero. Add a small floor (e.g. the quietest representable digital sample's power) before calling."
+            "band_power must be strictly positive: at exactly zero, this masker's implicit level "
+            "L = 10*log10(power) is -infinity, which is not a physically meaningful masker level for this "
+            "model. (Note this is a semantic guard, not a numerical-domain error: the exponent actually "
+            "applied to power in the recurrence, _UPPER_SLOPE_LEVEL_COEFF * dz, is POSITIVE -- dz is always "
+            "a positive Bark step -- so power**that_exponent evaluates to a well-defined 0.0 at power=0, not "
+            "NaN or a ZeroDivisionError. An earlier version of this message wrongly claimed the exponent was "
+            "negative and undefined at zero; it is not.) Add a small floor (e.g. the quietest representable "
+            "digital sample's power) before calling."
         )
 
     calibration = 10.0 ** (playback_level_db_spl / 10.0)
@@ -444,33 +600,52 @@ def masking_threshold(
     apply_absolute_threshold: bool = True,
     exponent: float = _DEFAULT_COMBINE_EXPONENT,
 ) -> np.ndarray:
-    """`spreading_function_peaq`'s masking profile, floored (per band) by
-    `threshold_in_quiet` at that band's centre frequency -- the combination
-    Painter & Spanias describe as the conventional `MAX(spread_pattern,
-    Tq)` (Sec. II.C; see module docstring's citation for `threshold_in_quiet`).
+    """`spreading_function_peaq`'s excitation pattern, weighted down by the
+    ITU-R BS.1387 Sec 2.1.9 eq. 24-26 masking offset `m[k]` (see
+    `_MASKING_OFFSET_FLOOR_DB`'s own comment), then optionally floored (per
+    band) by `threshold_in_quiet` at that band's centre frequency -- the
+    combination Painter & Spanias describe as the conventional
+    `MAX(spread_pattern, Tq)` (Sec. II.C; see module docstring's citation
+    for `threshold_in_quiet`), applied to the OFFSET-WEIGHTED pattern, not
+    the raw excitation.
 
     Args:
         band_power, bands, playback_level_db_spl, exponent: See
             `spreading_function_peaq`.
-        apply_absolute_threshold: If `False`, this is exactly
-            `spreading_function_peaq`'s output with no floor -- the
+        apply_absolute_threshold: If `False`, this is
+            `spreading_function_peaq`'s output with the eq. 24-26 masking
+            offset applied but with NO absolute-threshold floor -- the
             absolute-threshold-of-hearing term is optional per this epic's
             design notes ("optional absolute threshold of hearing floor").
+            The eq. 24-26 offset itself is NOT optional: it is what makes
+            this function's return value a masking THRESHOLD rather than a
+            bare excitation pattern, in either case.
 
     Returns:
         Same shape as `band_power`, same normalised linear-power units.
+        `10*log10(spreading_function_peaq(...)) -
+        10*log10(masking_threshold(..., apply_absolute_threshold=False))`
+        equals `_masking_offset_db(...)` exactly, at every band -- see
+        `tests/test_dsp_masking.py::
+        test_masking_threshold_sits_the_bs1387_offset_below_the_excitation`.
 
     Raises:
         As `spreading_function_peaq`.
     """
     spread = spreading_function_peaq(band_power, bands, playback_level_db_spl=playback_level_db_spl, exponent=exponent)
-    if not apply_absolute_threshold:
-        return spread
 
     n_bands = bands["n_bands"]
+    _, dz = _validate_peaq_bands(bands)
+    m_db = _masking_offset_db(n_bands, dz)
+    m_shape = (n_bands,) + (1,) * (spread.ndim - 1)
+    masked = spread * 10.0 ** (-m_db.reshape(m_shape) / 10.0)
+
+    if not apply_absolute_threshold:
+        return masked
+
     centers_hz = np.asarray(bands["centers_hz"], dtype=np.float64)
     tq_db_spl = threshold_in_quiet(centers_hz)
     calibration = 10.0 ** (playback_level_db_spl / 10.0)
     tq_normalised_power = 10.0 ** (tq_db_spl / 10.0) / calibration
-    tq_shape = (n_bands,) + (1,) * (spread.ndim - 1)
-    return np.maximum(spread, tq_normalised_power.reshape(tq_shape))
+    tq_shape = (n_bands,) + (1,) * (masked.ndim - 1)
+    return np.maximum(masked, tq_normalised_power.reshape(tq_shape))

@@ -291,7 +291,17 @@ def test_uniform_excitation_is_exactly_preserved_at_the_bs_reference_level():
     out = spreading_function_peaq(uniform, bands, playback_level_db_spl=playback_level_db_spl)
     max_abs_dev = float(np.max(np.abs(out / uniform - 1.0)))
     print(f"\n[masking] at exact Bs reference level: max |ratio - 1| = {max_abs_dev:.3e}")
-    assert np.allclose(out, uniform, rtol=1e-9)
+    # NOT `np.allclose(out, uniform, rtol=1e-9)` (no explicit atol): `uniform`
+    # here is ~6.3e-10 (1.0 / 10**9.2), so `np.allclose`'s DEFAULT atol=1e-8
+    # is ~16x LARGER than the quantity being compared -- it would pass for
+    # ANY `out` within 1e-8 of zero, regardless of whether the recurrence
+    # computed the right answer. MEASURED: deleting the Bs normalisation
+    # entirely still passes that old assertion (ratio deviates by 84%, but
+    # 84% of ~6.3e-10 is ~5.3e-10, still under the 1e-8 default atol).
+    # `max_abs_dev` above is already a RATIO (dimensionless, atol-immune);
+    # asserting on it directly is both tighter and correct regardless of
+    # the quantities' absolute scale.
+    assert max_abs_dev < 1e-9
 
 
 def test_uniform_excitation_deviation_is_bounded_and_matches_independent_oracle():
@@ -319,14 +329,17 @@ def test_uniform_excitation_deviation_is_bounded_and_matches_independent_oracle(
         measured[normalized_level] = max_dev
         print(f"\n[masking] normalised_level={normalized_level:.1e}: max |ratio-1| = {max_dev:.4f}")
 
-    # Measured this session (32 PEAQ bands, 92 dB SPL calibration): up to
-    # ~5.74 at full-scale (normalised power 1.0, i.e. every one of 32 bands
+    # Measured this session (32 PEAQ bands, 92 dB SPL calibration): 5.7382
+    # at full-scale (normalised power 1.0, i.e. every one of 32 bands
     # simultaneously at 92 dB SPL -- a physically extreme, not merely loud,
-    # input). 10.0 keeps a wide margin above that measured worst case while
-    # still catching a true regression (e.g. an unbounded overflow, or the
-    # exponent bug this test suite already caught once, which produced a
-    # roughly 10x-smaller deviation than the correct implementation's own).
-    assert measured[1.0] < 10.0
+    # input). The OLD bound here was `< 10.0` -- so loose it did not
+    # discriminate a real defect: deleting the Bs normalisation entirely
+    # (see the exact-reference test above) measures 8.7281 here, comfortably
+    # under the old 10.0 bound. 6.0 keeps real margin above the measured
+    # 5.7382 (to absorb harmless cross-platform/NumPy-version float
+    # differences) while catching that mutation's 8.7281 with room to
+    # spare, and still catches a true unbounded-blow-up regression.
+    assert measured[1.0] < 6.0
     # And the deviation should shrink monotonically toward the reference
     # level (decreasing normalised_level here, since the reference level
     # itself is far below all of these -- see the exact-reference test).
@@ -352,23 +365,127 @@ def test_spreading_function_handles_trailing_frame_axis():
         assert np.allclose(batched[:, frame_idx], single)
 
 
+def test_spreading_function_matches_independent_kabal_oracle_on_a_nonuniform_profile():
+    """Coverage gap this session found and closed: every other test in
+    THIS file is blind to a single-band index shift inside
+    `_spread_power_domain` (e.g. accidentally reading `centers_hz[m+1]`
+    instead of `centers_hz[m]` for band `m`'s own upper-slope coefficient).
+    MEASURED directly: applying exactly that mutation still passes all 32
+    of this file's other tests (asymmetry, fitted aggregate slopes over
+    6-band windows, uniform-profile normalisation) -- because a uniform
+    input is symmetric under a band relabelling, and a slope FITTED over
+    several neighbouring bands barely moves when just one band's
+    coefficient is nudged to its immediate neighbour's (Bark spacing is
+    fine enough that adjacent bands' coefficients are nearly equal). Only
+    `test_dsp_masking_kabal_reference.py`'s independent transliteration,
+    exercised on a NON-uniform, per-band-distinguishable profile, catches
+    it (24 of its parametrised cases failed under this exact mutation).
+
+    Rather than write a THIRD from-scratch transliteration of the same
+    published algorithm (which would itself need independent verification
+    before it could be trusted), this test reuses that already-independent
+    oracle directly -- closing the coverage gap in this file without
+    duplicating the risk of a fresh, unverified re-implementation.
+    """
+    # Loaded by file path (not `import test_dsp_masking_kabal_reference`):
+    # pytest's own import-mode does not reliably put `tests/` on `sys.path`
+    # when only ONE test file is targeted on the command line (MEASURED
+    # this session -- `pytest tests/test_dsp_masking.py` alone leaves
+    # `sys.path[0]` as the repo root, not `tests/`), so a bare module import
+    # here would pass when the whole suite is run but fail when this file
+    # is run alone. Loading by explicit file path is independent of that.
+    import importlib.util
+
+    _kabal_ref_spec = importlib.util.spec_from_file_location(
+        "test_dsp_masking_kabal_reference", Path(__file__).parent / "test_dsp_masking_kabal_reference.py"
+    )
+    _kabal_ref_module = importlib.util.module_from_spec(_kabal_ref_spec)
+    _kabal_ref_spec.loader.exec_module(_kabal_ref_module)
+    _kabal_spread_normalised = _kabal_ref_module._kabal_spread_normalised
+
+    n = 55
+    bands = band_edges(n, scale="bark_peaq", f_min=20.0, f_max=20000.0, allow_extrapolation=True)
+    fc = np.asarray(bands["centers_hz"])
+    z = hz_to_bark_peaq(fc)
+    dz = float(np.mean(np.diff(z)))
+    playback_level_db_spl = 92.0
+    calibration = 10.0 ** (playback_level_db_spl / 10.0)
+
+    # Deliberately non-uniform and non-symmetric: three maskers of
+    # different magnitudes at different positions, well away from the
+    # array edges (so no edge-clipping effect confounds the comparison).
+    normalised = np.full(n, 1e-9)
+    normalised[10] = 0.003
+    normalised[27] = 0.05
+    normalised[44] = 0.0007
+    calibrated = normalised * calibration
+
+    expected = _kabal_spread_normalised(calibrated, fc, dz) / calibration
+    actual = spreading_function_peaq(normalised, bands, playback_level_db_spl=playback_level_db_spl)
+
+    max_rel_err = float(np.max(np.abs((actual - expected) / np.where(expected != 0, expected, 1.0))))
+    print(f"\n[masking] non-uniform profile vs independent Kabal oracle: max rel err = {max_rel_err:.3e}")
+    assert np.allclose(actual, expected, rtol=1e-9, atol=1e-300)
+
+
 # --- masking_threshold ---
 
 
-def test_masking_threshold_without_absolute_floor_equals_spreading_function():
-    n = 32
-    bands = _peaq_bands(n)
-    rng = np.random.default_rng(11)
-    power = rng.uniform(1e-6, 1e-2, size=n)
-    spread = spreading_function_peaq(power, bands)
-    floored_off = masking_threshold(power, bands, apply_absolute_threshold=False)
-    assert np.array_equal(spread, floored_off)
+def test_masking_threshold_sits_the_bs1387_offset_below_the_excitation():
+    """CORRECTNESS BLOCKER fix, verified directly: ITU-R BS.1387 Annex 2
+    Sec 2.1.9 eq. 24-26 requires the masking threshold to sit `m[k]` dB
+    BELOW the (spread) excitation pattern, where
+
+        m[k]_dB = 3.0             for k*res <= 12
+                = 0.25 * (k*res)  for k*res >  12
+
+    (`k` = 0-indexed band number, `res` = the uniform Bark spacing between
+    band centres). BEFORE this fix, `masking_threshold` returned the raw
+    excitation unchanged -- threshold-minus-excitation measured at exactly
+    0.00 dB at every band, 3.0-6.75 dB too permissive (the UNSAFE direction
+    for a ducker: concluding material is masked when it audibly is not).
+
+    The expected `m[k]` values here are LITERAL constants from the
+    standard, typed directly into this test -- NOT imported from
+    `aud.dsp.masking._masking_offset_db` -- so this test cannot pass merely
+    because production and test agree with each other; it independently
+    re-derives the published formula and checks production against it.
+    This is also this test's mutation-proof for BOTH constants (3.0 and
+    0.25) individually: mutating either one in the source makes this
+    assertion fail (verified directly this session -- see the PR's mutation
+    transcript)."""
+    n = 109
+    bands = band_edges(n, scale="bark_peaq", f_min=20.0, f_max=20000.0, allow_extrapolation=True)
+    fc = np.asarray(bands["centers_hz"])
+    z = hz_to_bark_peaq(fc)
+    dz = float(np.mean(np.diff(z)))
+
+    rng = np.random.default_rng(2026)
+    power = rng.uniform(1e-6, 1e-1, size=n)
+
+    excitation = spreading_function_peaq(power, bands)
+    threshold_unfloored = masking_threshold(power, bands, apply_absolute_threshold=False)
+    measured_offset_db = 10.0 * np.log10(excitation) - 10.0 * np.log10(threshold_unfloored)
+
+    k = np.arange(n, dtype=np.float64)
+    bark_offset = k * dz
+    expected_offset_db = np.where(bark_offset <= 12.0, 3.0, 0.25 * bark_offset)
+
+    max_abs_diff = float(np.max(np.abs(measured_offset_db - expected_offset_db)))
+    print(f"\n[masking] threshold-minus-excitation vs eq. 24 m[k]: max |diff| = {max_abs_diff:.3e} dB")
+    assert np.allclose(measured_offset_db, expected_offset_db, atol=1e-9)
 
 
 def test_masking_threshold_floors_very_quiet_bands_at_absolute_threshold():
-    """A vanishingly quiet signal's spread masking pattern must not report
-    a masking threshold quieter than the absolute threshold of hearing --
-    nothing masks below the floor no one can hear anything at regardless."""
+    """A vanishingly quiet signal's masking threshold must not report a
+    value quieter than the absolute threshold of hearing -- nothing masks
+    below the floor no one can hear anything at regardless. Compared only
+    against `threshold_in_quiet`'s own independently-verified output (see
+    the checkpoints/ISO226 cross-check above) -- NOT against a fresh
+    `spreading_function_peaq` call, which would make this test unable to
+    distinguish a `masking_threshold` defect from a `spreading_function_peaq`
+    defect (the self-consistency anti-pattern this PR's review flagged and
+    this file has spent eight review rounds eliminating elsewhere)."""
     n = 32
     playback_level_db_spl = 92.0
     bands = _peaq_bands(n)
@@ -378,8 +495,6 @@ def test_masking_threshold_floors_very_quiet_bands_at_absolute_threshold():
     vanishingly_quiet = np.full(n, 1e-30)
 
     floored = masking_threshold(vanishingly_quiet, bands, playback_level_db_spl=playback_level_db_spl)
-    unfloored = spreading_function_peaq(vanishingly_quiet, bands, playback_level_db_spl=playback_level_db_spl)
-    assert np.all(floored >= unfloored)
 
     tq_db_spl = threshold_in_quiet(np.asarray(bands["centers_hz"]))
     tq_normalised = 10.0 ** (tq_db_spl / 10.0) / calibration
@@ -388,17 +503,26 @@ def test_masking_threshold_floors_very_quiet_bands_at_absolute_threshold():
 
 def test_masking_threshold_does_not_floor_a_loud_signal_at_low_and_mid_frequencies():
     """Where the absolute threshold at this calibration is modest (below
-    ~8 kHz, at 92 dB SPL), a loud signal's own spread pattern already
-    exceeds it and the floor must be a no-op."""
+    ~8 kHz, at 92 dB SPL), a loud signal's own masking threshold already
+    exceeds it and the floor must be a no-op. Checked independently of
+    `spreading_function_peaq`: if the floor were a no-op, `masking_threshold`
+    (which is `max(pre_floor_value, tq)`) can only read ABOVE `tq` by
+    returning `pre_floor_value` itself -- so `floored > tq` at a band
+    PROVES the floor did not engage there, without needing a second,
+    separately-computed `pre_floor_value` to compare against."""
     n = 32
+    playback_level_db_spl = 92.0
     bands = _peaq_bands(n)
+    calibration = 10.0 ** (playback_level_db_spl / 10.0)
     loud = np.full(n, 0.1)
-    floored = masking_threshold(loud, bands)
-    unfloored = spreading_function_peaq(loud, bands)
+    floored = masking_threshold(loud, bands, playback_level_db_spl=playback_level_db_spl)
     centers = np.asarray(bands["centers_hz"])
     low_mid = centers < 8000.0
     assert np.any(low_mid)
-    assert np.allclose(floored[low_mid], unfloored[low_mid])
+
+    tq_db_spl = threshold_in_quiet(centers)
+    tq_normalised = 10.0 ** (tq_db_spl / 10.0) / calibration
+    assert np.all(floored[low_mid] > tq_normalised[low_mid])
 
 
 def test_masking_threshold_floors_near_the_top_of_the_audible_range_even_for_a_loud_signal():
@@ -408,14 +532,21 @@ def test_masking_threshold_floors_near_the_top_of_the_audible_range_even_for_a_l
     so at a realistic 92 dB SPL calibration a merely LOUD (not extreme)
     signal can legitimately read as quieter than the absolute threshold in
     that range. This is the mirror image of the low/mid-frequency test
-    above: it confirms the floor actually ENGAGES where it should, rather
-    than this module's calibration silently no-op'ing it everywhere."""
+    above: it confirms the floor actually ENGAGES where it should (the
+    result EQUALS the independently-computed `tq_normalised` there), rather
+    than this module's calibration silently no-op'ing it everywhere --
+    checked independently of `spreading_function_peaq`, for the same reason
+    given in the test above."""
     n = 32
+    playback_level_db_spl = 92.0
     bands = _peaq_bands(n)
+    calibration = 10.0 ** (playback_level_db_spl / 10.0)
     loud = np.full(n, 0.1)
-    floored = masking_threshold(loud, bands)
-    unfloored = spreading_function_peaq(loud, bands)
+    floored = masking_threshold(loud, bands, playback_level_db_spl=playback_level_db_spl)
     centers = np.asarray(bands["centers_hz"])
     top_band = centers > 18000.0
     assert np.any(top_band)
-    assert np.all(floored[top_band] > unfloored[top_band])
+
+    tq_db_spl = threshold_in_quiet(centers)
+    tq_normalised = 10.0 ** (tq_db_spl / 10.0) / calibration
+    assert np.allclose(floored[top_band], tq_normalised[top_band])
