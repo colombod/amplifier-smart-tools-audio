@@ -120,6 +120,7 @@ failure, 2 on a bad invocation.
 | [src/aud/SMART_TOOL.md](src/aud/SMART_TOOL.md) | The manifest — what the tool is and what it needs |
 | [docs/VISION.md](docs/VISION.md) | Why this exists, what it will not do |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it is built: plan document, chain topology, module layout |
+| [docs/DESIGN-ENVELOPE.md](docs/DESIGN-ENVELOPE.md) | Patented loudness formulations to avoid, and the energy-domain approach used instead |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Settings, credentials, precedence |
 | [contracts/plan.v1.md](contracts/plan.v1.md) | The plan document another program may parse |
 | [contracts/regions.v1.md](contracts/regions.v1.md) | The regions document `detect` emits and `cut` consumes |
