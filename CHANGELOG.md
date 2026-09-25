@@ -168,6 +168,19 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   both MIT-compatible as used -- a keyword check would condemn this project's own DSP foundation.
   Recorded as an **audit, not an enforced check** (nothing reads `pyproject.toml`, `uv.lock` or
   `importlib.metadata`); enforcement is tracked as work item `smart_tools-c53`.
+- **`docs/DESIGN-ENVELOPE.md`'s libquadmath justification no longer overstates LGPL-2.1.**
+  "Dynamic linking under LGPL-2.1 imposes no copyleft obligation on the linking program" reached
+  the right conclusion by too broad a statement: read plainly it asserts *no obligations at all*,
+  and **section 6 does impose notice and source/relink conditions on whoever distributes a
+  combined work.** The claim is narrowed to what is actually true -- the linking program is not
+  relicensed -- and the clause that makes the position solid is now stated: **this project does
+  not redistribute those binaries** (pip/uv fetches the numpy and scipy wheels from PyPI), so the
+  section 6 obligations sit with numpy and scipy, not with `aud`. Also recorded, because it is why
+  the two rows need different reasoning rather than one shared argument: libquadmath does **not**
+  carry the GCC Runtime Library Exception that covers libgfortran, so its row rests on dynamic
+  linking plus non-redistribution alone and is the weaker of the two. The libgfortran reasoning is
+  unchanged and needed no change; the measured audit numbers and bundled-runtime sizes are
+  untouched.
 
 ### Added
 

@@ -189,7 +189,7 @@ classifier across all 20 resolved distributions: **copyleft 0, unknown 0, provab
 | Bundled library | Size | Licence | Why it is MIT-compatible as used |
 |---|---|---|---|
 | `libgfortran-*.so.5.0.0` | 2767 KB (also a 2651 KB variant in scipy) | **GPL-3.0-or-later WITH GCC-exception-3.1** | The GCC Runtime Library Exception exists precisely to permit GCC runtime libraries to be carried into a program under any licence, including proprietary, without propagating GPL terms to it. |
-| `libquadmath-*.so.0.0.0` | 265 KB / 245 KB | **LGPL-2.1-or-later** | Dynamic linking under LGPL-2.1 imposes no copyleft obligation on the linking program. |
+| `libquadmath-*.so.0.0.0` | 265 KB / 245 KB | **LGPL-2.1-or-later** | Dynamic linking under LGPL-2.1 does not relicense the linking program -- narrower than "no obligation at all," which would be wrong: **section 6 places notice and source/relink conditions on whoever distributes the combined work.** Those conditions sit with numpy and scipy, not with aud, because **this project does not redistribute these binaries** -- pip/uv fetches their wheels directly from PyPI. Note also that libquadmath does **not** carry the GCC Runtime Library Exception that covers libgfortran above; this row rests on dynamic linking plus non-redistribution alone, and is the weaker of the two arguments. |
 | `libscipy_openblas*.so` | ~24 MB | BSD-3-Clause | Permissive outright. |
 
 Both copyleft-family entries are MIT-compatible **as used**. That is the whole reason the
