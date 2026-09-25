@@ -75,6 +75,39 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ### Fixed
 
+- **`aud.dsp.masking.masking_threshold`** was missing ITU-R BS.1387 Annex 2 Sec 2.1.9's eq. 24-26
+  masking offset entirely: threshold-minus-excitation measured at exactly 0.00 dB at every band,
+  3.0-6.75 dB too permissive (concluding material is masked when it audibly is not -- the unsafe
+  direction for a ducker). Now applies `m[k] = 3.0 dB` for `k*res <= 12`, else `0.25*(k*res)`, per
+  band, with a dedicated test re-deriving the formula independently of the module's own constants
+  and mutation-proving both 3.0 and 0.25. Also corrected three wrong numbers in the module's own
+  docstrings/error text (the exact-Bs-reference level is 0 dB SPL, not "~-92"; `Tq` measures 65.9 dB
+  at 16 kHz, not ">100"; the zero-power guard is a semantic check, not a negative-exponent domain
+  error), documented the measured impact of not applying outer/middle-ear weighting and internal
+  noise before the level-dependent upper slope (0.2x the omitted `W[k]`, from -6.65 to +1.12 dB/Bark
+  across the audible range), and recorded two deliberate, previously-undocumented decisions (no
+  clamp on the upper slope's rare positive-going case above ~120 dB SPL; keep the absolute-threshold
+  floor default `True`). Two of six mutations run against this module during review (deleting the
+  `Bs` normalisation; a one-band index shift in the upper-slope frequency term) passed all of
+  `tests/test_dsp_masking.py`'s existing assertions undetected -- an `np.allclose` call with no
+  explicit `atol` against a ~6e-10-magnitude reference, and a `< 10.0` bound measured at 5.7382 for
+  the correct implementation, were both loose enough to admit the mutated values (8.7281, 84%
+  deviation). Fixed by asserting on the already-computed ratio deviation directly, tightening the
+  bound, and adding a test against `test_dsp_masking_kabal_reference.py`'s independently-transliterated
+  oracle on a non-uniform profile (the index-shift mutation is invisible to every uniform-profile or
+  aggregate-slope-fit assertion in this file, by construction).
+- **`aud.dsp.masking`** (PR #33 follow-up review): the docstring claim that
+  `apply_absolute_threshold=True` "declares essentially everything above ~15 kHz masked" was
+  measurably wrong -- re-measured (32 PEAQ bands, 20 Hz-20 kHz): the absolute-threshold floor only
+  dominates above ~16.0 kHz at `playback_level_db_spl=70`, rising to ~17.8 kHz at
+  `playback_level_db_spl=100` (converges to ~16.06/~17.89 kHz in the many-band limit), and
+  `threshold_in_quiet(15 kHz)` is only 51.0 dB SPL -- far below any realistic calibration. Restated
+  as an explicit calibration-dependent crossover instead of a single fixed number. Also added a
+  short pointer on both `masking_threshold` and `spreading_function_peaq` (the two public functions
+  callers actually invoke) to the module docstring's "Known deviation" section describing the
+  unweighted-band-power / outer-ear-weighting gap -- previously that disclosure existed only in the
+  module docstring, invisible to a caller reading either function directly. No table duplicated;
+  pointer only.
 - Refresh Google's default to current stable `gemini-3.5-flash-lite` in place of retired
   `gemini-2.0-flash`. Its default minimal thinking better fits the existing 2,000-token
   advice cap. Explicit model selections, request settings and stored records are unchanged.
