@@ -11,6 +11,64 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ### Added
 
+- **`aud.dsp.collision`** -- Step 6 of the masking/ducking epic: the collision measure, THE
+  feature of the whole epic and the step most likely to be silently wrong (issue #16). Given two
+  signals' own per-band energy over time, computes the per-band per-frame TARGET (masker) gain
+  that clears room for the KEY (maskee) inside it -- NOT multiband gating (gain driven by key
+  energy alone), which was ruled out explicitly: a band the target never occupied gets no
+  constraint and is never attenuated, and that property falls out of the linear-program
+  formulation rather than being special-cased.
+  - **Role assignment is the load-bearing, counter-intuitive part**: the TARGET (the signal
+    being gained down, e.g. a music bed) is the MASKER; the KEY (the sidechain signal, e.g.
+    speech) is the MASKEE. The masking threshold is computed FROM the target, and the key's own
+    energy is what it is compared against -- backwards from the naive "detect on the key" reading.
+    Mutation-proved this session: swapping which array is passed as `target_band_energy` vs.
+    `key_band_energy` fails 4 named tests, including one designed specifically to catch it
+    (`tests/test_dsp_collision_mutations.py::test_swapping_target_and_key_arguments_reverses_who_gets_cut`).
+  - **Formulation**: `T_b = M_b * sum_k S_bk * G_k * E_m,k`, solved per frame as
+    `minimise sum_k w_k*(1-G_k)` subject to `sum_k S_bk*E_m,k*G_k <= E_s,b/10**(margin_db/10)`
+    for every key-active band `b`, via `scipy.optimize.linprog` (already a BSD dependency; the LP
+    proved fast and numerically stable at this scale -- no fallback to the greedy alternative was
+    needed, see the PR description for timing measurements). `S` (the spreading matrix) reuses
+    `aud.dsp.masking.spreading_function_peaq` itself (Step 5) at `exponent=1.0` -- an explicit,
+    cited deviation from PEAQ's own 0.4-power multi-masker pooling (a documented free parameter
+    on that function), needed because a 0.4-power combination is nonlinear in each masker's own
+    gain and would destroy the LP's linearity. `M_b` is recovered from Step 5's PUBLIC API alone
+    (no private import, no duplicated formula) via a documented invariant of
+    `masking_threshold`/`spreading_function_peaq`'s own ratio.
+  - **`w_k` is SII (ANSI S3.5-1997 Table 3) band-importance, not key energy** -- a second,
+    independent reason the naive approach is wrong: normal-effort speech is loudest at 250-500 Hz
+    (~34.5 dB SPL, falling to ~17.3 dB by 2 kHz) but the SAME standard's importance table puts the
+    single most important band at 2 kHz (0.0898) and 59.2%/78.7% of total importance in
+    1-4 kHz/500 Hz-4 kHz -- a key-energy-weighted objective would spend the target's body cutting
+    exactly where intelligibility matters least. Density-interpolated (log-log, clamped outside
+    160-8000 Hz) and integrated across each of `bands`' own (possibly unequal) Hz widths, so a
+    caller's own band structure -- not the standard's 18-band table -- determines final weights.
+  - **Key-active gating uses BOTH an absolute and a relative (dB-below-this-frame's-own-peak)
+    floor**, not one alone: an absolute-only floor reads a hand-built uniform-fill test array as
+    100% active; a relative-only floor cannot tell genuine silence from a uniformly-near-zero
+    array. Measured this session on real, physically bandlimited (Butterworth) noise: ordinary
+    filter/STFT spectral leakage sits 55-65 dB below a passband's own peak, comfortably below the
+    default -40 dB relative floor.
+  - Acceptance is the issue's own four criteria, each measured on RENDERED audio (STFT analyse ->
+    `collision_gains` -> per-bin gain projection -> ISTFT), never the internally-computed gain
+    curve alone: (1) key energy in a target-empty band produces no attenuation; (2) disjoint
+    spectra leave the target unchanged (<2 dB) with near-zero total attenuation; (3) a localised
+    overlap concentrates attenuation there (measured: -4.3 to -4.9 dB in-range vs. -0.01 to
+    -0.02 dB outside, across ten random seeds); (4) broadband/broadband collision degrades to a
+    roughly uniform duck (std ~1.4 dB against an ~11.4 dB mean) that cuts no more than a naive
+    full-band level ducker in that same case.
+  - A real-audio test harness (`tests/collision_test_support.py`) required its own calibration
+    fix: `aud.dsp.bands.band_energy`'s raw output is on `ShortTimeFFT`'s own window-gain-scaled
+    units, not the "0 dBFS == 1.0" convention `aud.dsp.masking`'s `playback_level_db_spl`
+    calibration assumes -- measured directly (a bin-aligned 0 dBFS reference tone) at
+    `(sum(window))**2 / 4`. Without dividing by that constant, ordinary -6 dBFS test material
+    calibrated to upward of 120 dB SPL, driving the PEAQ upper slope's level-dependent term far
+    past any realistic playback level and producing absurdly wide masking spread -- caught only
+    by rendering real audio, not by inspecting the gain array in isolation.
+  - Scope boundary held deliberately: this step computes the target gain the collision measure
+    implies, with `g_min` defaulting to 0.0 (unbounded depth) and no ballistics -- attack/release
+    and depth limiting are Step 7/8's job (issue #17), not silently folded in here.
 - **`aud.dsp.stft`** -- STFT analysis / weighted-overlap-add (WOLA) resynthesis: the transform
   spine for future spectral processing (masking, denoising, de-essing-by-band, ...), library-only
   in this step -- no CLI verb, no plan stage, no engine handler. Uses `scipy.signal.ShortTimeFFT`
