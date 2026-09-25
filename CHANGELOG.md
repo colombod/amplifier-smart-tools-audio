@@ -58,6 +58,20 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   actually read the paper. A partially-verified formula is shipped guesswork; since nothing in
   the codebase called this variant, it was cheaper to remove the whole thing than to keep
   carrying an unverified half-version.
+- **`docs/DESIGN-ENVELOPE.md`** -- the MIT-shippable design envelope for the masking/ducking
+  work: an AVOID-list of patented formulations (with patent numbers) and an ALLOW-list of
+  long-published standards (with citations and publication dates), plus an explicit statement
+  that it is design rationale and **not** a legal clearance. Enforced rather than merely
+  documented, by `tests/test_design_envelope_enforcement.py`: the build fails if a forbidden
+  term -- `partial_loudness`, `loudness_loss`, "phon"/"phons" used as a UNIT, or the
+  alone-vs-in-mix loudness comparison in either word order -- appears anywhere in `src/`,
+  naming the file, line, term, reason and the envelope document. A deliberate exception
+  requires an inline `# DESIGN-ENVELOPE-EXCEPTION: <reason>` marker on the flagged line
+  itself. The constraint a contributor is most likely to trip over: BS.1387's
+  `S_l = 27 dB/Bark` / `S_u = -24 - 230/f_c + 0.2*L` belong to the **FFT-based** ear model
+  only -- the filter-bank model in the same standard uses 31 dB/Bark and
+  `s = min(-4, -24 - 230/f_c + 0.2*L)` -- so the ear model must be named whenever those
+  constants are quoted.
 
 ### Fixed
 
