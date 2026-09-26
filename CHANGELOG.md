@@ -11,6 +11,57 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ### Added
 
+- **MIT-compatible dependency enforcement** (`tests/license_policy.py` +
+  `tests/test_license_enforcement.py`) -- AGENTS.md section 1's licence rule was a documented
+  human audit with nothing enforcing it; a licence audit that is not a check is a comment. Now
+  it is a check, run in CI (`.github/workflows/ci.yml`'s `Lint and test` job).
+  - **Two independent signals, deliberately combined**: (1) the ACTUAL licence metadata
+    (`License-Expression` SPDX header, trove `Classifier` lines, and legacy `License` field, in
+    that priority order) of every distribution actually resolved and installed in the
+    environment (`importlib.metadata.distributions()`, chosen over shelling out to `uv tree`/
+    `uv pip list` -- stdlib, structured, no subprocess-output parsing) -- the general rule that
+    catches a GPL-family package nobody has denylisted yet; (2) a measured, named denylist
+    (`pedalboard`, `matchering`, `rubberband` and every spelling variant, `essentia`, `librosa`)
+    as a backstop, because metadata is not always trustworthy -- see below.
+  - **A third, independent layer**: an AST scan (not regex) of every file under `src/` for a
+    forbidden import at ANY nesting depth (a function-body import is visited exactly like a
+    module-level one) or a literal-string argument to `importlib.import_module`/`__import__`.
+  - **A fourth**: a static parse of `pyproject.toml` -- main dependencies AND every
+    `optional-dependencies` extra -- against the denylist by name, so a denylisted package
+    hidden in an extra is caught even when that extra is not currently installed.
+  - **Real, load-bearing finding, not a hypothetical**: `pyrubberband`'s OWN PyPI metadata is
+    genuinely `License :: OSI Approved :: ISC License (ISCL)` (permissive) -- verified against
+    `https://pypi.org/pypi/pyrubberband/json`. It is a thin wrapper; the licence problem is the
+    GPL/commercial-dual Rubber Band C++ library it calls out to at runtime, which never appears
+    as its own installed Python distribution. A metadata-only check would ALLOW it. This is why
+    the name denylist is checked unconditionally, not only when metadata is silent.
+  - **Second real finding, also load-bearing**: `essentia` ships NO legacy `License ::`
+    classifiers at all -- only a modern `License-Expression: AGPL-3.0-only` header (verified
+    against `https://pypi.org/pypi/essentia/json`). A classifier-only checker would see zero
+    signal and call it merely UNKNOWN; the `License-Expression` check is what makes the general
+    metadata rule actually catch it on its own.
+  - **False-positive trap found and avoided**: the permitted, permissive (BSD) `scipy`
+    dependency's own legacy `License` metadata field literally contains the substrings
+    `GPL-3.0-or-later` and `LGPL-2.1-or-later` -- bundled OpenBLAS/gfortran runtime notices
+    under the GCC Runtime Library Exception, which extends no obligation to scipy itself. A
+    naive substring search over that field would misclassify a dependency this project
+    explicitly permits. Classifiers are checked FIRST and are what actually decide scipy's
+    verdict; the long legacy-field blob is never keyword-matched when classifiers are present.
+    Guarded directly against the real installed distribution in
+    `test_scipy_bundled_gpl_notice_is_not_a_false_positive`.
+  - Every one of the task's five named evasion patterns (function-body import; literal-string
+    `importlib.import_module`/`__import__`; dependency hidden in an optional extra; transitive
+    dependency anywhere in the resolved graph; name-spelling/case/hyphenation variant) has its
+    own named test, and each was verified red-then-green by temporarily neutering the relevant
+    detection function and re-running -- see the PR description for the transcripts.
+  - **Known limitation, reported rather than hidden**: every signal here is name-based or
+    metadata-based. Vendoring GPL source under a new module name, or repointing a dependency
+    name to different upstream content via a source override or renamed fork, defeats all four
+    signals simultaneously and would need content/copyright-header fingerprinting to catch.
+  - **Discrepancy flagged, not silently corrected**: `librosa` is carried on the denylist as
+    instructed, but librosa's OWN published licence is ISC (permissive), not GPL/AGPL -- it is
+    excluded from this project's dependency stack by policy (docs/VISION.md), not by licence.
+
 - **`aud.dsp.collision`** -- Step 6 of the masking/ducking epic: the collision measure, THE
   feature of the whole epic and the step most likely to be silently wrong (issue #16). Given two
   signals' own per-band energy over time, computes the per-band per-frame TARGET (masker) gain
