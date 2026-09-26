@@ -62,6 +62,63 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
     instructed, but librosa's OWN published licence is ISC (permissive), not GPL/AGPL -- it is
     excluded from this project's dependency stack by policy (docs/VISION.md), not by licence.
 
+- **`aud.dsp.gate.dynamic_eq`** -- Step 7 of the masking/ducking epic: a per-band dynamic EQ
+  driven by an EXTERNAL key (issue #17). USER RULING, binding: this is a dynamic EQ, NOT a
+  sidechain level ducker -- the gain law (threshold/ratio/knee/depth-limit) is computed
+  INDEPENDENTLY PER BAND from the key's own level, not as one full-band gain.
+  - **The seam**: `_process_bands` (used internally by `gate`/`expand` too) used to FUSE
+    detector-source with gain-target -- it detected on `band` and applied the result to that
+    SAME `band`. It now takes an optional `key` array, decoupled from `x`: `None` (default)
+    reproduces `gate`/`expand`'s original fused behaviour exactly (verified: all 48
+    pre-existing `gate`/`expand`/chain tests pass unchanged); when given, `key` is split into
+    the same crossover bands as `x`, and band `i`'s LEVEL comes from `key` while the GAIN is
+    applied to `x`. A new `smoothing` flag (`False` for `dynamic_eq`) skips lookahead and
+    hold/attack/release entirely -- ballistics and cross-band (ERB-width) smoothing are
+    Step 8's job (issue #18), not this step's; `dynamic_eq` applies the raw per-sample static
+    law directly and stops there.
+  - **Helper reuse (an acceptance criterion, not a preference)**: reuses
+    `aud.dsp.dynamics.static_gain_reduction_db` (renamed public from `_static_gain_reduction_db`
+    -- this repo's own convention is cross-module reuse via a public API, never a private
+    import, see `aud.dsp.collision`'s `masking_offset`) UNMODIFIED, per band -- it already takes
+    a `level_db` array and returns a gain. Does NOT reuse `_gate_curve`/`_expander_curve`
+    (`aud.dsp.gate`): both attenuate BELOW threshold, the correct shape for cleaning a signal's
+    OWN quiet passages, but backwards for an external-key duck (which must attenuate the target
+    when the key is LOUD, above threshold) -- using either would silently invert the feature.
+  - **Depth limit holds by construction**: the raw ratio-based reduction is otherwise unbounded
+    as the key's level rises; `dynamic_eq` clips it to `-max_depth_db` before applying it, so
+    acceptance criterion 1 (rendered attenuation never exceeds the requested max depth, in any
+    band) is structural, not incidental. Mutation-proved: removing the clip made the measured
+    cut blow past the limit (53.3 dB rendered against a 10 dB limit; 53.6 dB against an 8 dB
+    per-band limit in the multiband case).
+  - **Naming hazard, resolved**: `gate`/`expand`'s existing `sidechain_hpf_hz` highpasses their
+    own FUSED detector copy of `band` itself -- not an external key. `dynamic_eq` takes
+    `key_hpf_hz` instead, a highpass on the EXTERNAL key's detector copy, so the two meanings of
+    "sidechain highpass" cannot collide on any call site.
+  - **Stereo mono-fold inherited for free**: `_detector_level_db` already mono-folds (means
+    channel power together) before computing a level -- written for `gate`/`expand`'s own
+    stereo-image-safety property, and it applies unchanged when the detector signal is an
+    external `key`. Mutation-proved directly: with the fold replaced by "read channel 0 only",
+    a key with its loud content on channel 0 vs. channel 1 produced an 8.2 dB cut in one
+    arrangement and 0.0 dB in the swapped one -- the real, channel-order-dependent failure the
+    fold prevents (a naive "identical stereo in -> identical stereo out" check alone does NOT
+    catch this, since this architecture broadcasts one gain envelope to every channel of a band
+    regardless of the fold; the real test is symmetry under channel swap).
+  - **Relationship to Step 6 (`aud.dsp.collision`)**: independent gain mechanisms, not a
+    pipeline where one feeds the other -- `collision_gains` is a psychoacoustic masking-LP over
+    STFT frames with `g_min` deliberately left unbounded (its own docstring: depth-limiting is
+    Step 7/8's job); `dynamic_eq` is an ordinary per-band level-vs-threshold law over
+    crossover-split time-domain bands. `max_depth_db` here is an unconditional ceiling,
+    independent of anything upstream: composing it with Step 6's own documented over-prediction
+    of masking (which makes `collision_gains` under-duck, the safe-by-accident direction) can
+    only make a combined result MORE conservative, never less.
+  - Acceptance measured on RENDERED audio throughout (steady tones, RMS dB before/after, never
+    an internal gain array in isolation): depth limit (full-band and per-band multiband);
+    identical stereo channels remain identical; detection symmetric under channel swap; hard-vs
+    soft-knee at exactly threshold; rendered reduction matches a hand-derived closed form
+    (`(threshold_db - level_db) * (1 - 1/ratio)`, independently measured, never built by calling
+    the function under test) within 0.5 dB; per-band independence in a two-band multiband case;
+    the seam itself (a near-silent target is still cut when the key is loud, and a loud target
+    is left alone when the key is quiet) -- 12 new tests in `tests/test_dsp_dynamic_eq.py`.
 - **`aud.dsp.collision`** -- Step 6 of the masking/ducking epic: the collision measure, THE
   feature of the whole epic and the step most likely to be silently wrong (issue #16). Given two
   signals' own per-band energy over time, computes the per-band per-frame TARGET (masker) gain
