@@ -61,6 +61,37 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   - **Discrepancy flagged, not silently corrected**: `librosa` is carried on the denylist as
     instructed, but librosa's OWN published licence is ISC (permissive), not GPL/AGPL -- it is
     excluded from this project's dependency stack by policy (docs/VISION.md), not by licence.
+  - **Acceptance-criteria closure (work item `smart_tools-c53`)**, six gaps the original PR did
+    not cover, each with its own test(s):
+    - **Bundled copyleft runtime binaries** (`numpy.libs/`, `scipy.libs/`) are now a SEPARATE,
+      explicitly-enumerated `BUNDLED_RUNTIME_ACKNOWLEDGEMENTS` list naming `libgfortran`
+      (GPL-3.0-or-later WITH GCC-exception-3.1) and `libquadmath` (LGPL-2.1-or-later) with the
+      MIT-compatibility argument for each -- see docs/DESIGN-ENVELOPE.md's "Dependency licences".
+      `scan_bundled_runtime_binaries()` fails on any binary in either directory that matches none
+      of the acknowledged patterns; proved both against the real environment (passes) and against
+      a synthetic new binary (fails) in `tests/test_license_enforcement.py`.
+    - **Non-truncation proved directly**: `test_scipy_license_field_read_is_not_truncated` asserts
+      the real scipy `License` field reads back as 47,559+ characters (the exact false-clean bug
+      docs/DESIGN-ENVELOPE.md records -- a 45-character-capped read hid the bundled GPL/LGPL
+      notices entirely).
+    - **Three separate live transcripts** proved `pedalboard` is caught as a direct dependency, as
+      an optional extra, and as a PEP 735 `[dependency-groups]` dev-group dependency -- each by
+      actually mutating the real `pyproject.toml`, observing the real test fail naming the package
+      and its licence, then restoring the file byte-identical (sha256-verified). Dev-group support
+      is new: `iter_declared_dependency_specs` now also reads `[dependency-groups]`, closing a gap
+      where a denylisted package placed only in the `dev` group was invisible to this signal.
+    - **Allow-list tightened to exactly the specified set** (`MIT`, `MIT-0`, `BSD-2-Clause`,
+      `BSD-3-Clause`, `0BSD`, `ISC`, `Apache-2.0`, `PSF-2.0`, `Python-2.0`, `Zlib`, `Unlicense`,
+      `CC0-1.0`, `HPND`) -- `BSD-3-Clause-Clear` (not on the list) removed; `Python-2.0` and `HPND`
+      (missing) added; a lock test (`test_allow_list_matches_exactly_the_specified_set`) fails loud
+      on any future drift.
+    - **Every non-ALLOWED verdict's reason now names the package, its licence signal, AND the
+      governing document** (docs/DESIGN-ENVELOPE.md's "Dependency licences" section, work item
+      `smart_tools-c53`) -- previously only the denylist path cited a document at all.
+    - **Clean-tree criterion proved as one explicit assertion**
+      (`test_the_current_clean_tree_passes_every_signal`): given the current tree (numpy, scipy and
+      their bundled libgfortran/libquadmath present), every signal -- installed environment,
+      declared dependencies, `src/` AST scan, bundled runtime binaries -- passes.
 
 - **`aud.dsp.gate.dynamic_eq`** -- Step 7 of the masking/ducking epic: a per-band dynamic EQ
   driven by an EXTERNAL key (issue #17). USER RULING, binding: this is a dynamic EQ, NOT a

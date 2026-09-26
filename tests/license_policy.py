@@ -44,9 +44,24 @@ function body) and for a literal string argument to `importlib.import_module`/
 without ever being declared as a dependency at all.
 
 A fourth -- `scan_declared_dependencies_against_denylist` -- reads `pyproject.toml`
-statically (main dependencies AND every optional-dependencies extra) so a
-denylisted package hidden in an extra is caught even when that extra is not
-currently installed and so never shows up in (1).
+statically (main dependencies, every optional-dependencies extra, AND every
+PEP 735 `[dependency-groups]` group such as `dev`) so a denylisted package hidden
+in an extra or a dev-only group is caught even when that group is not currently
+installed and so never shows up in (1).
+
+A fifth -- `scan_bundled_runtime_binaries` -- walks `numpy.libs/`/`scipy.libs/`
+(the auditwheel-bundled shared-library directories that sit alongside the
+`numpy`/`scipy` packages themselves) and checks every file there against
+`BUNDLED_RUNTIME_ACKNOWLEDGEMENTS`, a separate, explicitly-enumerated, reviewed
+list -- see docs/DESIGN-ENVELOPE.md's "Dependency licences" section for the
+per-binary licence and MIT-compatibility argument for each entry on that list.
+These binaries never appear in `importlib.metadata` at all (they are not
+themselves installed distributions), so signal (1) cannot see them; this is a
+sixth, independent signal for exactly that gap. A binary found in either
+directory that matches none of the acknowledged patterns is a **new, unreviewed
+bundled runtime** and fails the check unconditionally -- the acknowledgement
+list is an enumerated decision, never a blanket exemption for those two
+directories.
 
 ## The sixth evasion this cannot catch
 
@@ -68,7 +83,7 @@ import re
 import tomllib
 from dataclasses import dataclass
 from enum import Enum
-from importlib.metadata import Distribution, distributions
+from importlib.metadata import Distribution, PackageNotFoundError, distribution, distributions
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -176,35 +191,45 @@ _FORBIDDEN_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Trove `License ::` classifiers that correspond to an entry on `_ALLOWED_SPDX_IDS`
+# below. Deliberately NOT a superset of "permissive-sounding" classifiers: e.g.
+# "Public Domain", "Universal Permissive License", "Zope Public License" and "W3C
+# License" were removed because none of them is the specified allow-list -- see
+# gap (d), "THE ALLOW-LIST IS SPECIFIED, use exactly it. ANYTHING ELSE FAILS,
+# INCLUDING UNKNOWN." A trove classifier with no corresponding SPDX id on the list
+# is intentionally left unmatched here and falls through to UNKNOWN.
 _ALLOWED_CLASSIFIER_SUBSTRINGS = (
-    "MIT License",
-    "BSD License",
-    "ISC License",
-    "Apache Software License",
-    "Python Software Foundation License",
-    "Public Domain",
-    "Universal Permissive License",
-    "Zope Public License",
-    "W3C License",
-    "The Unlicense",
+    "MIT License",  # MIT
+    "BSD License",  # BSD-2-Clause / BSD-3-Clause (trove does not distinguish)
+    "ISC License",  # ISC
+    "Apache Software License",  # Apache-2.0
+    "Python Software Foundation License",  # PSF-2.0
+    "The Unlicense",  # Unlicense
+    "zlib/libpng License",  # Zlib
 )
 
 # SPDX identifiers recognised as permissive when found in a modern `License-Expression`
 # header (PEP 639 / Metadata 2.4) or as a short, exact `License` field value.
+#
+# This is the EXACT allow-list from the governing work item (smart_tools-c53) and
+# docs/DESIGN-ENVELOPE.md's "Dependency licences" section -- not a superset, not a
+# subset. Anything else classifies UNKNOWN, which fails the build just like FORBIDDEN
+# does (see `classify()` below and `test_installed_environment_has_no_forbidden_or_unknown_licences`).
 _ALLOWED_SPDX_IDS = frozenset(
     {
         "MIT",
         "MIT-0",
         "BSD-2-CLAUSE",
         "BSD-3-CLAUSE",
-        "BSD-3-CLAUSE-CLEAR",
-        "APACHE-2.0",
-        "ISC",
-        "PSF-2.0",
         "0BSD",
+        "ISC",
+        "APACHE-2.0",
+        "PSF-2.0",
+        "PYTHON-2.0",
+        "ZLIB",
         "UNLICENSE",
         "CC0-1.0",
-        "ZLIB",
+        "HPND",
     }
 )
 
@@ -284,6 +309,16 @@ def _distinfo_from_installed(dist: Distribution) -> DistInfo:
     )
 
 
+#: Cited in every non-ALLOWED verdict's reason string (gap (f): "Each failure must
+#: NAME the offending package, its licence, AND the governing document") -- the
+#: package name and licence are already embedded earlier in the reason text; this
+#: constant supplies the document.
+_GOVERNING_DOC_NOTE = (
+    "governing document: docs/DESIGN-ENVELOPE.md 'Dependency licences' section "
+    "(policy: AGENTS.md section 1; tracked as work item smart_tools-c53)"
+)
+
+
 def classify(info: DistInfo) -> tuple[Verdict, str]:
     """Combines the metadata general rule with the denylist backstop. The
     denylist is checked UNCONDITIONALLY -- even when the metadata rule alone
@@ -304,10 +339,12 @@ def classify(info: DistInfo) -> tuple[Verdict, str]:
             reason = "no licence metadata at all (no License-Expression, no classifiers, no License field)"
 
     denylisted = denylist_match(info.name)
-    if denylisted is not None:
-        if verdict is Verdict.FORBIDDEN:
-            return Verdict.FORBIDDEN, reason
-        return Verdict.FORBIDDEN, f"denylisted despite metadata verdict {verdict.value}: {denylisted.reason}"
+    if denylisted is not None and verdict is not Verdict.FORBIDDEN:
+        reason = f"denylisted despite metadata verdict {verdict.value}: {denylisted.reason}"
+        verdict = Verdict.FORBIDDEN
+
+    if verdict is not Verdict.ALLOWED:
+        reason = f"package {info.name!r}: {reason} -- {_GOVERNING_DOC_NOTE}"
 
     return verdict, reason
 
@@ -326,8 +363,11 @@ def scan_installed_environment() -> list[tuple[DistInfo, Verdict, str]]:
 
 
 # ---------------------------------------------------------------------------
-# Declared dependencies (main + every optional extra), read statically --
-# catches evasion pattern 3 even when the extra is not currently installed.
+# Declared dependencies -- main dependencies, every optional-dependencies extra,
+# AND every PEP 735 `[dependency-groups]` group (e.g. `dev`) -- read statically so
+# a denylisted package hidden in ANY of the three is caught even when it is not
+# currently installed. This repo's own `dev` group (pytest, ruff) is exactly the
+# PEP 735 shape being read here -- see pyproject.toml's `[dependency-groups]`.
 # ---------------------------------------------------------------------------
 
 _SPEC_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+")
@@ -344,6 +384,16 @@ def iter_declared_dependency_specs(pyproject_text: str) -> list[str]:
     specs: list[str] = list(project.get("dependencies", []))
     for _extra_name, extra_deps in project.get("optional-dependencies", {}).items():
         specs.extend(extra_deps)
+    for _group_name, group_deps in data.get("dependency-groups", {}).items():
+        for dep in group_deps:
+            # PEP 735 allows a group member to be a plain requirement string OR a
+            # `{include-group = "other-group"}` table referencing another group.
+            # The latter carries no package name of its own -- nothing to check
+            # here directly; the group it points at is scanned on its own
+            # iteration of this same loop (or, if external, is out of scope for
+            # a static single-file read). Only plain string specs are collected.
+            if isinstance(dep, str):
+                specs.append(dep)
     return specs
 
 
@@ -423,6 +473,120 @@ def scan_source_tree(root: Path) -> list[ImportViolation]:
 
 
 # ---------------------------------------------------------------------------
+# Bundled copyleft runtime binaries -- present on disk in numpy.libs/ and
+# scipy.libs/, never visible in any importlib.metadata field (they are not
+# themselves installed distributions). This is a SEPARATE, explicitly-enumerated,
+# reviewed acknowledgement list -- not a blanket exemption for those directories.
+# See docs/DESIGN-ENVELOPE.md's "Dependency licences" section for the licence and
+# MIT-compatibility argument recorded for each entry below; do not add an entry
+# here without adding the matching argument there.
+# ---------------------------------------------------------------------------
+
+#: Packages whose sibling `<name>.libs/` directory (the auditwheel/delvewheel
+#: convention for a wheel's bundled shared libraries) is scanned.
+BUNDLED_RUNTIME_PACKAGE_NAMES: tuple[str, ...] = ("numpy", "scipy")
+
+
+@dataclass(frozen=True)
+class BundledBinaryAcknowledgement:
+    pattern: re.Pattern[str]
+    licence: str
+    note: str
+
+
+# Filenames carry a build-specific content hash suffix appended by auditwheel
+# (e.g. `libgfortran-040039e1-0352e75f.so.5.0.0`), so each pattern matches the
+# stable prefix, not an exact filename -- confirmed against the real filenames
+# in THIS environment's numpy.libs/ and scipy.libs/ (see
+# test_bundled_runtime_binaries_currently_on_disk_are_all_acknowledged).
+BUNDLED_RUNTIME_ACKNOWLEDGEMENTS: tuple[BundledBinaryAcknowledgement, ...] = (
+    BundledBinaryAcknowledgement(
+        re.compile(r"^libgfortran-.*\.so(\.\d+)*$"),
+        "GPL-3.0-or-later WITH GCC-exception-3.1",
+        "The GCC Runtime Library Exception exists precisely to permit GCC runtime "
+        "libraries to be carried into a program under ANY licence, including "
+        "proprietary, without propagating GPL terms to it -- MIT-compatible as used. "
+        "docs/DESIGN-ENVELOPE.md 'Dependency licences'.",
+    ),
+    BundledBinaryAcknowledgement(
+        re.compile(r"^libquadmath-.*\.so(\.\d+)*$"),
+        "LGPL-2.1-or-later",
+        "Dynamic linking under LGPL-2.1 does not relicense the linking program; this "
+        "project does not redistribute the binary (pip/uv fetch numpy/scipy wheels "
+        "directly from PyPI), so LGPL section 6's notice/relink duties sit with "
+        "numpy/scipy, not aud. Does NOT carry the GCC Runtime Library Exception -- "
+        "the weaker of the two arguments on this list, recorded as such. "
+        "docs/DESIGN-ENVELOPE.md 'Dependency licences'.",
+    ),
+    BundledBinaryAcknowledgement(
+        re.compile(r"^libscipy_openblas(64_)?-.*\.so$"),
+        "BSD-3-Clause",
+        "Permissive outright. docs/DESIGN-ENVELOPE.md 'Dependency licences'.",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class UnacknowledgedBundledBinary:
+    path: str
+    reason: str
+
+
+def _scan_libs_dir(libs_dir: Path) -> list[UnacknowledgedBundledBinary]:
+    """Testable in isolation against a synthetic directory, so the "fails on a
+    new unlisted binary" acceptance criterion can be proved without needing a
+    real new copyleft library to actually appear in a real wheel."""
+    violations = []
+    if not libs_dir.is_dir():
+        return violations
+    for entry in sorted(libs_dir.iterdir()):
+        if not entry.is_file():
+            continue
+        if any(ack.pattern.match(entry.name) for ack in BUNDLED_RUNTIME_ACKNOWLEDGEMENTS):
+            continue
+        violations.append(
+            UnacknowledgedBundledBinary(
+                path=str(entry),
+                reason=(
+                    f"{entry.name!r} in {libs_dir} is not on the reviewed bundled-runtime "
+                    "acknowledgement list (tests/license_policy.py BUNDLED_RUNTIME_ACKNOWLEDGEMENTS) "
+                    "-- a new bundled binary must be reviewed and explicitly enumerated with its "
+                    "licence and MIT-compatibility argument, never silently passed. "
+                    f"{_GOVERNING_DOC_NOTE}"
+                ),
+            )
+        )
+    return violations
+
+
+def _libs_dirs_for(names: tuple[str, ...]) -> list[Path]:
+    dirs = []
+    for name in names:
+        try:
+            dist = distribution(name)
+        except PackageNotFoundError:
+            continue
+        site_root = Path(str(dist.locate_file("")))
+        libs_dir = site_root / f"{name}.libs"
+        if libs_dir.is_dir():
+            dirs.append(libs_dir)
+    return dirs
+
+
+def scan_bundled_runtime_binaries(
+    names: tuple[str, ...] = BUNDLED_RUNTIME_PACKAGE_NAMES,
+) -> list[UnacknowledgedBundledBinary]:
+    """Every file under `<name>.libs/` for each package in `names`, checked
+    against `BUNDLED_RUNTIME_ACKNOWLEDGEMENTS`. A package with no `.libs/`
+    directory (not installed, or a build with no bundled binaries) contributes
+    nothing -- that is not a failure."""
+    violations: list[UnacknowledgedBundledBinary] = []
+    for libs_dir in _libs_dirs_for(names):
+        violations.extend(_scan_libs_dir(libs_dir))
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # Standalone report -- `uv run python -m tests.license_policy`
 # ---------------------------------------------------------------------------
 
@@ -455,7 +619,15 @@ def main() -> int:
     else:
         print("  none")
 
-    return 1 if (bad or declared_violations or import_violations) else 0
+    print("\n== Bundled runtime binaries (numpy.libs/, scipy.libs/) vs. acknowledgement list ==")
+    bundled_violations = scan_bundled_runtime_binaries()
+    if bundled_violations:
+        for v in bundled_violations:
+            print(f"  {v.path}: {v.reason}")
+    else:
+        print("  none (every bundled binary present matches an acknowledged pattern)")
+
+    return 1 if (bad or declared_violations or import_violations or bundled_violations) else 0
 
 
 if __name__ == "__main__":
