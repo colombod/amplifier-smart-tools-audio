@@ -19,7 +19,7 @@ import numpy as np
 
 from aud.dsp import crossover
 
-__all__ = ["BandParams", "compress", "multiband_compress"]
+__all__ = ["BandParams", "compress", "multiband_compress", "static_gain_reduction_db"]
 
 _EPS = 1e-12
 
@@ -70,8 +70,19 @@ def _detector_signal(x: np.ndarray, detector: str, sr: int, stereo_link: bool) -
     return np.sqrt(np.maximum(smoothed, 0.0))
 
 
-def _static_gain_reduction_db(level_db: np.ndarray, params: BandParams) -> np.ndarray:
-    """Soft-knee gain reduction curve, in dB (<= 0), per Giannoulis et al."""
+def static_gain_reduction_db(level_db: np.ndarray, params: BandParams) -> np.ndarray:
+    """Soft-knee gain reduction curve, in dB (<= 0), per Giannoulis et al.
+
+    Public (not `_`-prefixed): `aud.dsp.gate.dynamic_eq` (Step 7 of the
+    masking/ducking epic, issue #17) reuses this UNMODIFIED, per band, to
+    build its own threshold/ratio/knee gain law from an external key's
+    level -- this function already takes a `level_db` array and returns a
+    gain, so it applies per band with no changes at all. Renamed from
+    `_static_gain_reduction_db` (private) to this public name for that
+    reuse: this repo's own convention (see `aud.dsp.collision`'s
+    `masking_offset` docstring) is cross-module reuse via a PUBLIC API,
+    never a private import.
+    """
     t = params.threshold_db
     w = max(params.knee_db, 0.0)
     ratio = max(params.ratio, 1e-6)
@@ -145,7 +156,7 @@ def compress(
     if level_db.ndim == 2:
         level_db = level_db[:, 0]
 
-    raw_gain_db = _static_gain_reduction_db(level_db, params)
+    raw_gain_db = static_gain_reduction_db(level_db, params)
     smoothed_gain_db = _smooth_gain_db(raw_gain_db, sr, params.attack_ms, params.release_ms)
 
     gain_lin = _db_to_lin(smoothed_gain_db)
