@@ -60,15 +60,22 @@ def test_swapping_target_and_key_arguments_reverses_who_gets_cut():
     )
 
 
-def test_target_empty_band_stops_being_protected_from_attenuation_if_roles_swapped():
-    """The acceptance-test-1 property (issue #16's own definition of the
-    feature) INVERTS under a role swap: with correct roles, a band where
-    the target has no energy is never attenuated (nothing to attenuate,
-    nothing constrains it). Feed the SAME two arrays with target and key
-    swapped, and check the SPECIFIC band that had real (masker) energy in
-    the correct call now gets a real cut when it plays the "key" role in
-    an otherwise-loud "target" -- i.e. the two calls disagree exactly at
-    the band the whole feature is about."""
+def test_target_empty_band_gain_alone_does_not_discriminate_a_role_swap():
+    """A NEGATIVE result, kept deliberately: checking only the empty band's
+    OWN gain does NOT discriminate a role swap -- it reads exactly 1.0 in
+    BOTH the correct call and the swapped call, for two DIFFERENT
+    structural reasons (target has no energy there vs. key is not active
+    there). The real discriminator is the AGGREGATE assertion in
+    `test_swapping_target_and_key_arguments_reverses_who_gets_cut` above,
+    not a single-band check -- this test exists to document why that
+    single-band check alone would be insufficient, not to claim it detects
+    anything on its own.
+
+    Renamed from
+    `test_target_empty_band_stops_being_protected_from_attenuation_if_roles_swapped`,
+    which asserted ~1.0 in both calls (i.e. this same non-discriminating
+    result) while its name and opening claimed the opposite -- that the
+    property INVERTS under a role swap. It does not; see the body below."""
     bands = _peaq_bands(32)
     n_bands = bands["n_bands"]
     centers = bands["centers_hz"]

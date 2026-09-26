@@ -101,6 +101,23 @@ SHAPE, the Bark-scale validation, and the unit-preserving normalisation are
 differs, and that difference is this module's entire reason to exist as a
 separate step rather than a one-line call into Step 5.
 
+Inherited known deviation: this module CONSUMES the over-prediction, it
+does not just carry it
+------------------------------------------------------------------------
+`M[b]` and `S[b,k]` both come straight from `aud.dsp.masking`, which
+over-predicts masking almost everywhere -- no outer/middle-ear `W[k]`
+weighting, no internal-noise floor (see that module's own "Known
+deviation" section for the measured per-band table, e.g. ~2.75 dB/Bark
+too shallow a slope at 100 Hz). This module is the first place that
+over-prediction turns into an audible decision rather than a number: a
+masking threshold read as higher than the true perceptual one means this
+step's LP believes the key is adequately covered sooner than it truly is,
+so `collision_gains` ducks LESS than a fully eq.-7/eq.-18-compliant model
+would ask for. That is the safe-by-accident direction (under-ducking, not
+over-ducking), but a caller relying on `margin_db` for a hard
+intelligibility guarantee should budget extra margin to compensate rather
+than assume the computed threshold is exact.
+
 Why SII importance, not key energy, weights the objective -- a second,
 independent reason the naive approach is wrong
 ------------------------------------------------------------------------

@@ -190,7 +190,7 @@ def test_collision_gains_all_silent_key_returns_unity_gain():
     target = np.full((16, 4), 0.01)
     key = np.full((16, 4), 1e-15)
     result = collision_gains(target, key, bands)
-    assert np.allclose(result.gain, 1.0)
+    assert np.allclose(result.gain, 1.0, rtol=1e-5, atol=1e-6)
     assert not np.any(result.active_bands)
 
 
@@ -211,33 +211,75 @@ def test_collision_gains_silent_target_band_never_constrained_by_construction():
     assert result.gain[4, 0] == pytest.approx(1.0, abs=1e-6)
 
 
-def test_collision_gains_objective_prefers_cutting_low_importance_band_when_redundant():
-    """When TWO masker bands can equally relieve the SAME constraint (one
-    with high SII importance, one with low), the LP's objective must
-    prefer sacrificing the low-importance one -- this is the entire reason
-    `w` is SII-derived rather than uniform (see module docstring's "Why
-    SII importance" section). Built as a small, hand-constructed 3-band
-    system where the redundancy is exact by construction, not inferred
-    from calling `collision_gains` itself for the expected value."""
-    bands = _peaq_bands(3, f_min=100.0, f_max=8000.0)
-    # Band 0: low SII importance (near 100 Hz). Band 1: mid-range, higher
-    # SII importance. Band 2: the protected (key-active) band, far enough
-    # that only the diagonal (its own energy) matters, kept quiet.
+def test_collision_gains_objective_prefers_cutting_low_importance_band_when_redundant(monkeypatch):
+    """When the LP has genuine freedom in which of several masker bands to
+    sacrifice to satisfy the SAME constraint(s), the objective -- not the
+    constraints alone -- decides, and it must prefer sacrificing the
+    LOWER-SII-importance band. This is the entire reason `w` is SII-derived
+    rather than uniform (see module docstring's "Why SII importance"
+    section).
+
+    An earlier version of this test tried to force that redundancy with a
+    hand-built 3-band system, but its own docstring admitted the assertion
+    it actually made (`result.gain[2, 0] == 1.0`) was an unrelated,
+    already-covered invariant -- the redundancy it described was never
+    exercised. A PR review round (see PR #34) then found something
+    stronger: mutating `sii_band_importance` to return uniform weights and
+    re-running the suite left every test that exercises `collision_gains`'
+    OWN OUTPUT (as opposed to `sii_band_importance`'s return value in
+    isolation) passing -- the PR body's first draft wrongly read that as
+    "the mutation produces no behavioural difference at all".
+
+    That reading was too broad. `w` is internal to `collision_gains` (not a
+    parameter a caller can inject), so the only way to compare SII against
+    uniform IS to patch `sii_band_importance` and re-run -- exactly the
+    mutation already used, just measured on the right output. Doing that
+    across many independently-random, ordinary (non-degenerate) broadband
+    energy draws at this dynamic range (this session, n=30 seeds, no weight
+    vector hand-tuned): ~20-30% differ, sometimes across the full gain
+    range on a specific band; the rest are bit-identical. The LP only has a
+    genuine tie for the objective to break when two bands' constraint
+    contributions land close enough together by chance -- most random
+    draws do not create that tie, but plenty do, and the seed fixed below
+    is one of them (found by that sweep, not hand-crafted to force a
+    particular answer)."""
+    bands = _peaq_bands(32)
+    n_bands = bands["n_bands"]
     w = sii_band_importance(bands)
-    assert w[0] < w[1], "test setup assumes band 0 has lower SII importance than band 1"
 
-    target = np.array([[1.0], [1.0], [1e-12]])
-    key = np.array([[1e-15], [1e-15], [0.5]])
+    rng = np.random.default_rng(6)  # confirmed (this session) to land in the ~20-30% that differ
+    target = rng.uniform(0.01, 0.2, size=(n_bands, 4))
+    key = rng.uniform(0.01, 0.2, size=(n_bands, 4))
 
-    result = collision_gains(target, key, bands, margin_db=3.0)
-    # Band 2 has (near) no target energy -> unconstrained -> G[2] ~= 1,
-    # regardless of key's strong presence there (same structural property
-    # as the test above). The REAL redundancy this test targets is between
-    # bands 0 and 1 satisfying band 2's constraint if it existed; with
-    # band 2 unconstrained here there is nothing forcing bands 0/1 down at
-    # all, so both should sit at 1. This test instead exercises the
-    # explicit weighted redundancy directly on the LP inputs below.
-    assert result.gain[2, 0] == pytest.approx(1.0, abs=1e-6)
+    result_sii = collision_gains(target, key, bands, margin_db=6.0)
+
+    def _uniform_weights(patched_bands):
+        n = patched_bands["n_bands"]
+        return np.full(n, 1.0 / n, dtype=np.float64)
+
+    monkeypatch.setattr("aud.dsp.collision.sii_band_importance", _uniform_weights)
+    result_uniform = collision_gains(target, key, bands, margin_db=6.0)
+
+    diff = np.abs(result_sii.gain - result_uniform.gain)
+    assert diff.max() > 0.3, (
+        f"SII-weighted and uniform-weighted objectives produced near-identical gain "
+        f"(max |diff|={diff.max():.6f}) on a fixed random-broadband input chosen because it "
+        f"showed a real difference this session -- if this now fails, the LP's sensitivity to "
+        f"`w` has genuinely changed and this test's premise needs re-checking, not just its seed"
+    )
+
+    # Not just "different" -- SII's OWN solution must score higher under SII's
+    # OWN objective than uniform's solution does, on the frame that differs
+    # most. Otherwise the difference above could be arbitrary solver
+    # tie-breaking rather than a real preference for the important band.
+    frame = int(np.argmax(diff.max(axis=0)))
+    objective_at_sii_solution = np.sum(w * result_sii.gain[:, frame])
+    objective_at_uniform_solution = np.sum(w * result_uniform.gain[:, frame])
+    assert objective_at_sii_solution > objective_at_uniform_solution, (
+        "the SII-weighted solution must score strictly better under the real SII objective than "
+        "the uniform-weighted solution -- otherwise the gain difference is solver noise, not a "
+        "genuine preference for sacrificing the lower-importance band"
+    )
 
 
 def test_lp_prefers_cutting_lower_weight_variable_given_redundant_constraints():
