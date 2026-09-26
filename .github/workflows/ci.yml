@@ -49,6 +49,14 @@ jobs:
       - name: Tests
         run: uv run pytest -q
 
+      - name: Licence enforcement (MIT-compatible dependency check)
+        # Runs again, named, for visibility -- it is already exercised by the
+        # `Tests` step above since it is an ordinary pytest module. See
+        # tests/license_policy.py for the resolved-dependency-graph metadata
+        # check, the denylist backstop and the src/ AST import scan; see
+        # AGENTS.md section 1 for the licence rule this enforces.
+        run: uv run pytest tests/test_license_enforcement.py -v
+
   conformance:
     name: Smart-tool conformance
     runs-on: ubuntu-latest

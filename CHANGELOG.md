@@ -11,6 +11,88 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ### Added
 
+- **MIT-compatible dependency enforcement** (`tests/license_policy.py` +
+  `tests/test_license_enforcement.py`) -- AGENTS.md section 1's licence rule was a documented
+  human audit with nothing enforcing it; a licence audit that is not a check is a comment. Now
+  it is a check, run in CI (`.github/workflows/ci.yml`'s `Lint and test` job).
+  - **Two independent signals, deliberately combined**: (1) the ACTUAL licence metadata
+    (`License-Expression` SPDX header, trove `Classifier` lines, and legacy `License` field, in
+    that priority order) of every distribution actually resolved and installed in the
+    environment (`importlib.metadata.distributions()`, chosen over shelling out to `uv tree`/
+    `uv pip list` -- stdlib, structured, no subprocess-output parsing) -- the general rule that
+    catches a GPL-family package nobody has denylisted yet; (2) a measured, named denylist
+    (`pedalboard`, `matchering`, `rubberband` and every spelling variant, `essentia`, `librosa`)
+    as a backstop, because metadata is not always trustworthy -- see below.
+  - **A third, independent layer**: an AST scan (not regex) of every file under `src/` for a
+    forbidden import at ANY nesting depth (a function-body import is visited exactly like a
+    module-level one) or a literal-string argument to `importlib.import_module`/`__import__`.
+  - **A fourth**: a static parse of `pyproject.toml` -- main dependencies AND every
+    `optional-dependencies` extra -- against the denylist by name, so a denylisted package
+    hidden in an extra is caught even when that extra is not currently installed.
+  - **Real, load-bearing finding, not a hypothetical**: `pyrubberband`'s OWN PyPI metadata is
+    genuinely `License :: OSI Approved :: ISC License (ISCL)` (permissive) -- verified against
+    `https://pypi.org/pypi/pyrubberband/json`. It is a thin wrapper; the licence problem is the
+    GPL/commercial-dual Rubber Band C++ library it calls out to at runtime, which never appears
+    as its own installed Python distribution. A metadata-only check would ALLOW it. This is why
+    the name denylist is checked unconditionally, not only when metadata is silent.
+  - **Second real finding, also load-bearing**: `essentia` ships NO legacy `License ::`
+    classifiers at all -- only a modern `License-Expression: AGPL-3.0-only` header (verified
+    against `https://pypi.org/pypi/essentia/json`). A classifier-only checker would see zero
+    signal and call it merely UNKNOWN; the `License-Expression` check is what makes the general
+    metadata rule actually catch it on its own.
+  - **False-positive trap found and avoided**: the permitted, permissive (BSD) `scipy`
+    dependency's own legacy `License` metadata field literally contains the substrings
+    `GPL-3.0-or-later` and `LGPL-2.1-or-later` -- bundled OpenBLAS/gfortran runtime notices
+    under the GCC Runtime Library Exception, which extends no obligation to scipy itself. A
+    naive substring search over that field would misclassify a dependency this project
+    explicitly permits. Classifiers are checked FIRST and are what actually decide scipy's
+    verdict; the long legacy-field blob is never keyword-matched when classifiers are present.
+    Guarded directly against the real installed distribution in
+    `test_scipy_bundled_gpl_notice_is_not_a_false_positive`.
+  - Every one of the task's five named evasion patterns (function-body import; literal-string
+    `importlib.import_module`/`__import__`; dependency hidden in an optional extra; transitive
+    dependency anywhere in the resolved graph; name-spelling/case/hyphenation variant) has its
+    own named test, and each was verified red-then-green by temporarily neutering the relevant
+    detection function and re-running -- see the PR description for the transcripts.
+  - **Known limitation, reported rather than hidden**: every signal here is name-based or
+    metadata-based. Vendoring GPL source under a new module name, or repointing a dependency
+    name to different upstream content via a source override or renamed fork, defeats all four
+    signals simultaneously and would need content/copyright-header fingerprinting to catch.
+  - **Discrepancy flagged, not silently corrected**: `librosa` is carried on the denylist as
+    instructed, but librosa's OWN published licence is ISC (permissive), not GPL/AGPL -- it is
+    excluded from this project's dependency stack by policy (docs/VISION.md), not by licence.
+  - **Acceptance-criteria closure (work item `smart_tools-c53`)**, six gaps the original PR did
+    not cover, each with its own test(s):
+    - **Bundled copyleft runtime binaries** (`numpy.libs/`, `scipy.libs/`) are now a SEPARATE,
+      explicitly-enumerated `BUNDLED_RUNTIME_ACKNOWLEDGEMENTS` list naming `libgfortran`
+      (GPL-3.0-or-later WITH GCC-exception-3.1) and `libquadmath` (LGPL-2.1-or-later) with the
+      MIT-compatibility argument for each -- see docs/DESIGN-ENVELOPE.md's "Dependency licences".
+      `scan_bundled_runtime_binaries()` fails on any binary in either directory that matches none
+      of the acknowledged patterns; proved both against the real environment (passes) and against
+      a synthetic new binary (fails) in `tests/test_license_enforcement.py`.
+    - **Non-truncation proved directly**: `test_scipy_license_field_read_is_not_truncated` asserts
+      the real scipy `License` field reads back as 47,559+ characters (the exact false-clean bug
+      docs/DESIGN-ENVELOPE.md records -- a 45-character-capped read hid the bundled GPL/LGPL
+      notices entirely).
+    - **Three separate live transcripts** proved `pedalboard` is caught as a direct dependency, as
+      an optional extra, and as a PEP 735 `[dependency-groups]` dev-group dependency -- each by
+      actually mutating the real `pyproject.toml`, observing the real test fail naming the package
+      and its licence, then restoring the file byte-identical (sha256-verified). Dev-group support
+      is new: `iter_declared_dependency_specs` now also reads `[dependency-groups]`, closing a gap
+      where a denylisted package placed only in the `dev` group was invisible to this signal.
+    - **Allow-list tightened to exactly the specified set** (`MIT`, `MIT-0`, `BSD-2-Clause`,
+      `BSD-3-Clause`, `0BSD`, `ISC`, `Apache-2.0`, `PSF-2.0`, `Python-2.0`, `Zlib`, `Unlicense`,
+      `CC0-1.0`, `HPND`) -- `BSD-3-Clause-Clear` (not on the list) removed; `Python-2.0` and `HPND`
+      (missing) added; a lock test (`test_allow_list_matches_exactly_the_specified_set`) fails loud
+      on any future drift.
+    - **Every non-ALLOWED verdict's reason now names the package, its licence signal, AND the
+      governing document** (docs/DESIGN-ENVELOPE.md's "Dependency licences" section, work item
+      `smart_tools-c53`) -- previously only the denylist path cited a document at all.
+    - **Clean-tree criterion proved as one explicit assertion**
+      (`test_the_current_clean_tree_passes_every_signal`): given the current tree (numpy, scipy and
+      their bundled libgfortran/libquadmath present), every signal -- installed environment,
+      declared dependencies, `src/` AST scan, bundled runtime binaries -- passes.
+
 - **`aud.dsp.gate.dynamic_eq`** -- Step 7 of the masking/ducking epic: a per-band dynamic EQ
   driven by an EXTERNAL key (issue #17). USER RULING, binding: this is a dynamic EQ, NOT a
   sidechain level ducker -- the gain law (threshold/ratio/knee/depth-limit) is computed
