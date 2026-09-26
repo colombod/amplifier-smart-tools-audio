@@ -1192,3 +1192,152 @@ def test_band_edges_and_weights_are_deterministic():
     w1 = bands.bin_band_weights(r1, n_fft=2048, sr=48000)
     w2 = bands.bin_band_weights(r2, n_fft=2048, sr=48000)
     assert np.array_equal(w1, w2)
+
+
+# --- 10. Issue #29: `bark_zwicker_terhardt_to_hz`'s `tol`/`max_iter` were
+# solver internals leaking into the public signature -- removed entirely,
+# not guarded -- plus a full parameter sweep of the rest of this file ---
+
+
+def _reference_bisect_bark_zwicker_terhardt_to_hz(z, tol=1e-9, max_iter=60):
+    """Independent reconstruction of the bisection `bark_zwicker_terhardt_to_hz`
+    ran BEFORE issue #29 removed `tol`/`max_iter` from its public signature.
+    Lives only here, in the test file -- deliberately NOT imported from
+    production, so it cannot silently track a future change to the
+    production narrowing loop (AGENTS.md #3b: building an expected value by
+    calling the code under test proves nothing). Used exactly once, below,
+    to pin that removing the surface changed no valid answer: same seed
+    (`bands._BARK_BRACKET_SEED_HZ`) and expansion cap
+    (`bands._BARK_BRACKET_EXPANSION_CAP`, both untouched by this change) and
+    the exact narrowing `tol`/`max_iter` (1e-9 / 60) that used to be the
+    removed parameters' own defaults.
+    """
+    z = np.asarray(z, dtype=np.float64)
+    lo = np.zeros_like(z)
+    hi = np.full_like(z, bands._BARK_BRACKET_SEED_HZ)
+    for _ in range(bands._BARK_BRACKET_EXPANSION_CAP):
+        too_low = bands.hz_to_bark_zwicker_terhardt(hi) < z
+        if not np.any(too_low):
+            break
+        hi = np.where(too_low, hi * 2.0, hi)
+    for _ in range(max_iter):
+        mid = 0.5 * (lo + hi)
+        too_high = bands.hz_to_bark_zwicker_terhardt(mid) > z
+        hi = np.where(too_high, mid, hi)
+        lo = np.where(too_high, lo, mid)
+        if np.all(hi - lo < tol):
+            break
+    return 0.5 * (lo + hi)
+
+
+def test_bark_zwicker_terhardt_to_hz_bit_identical_to_pre_removal_defaults_dense_sweep():
+    """This is a SURFACE REMOVAL, not a behaviour change: across every
+    audible frequency (the same 19,981-point, 1 Hz-step, 20 Hz-20 kHz sweep
+    `test_bark_round_trip_dense` above uses), the production function (now
+    with no `tol`/`max_iter` to pass) must match the independent reference
+    reconstruction above -- called with the exact removed defaults -- with
+    max absolute difference EXACTLY 0.0, not merely close."""
+    z = bands.hz_to_bark_zwicker_terhardt(_DENSE_FREQS_HZ)
+    reference = _reference_bisect_bark_zwicker_terhardt_to_hz(z, tol=1e-9, max_iter=60)
+    production = bands.bark_zwicker_terhardt_to_hz(z)
+    max_abs_diff = float(np.max(np.abs(production - reference)))
+    print(f"\n[bands] issue #29 tol/max_iter removal: max abs diff vs pre-removal defaults = {max_abs_diff!r}")
+    assert max_abs_diff == 0.0
+    assert np.array_equal(production, reference)
+
+
+def test_bark_zwicker_terhardt_to_hz_no_longer_accepts_tol_or_max_iter():
+    """The whole point of removing these: a caller can no longer choose an
+    invalid solver internal at all. `max_iter=0` used to silently return
+    25000 Hz (half the bracket seed) for any input; `tol=inf` used to
+    silently return 12500 Hz after a single iteration. Both are now simply
+    not parameters -- passing either is a `TypeError` from Python's own
+    argument binding, not a validated-and-rejected `ValueError`."""
+    with pytest.raises(TypeError):
+        bands.bark_zwicker_terhardt_to_hz(10.0, tol=1e-9)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        bands.bark_zwicker_terhardt_to_hz(10.0, max_iter=60)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        bands.bark_zwicker_terhardt_to_hz(10.0, max_iter=0)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        bands.bark_zwicker_terhardt_to_hz(10.0, tol=float("inf"))  # type: ignore[call-arg]
+
+
+def test_bark_zwicker_terhardt_to_hz_rejects_negative_z():
+    """Full-file sweep finding: a negative Bark request used to silently
+    converge to ~0 Hz -- the bisection bracket's own floor (`lo` starts at
+    0.0) -- with no signal that a negative Bark value has no meaning on
+    this scale (`z(0 Hz) = 0` is the floor). Symmetric with the existing
+    asymptote (upper-bound) guard."""
+    with pytest.raises(ValueError, match="negative"):
+        bands.bark_zwicker_terhardt_to_hz(-100.0)
+    with pytest.raises(ValueError, match="negative"):
+        bands.bark_zwicker_terhardt_to_hz(np.array([5.0, -0.001, 10.0]))
+    # Reachable through the hz_to_bark/bark_to_hz dispatch layer too.
+    with pytest.raises(ValueError, match="negative"):
+        bands.bark_to_hz(-1.0, "bark_zwicker_terhardt")
+
+
+@pytest.mark.parametrize("bad_n_bands", [32.5, "32", None, float("nan"), True])
+def test_band_edges_rejects_non_integer_n_bands(bad_n_bands):
+    """Full-file sweep finding: a non-int `n_bands` (a float, a numeric
+    string, `None`, NaN, or a `bool`) used to raise an unnamed `TypeError`
+    (e.g. `'<' not supported between instances of 'str' and 'int'`) instead
+    of a documented `ValueError` naming `n_bands` and its constraint -- or,
+    for some inputs, silently propagate into `np.linspace` deeper inside."""
+    with pytest.raises(ValueError, match="n_bands"):
+        bands.band_edges(bad_n_bands, "bark_zwicker_terhardt", f_min=20.0, f_max=15000.0)
+
+
+@pytest.mark.parametrize("bad_value", ["20", None, True, [20.0]])
+def test_band_edges_rejects_non_numeric_f_min_f_max(bad_value):
+    """Full-file sweep finding: a non-numeric `f_min`/`f_max` (a string, a
+    bool, `None`, a list) used to raise an unnamed `TypeError` from
+    `np.isfinite` (e.g. \"ufunc 'isfinite' not supported for the input
+    types...\") rather than a `ValueError` naming which parameter and why."""
+    with pytest.raises(ValueError, match="f_min"):
+        bands.band_edges(8, "bark_zwicker_terhardt", f_min=bad_value, f_max=15000.0)
+    with pytest.raises(ValueError, match="f_max"):
+        bands.band_edges(8, "bark_zwicker_terhardt", f_min=20.0, f_max=bad_value)
+
+
+@pytest.mark.parametrize("bad_value", ["False", 1, 0, "True"])
+def test_band_edges_rejects_non_bool_allow_extrapolation(bad_value):
+    """Full-file sweep finding: `allow_extrapolation` was never type-checked,
+    so ANY truthy non-bool -- including the string `"False"` -- silently let
+    >15.5 kHz Bark extrapolation through with no signal that the caller's
+    apparently-negative value was ignored. `0` (falsy) must still raise: the
+    point is the wrong TYPE, not merely the wrong truthiness."""
+    with pytest.raises(ValueError, match="allow_extrapolation"):
+        bands.band_edges(8, "bark_zwicker_terhardt", f_min=20.0, f_max=20000.0, allow_extrapolation=bad_value)
+
+
+@pytest.mark.parametrize("bad_bands", [None, [1, 2, 3], "not_a_dict", 42])
+def test_bin_band_weights_rejects_non_dict_bands(bad_bands):
+    """Full-file sweep finding: a non-dict `bands` used to raise an unnamed
+    `TypeError` (`'NoneType' object is not subscriptable`,
+    `list indices must be integers or slices, not str`, ...) instead of a
+    `ValueError` naming the constraint."""
+    with pytest.raises(ValueError, match="bands"):
+        bands.bin_band_weights(bad_bands, n_fft=1024, sr=48000.0)
+
+
+@pytest.mark.parametrize(
+    "incomplete_bands",
+    [{}, {"n_bands": 4}, {"n_bands": 4, "f_min": 20.0, "f_max": 15000.0}],
+)
+def test_bin_band_weights_rejects_bands_missing_required_keys(incomplete_bands):
+    """Full-file sweep finding: a dict missing `centers_hz` (or other
+    required keys) used to raise an unnamed `KeyError` instead of a
+    `ValueError` naming which key(s) are missing."""
+    with pytest.raises(ValueError, match="missing required key"):
+        bands.bin_band_weights(incomplete_bands, n_fft=1024, sr=48000.0)
+
+
+@pytest.mark.parametrize("bad_sr", ["48000", None, True, [48000.0]])
+def test_bin_band_weights_rejects_non_numeric_sr(bad_sr):
+    """Full-file sweep finding: a non-numeric `sr` used to raise an unnamed
+    `TypeError` from `np.isfinite` rather than a `ValueError` naming `sr`."""
+    result = bands.band_edges(8, "bark_zwicker_terhardt", f_min=20.0, f_max=15500.0)
+    with pytest.raises(ValueError, match="sr"):
+        bands.bin_band_weights(result, n_fft=1024, sr=bad_sr)

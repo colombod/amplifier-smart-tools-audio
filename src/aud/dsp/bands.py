@@ -125,6 +125,38 @@ approximately, whenever the weights sum to 1 per bin (verified directly by
 `test_partition_of_unity_sums_to_one_everywhere`, and the energy-sum
 equality is checked independently in
 `test_band_energy_conserves_total_energy`).
+
+Which functions validate their numeric input, and why some don't
+--------------------------------------------------------------------
+`bark_zwicker_terhardt_to_hz` (an ITERATIVE SEARCH) and `band_edges` /
+`bin_band_weights` (which CONSTRUCT A RANGE FROM ENDPOINTS AND A COUNT)
+validate their arguments and raise on non-finite or degenerate input,
+because those code paths can silently return a bracket edge, an
+extrapolated point, or a mis-shapen array dressed up as a real answer with
+no signal that anything was wrong -- issues #25, #26 and #29 are three
+independent, previously-shipped instances of exactly that in this file.
+
+The six one-line closed-form scalar maps (`hz_to_bark_peaq`,
+`bark_peaq_to_hz`, `hz_to_bark_zwicker_terhardt`, `hz_to_erb_rate`,
+`erb_rate_to_hz`, `critical_bandwidth_hz`, `erb_bandwidth_hz`) and
+`band_energy` do NOT validate, deliberately. Each is a single published
+formula evaluated once (or, for `band_energy`, a per-bin weighted sum) with
+no search and no accumulated state: NaN in produces NaN out, +-inf in
+produces whatever that one formula's own limit is (finite or infinite),
+and a negative Hz/Bark/ERB-rate/energy value -- physically meaningless, but
+not a defect class this module guards against anywhere else -- evaluates
+the formula exactly as published. None of these can produce a PLAUSIBLE
+WRONG ANSWER the way a search or a range construction can: the output is
+always the literal, honestly-computed image of the input under that one
+formula, so a caller can already tell the answer is unusable by inspecting
+it for non-finiteness, and there is nothing left for a guard to add. This
+is the same precedent `bark_peaq_to_hz` established in PR #26 ("the honest
+sibling"): propagate, don't add a guard whose only job would be to reject
+a value that is already self-evidently unusable. `band_energy` additionally
+sits in a per-frame hot path (see AGENTS.md #8: `dsp/` modules take arrays
+and return arrays without raising user-facing errors); validating every
+element of a spectrum on every call would cost real time for no caller who
+could not already see a NaN/negative value in the array it just handed in.
 """
 
 from __future__ import annotations
@@ -230,14 +262,31 @@ _BARK_BRACKET_SEED_HZ = 50_000.0
 # headroom assertion, which reads this constant rather than a literal 200.
 _BARK_BRACKET_EXPANSION_CAP = 200
 
+# Bisection convergence parameters for the SECOND loop below (narrowing the
+# bracket once it covers z), not the expansion loop above. These used to be
+# caller-facing `tol`/`max_iter` keyword arguments; issue #29 found that an
+# invalid choice (max_iter<=0, non-finite/negative tol) silently returned a
+# bracket edge dressed up as a real answer, with no exception -- e.g.
+# max_iter=0 returned 25000 Hz (the bracket's own seed/2) for every input.
+# They are SOLVER INTERNALS: a caller who does not know a bisection is
+# running here has no principled basis for choosing either value, and
+# nothing in this codebase ever passed either one explicitly (verified by
+# grep across src/ and tests/ before removing them -- see the PR). Fixed
+# here as named constants instead of a tunable surface; removing the
+# surface ends this defect class in this function rather than extending it
+# with a validated-but-still-present guard.
+_BARK_INVERSE_TOL_HZ = 1e-9
+_BARK_INVERSE_MAX_ITER = 60
 
-def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int = 60) -> np.ndarray:
+
+def bark_zwicker_terhardt_to_hz(z: np.ndarray) -> np.ndarray:
     """Bark -> Hz, Zwicker & Terhardt 1980, by bisection.
 
     `hz_to_bark_zwicker_terhardt` has no closed-form inverse. The formula
     saturates as `f -> infinity` (both `atan` terms approach `pi/2`), so its
     range has a hard ceiling of `13*pi/2 + 3.5*pi/2` (~25.918 Bark); a `z` at
-    or beyond that ceiling has no finite Hz value and is rejected outright.
+    or beyond that ceiling -- or below 0, the formula's value at `f=0` --
+    has no finite Hz value in range and is rejected outright.
 
     Below the ceiling, the bisection bracket is expanded geometrically from
     a `_BARK_BRACKET_SEED_HZ` (50 kHz) seed until it actually covers `z`,
@@ -248,29 +297,42 @@ def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int 
     `band_edges(..., allow_extrapolation=True)` lets a
     caller ask for `f_max` well above 50 kHz (e.g. 96 kHz, the Nyquist of a
     192 kHz transfer), and the fixed bracket silently capped every returned
-    edge at ~50 kHz with no exception. `max_iter=60` halves whatever bracket
-    is found to <2^-60 of its width -- a RELATIVE bound, not an absolute
-    one. Within the audible range (20 Hz-24 kHz) the bracket stays small, so
-    this also reaches `tol` in absolute Hz (dense round-trip: ~3.6e-10 Hz).
-    Near the asymptote the forward map itself saturates (both `atan` terms
-    flatten toward their limits), so `hz_to_bark_zwicker_terhardt`'s
-    derivative there is minuscule (~1.7e-14 at f=1e9 Hz, measured): float64
-    rounding noise in evaluating the forward formula, not the number of
-    bisection halvings, is what limits how precisely `z` can pin down `f`
-    there. Measured: the ~0.102 Hz absolute error at f=1e9 Hz is IDENTICAL
-    from `max_iter=60` through `max_iter=2000`, including with `tol=0` --
-    more halvings buy nothing once the bracket has narrowed past what the
-    saturated forward function can resolve at that magnitude. Within the
-    audible range (20 Hz-24 kHz) the forward map is nowhere near saturated,
-    so the bisection reaches `tol` in absolute Hz as stated above.
+    edge at ~50 kHz with no exception. `_BARK_INVERSE_MAX_ITER` (60) halves
+    whatever bracket is found to <2^-60 of its width -- a RELATIVE bound,
+    not an absolute one. Within the audible range (20 Hz-24 kHz) the
+    bracket stays small, so this also reaches `_BARK_INVERSE_TOL_HZ` in
+    absolute Hz (dense round-trip: ~3.6e-10 Hz, re-measured at ~4.3e-10 Hz
+    over a 200,000-point 20 Hz-20 kHz sweep when the tol/max_iter
+    parameters were removed -- see the PR). Near the asymptote the forward
+    map itself saturates (both `atan` terms flatten toward their limits),
+    so `hz_to_bark_zwicker_terhardt`'s derivative there is minuscule
+    (~1.7e-14 at f=1e9 Hz, measured): float64 rounding noise in evaluating
+    the forward formula, not the number of bisection halvings, is what
+    limits how precisely `z` can pin down `f` there. Measured: the ~0.102
+    Hz absolute error at f=1e9 Hz is IDENTICAL from `max_iter=60` through
+    `max_iter=2000`, including with `tol=0` -- more halvings buy nothing
+    once the bracket has narrowed past what the saturated forward function
+    can resolve at that magnitude. Within the audible range (20 Hz-24 kHz)
+    the forward map is nowhere near saturated, so the bisection reaches
+    `_BARK_INVERSE_TOL_HZ` in absolute Hz as stated above.
 
     Raises:
-        ValueError: `z` is non-finite (NaN/inf), or at or beyond the
+        ValueError: `z` is non-finite (NaN/inf), negative (below the
+            formula's `z(0 Hz) = 0` floor -- a negative Bark request used
+            to silently converge on ~0 Hz, the bisection bracket's own
+            floor, dressed up as a real answer), or at or beyond the
             formula's asymptote (see above).
     """
     z = np.asarray(z, dtype=np.float64)
     if not np.all(np.isfinite(z)):
         raise ValueError(f"z must be finite; got z={z}")
+
+    if np.any(z < 0.0):
+        raise ValueError(
+            f"z={float(np.min(np.atleast_1d(z)))} Bark is negative; the Zwicker & Terhardt scale "
+            "starts at 0 Bark (z(0 Hz) = 0) and has no Hz value below it. Request a non-negative "
+            "Bark value."
+        )
 
     # 13*atan(x) -> 13*pi/2 and 3.5*atan(x**2) -> 3.5*pi/2 as f -> infinity.
     asymptote = 13.0 * (np.pi / 2.0) + 3.5 * (np.pi / 2.0)
@@ -304,12 +366,12 @@ def bark_zwicker_terhardt_to_hz(z: np.ndarray, tol: float = 1e-9, max_iter: int 
             break
         hi = np.where(too_low, hi * 2.0, hi)
 
-    for _ in range(max_iter):
+    for _ in range(_BARK_INVERSE_MAX_ITER):
         mid = 0.5 * (lo + hi)
         too_high = hz_to_bark_zwicker_terhardt(mid) > z
         hi = np.where(too_high, mid, hi)
         lo = np.where(too_high, lo, mid)
-        if np.all(hi - lo < tol):
+        if np.all(hi - lo < _BARK_INVERSE_TOL_HZ):
             break
     return 0.5 * (lo + hi)
 
@@ -440,17 +502,30 @@ def band_edges(
         }
 
     Raises:
-        ValueError: `n_bands < 1`; `f_min`/`f_max` non-finite (inf/NaN);
-            `f_min` outside `(0, f_max)`; unknown `scale`; or a Bark `scale`
-            with `f_max` beyond the tabulated limit and
-            `allow_extrapolation=False`.
+        ValueError: `n_bands` is not an integer, or is `< 1`; `f_min`/
+            `f_max` are not real numbers, are non-finite (inf/NaN), or
+            `f_min` is outside `(0, f_max)`; `allow_extrapolation` is not a
+            `bool`; unknown `scale`; or a Bark `scale` with `f_max` beyond
+            the tabulated limit and `allow_extrapolation=False`.
     """
+    if not isinstance(n_bands, (int, np.integer)) or isinstance(n_bands, bool):
+        raise ValueError(f"n_bands must be an integer; got n_bands={n_bands!r} (type {type(n_bands).__name__})")
     if n_bands < 1:
         raise ValueError(f"n_bands must be >= 1; got {n_bands}")
+    for _name, _value in (("f_min", f_min), ("f_max", f_max)):
+        if not isinstance(_value, (int, float, np.integer, np.floating)) or isinstance(_value, bool):
+            raise ValueError(f"{_name} must be a real number; got {_name}={_value!r} (type {type(_value).__name__})")
     if not (np.isfinite(f_min) and np.isfinite(f_max)):
         raise ValueError(f"f_min/f_max must be finite; got f_min={f_min}, f_max={f_max}")
     if not (0.0 < f_min < f_max):
         raise ValueError(f"f_min/f_max must satisfy 0 < f_min < f_max; got f_min={f_min}, f_max={f_max}")
+    if not isinstance(allow_extrapolation, bool):
+        raise ValueError(
+            f"allow_extrapolation must be a bool; got allow_extrapolation={allow_extrapolation!r} "
+            f"(type {type(allow_extrapolation).__name__}) -- a truthy non-bool (e.g. a non-empty "
+            "string, even the string 'False') would silently be treated as True regardless of its "
+            "apparent meaning"
+        )
     forward, inverse = _scale_funcs(scale)
 
     extrapolated = scale in BARK_SCALES and f_max > _BARK_TABULATED_LIMIT_HZ
@@ -536,8 +611,12 @@ def bin_band_weights(bands: dict, n_fft: int, sr: float) -> np.ndarray:
     band-0/band-N energy indistinguishable from a real signal there.
 
     Raises:
-        ValueError: `n_fft` is not a positive integer, or `sr` is not a
-            positive finite number; `bands["n_bands"]` does not match
+        ValueError: `bands` is not a dict, or is missing one of its
+            required keys (`n_bands`, `f_min`, `f_max`, `centers_hz` -- a
+            hand-built dict, or an unrelated object, that used to fail with
+            an unnamed `TypeError`/`KeyError` instead); `n_fft` is not a
+            positive integer, or `sr` is not a real, positive finite
+            number; `bands["n_bands"]` does not match
             `len(bands["centers_hz"])` (a hand-built or hand-edited `bands`
             dict with mismatched fields, which would otherwise silently
             produce weights for the wrong number of bands, or an `IndexError`
@@ -549,8 +628,19 @@ def bin_band_weights(bands: dict, n_fft: int, sr: float) -> np.ndarray:
             covered scale span, that two centers collide at float64
             precision) that would otherwise silently divide by zero.
     """
+    if not isinstance(bands, dict):
+        raise ValueError(f"bands must be a dict as returned by band_edges(); got type {type(bands).__name__}")
+    _required_keys = {"n_bands", "f_min", "f_max", "centers_hz"}
+    _missing_keys = _required_keys - bands.keys()
+    if _missing_keys:
+        raise ValueError(
+            f"bands is missing required key(s) {sorted(_missing_keys)}; expected a dict as "
+            "returned by band_edges(), with keys n_bands/f_min/f_max/centers_hz"
+        )
     if not isinstance(n_fft, (int, np.integer)) or n_fft <= 0:
         raise ValueError(f"n_fft must be a positive integer; got n_fft={n_fft!r}")
+    if not isinstance(sr, (int, float, np.integer, np.floating)) or isinstance(sr, bool):
+        raise ValueError(f"sr must be a real number; got sr={sr!r} (type {type(sr).__name__})")
     if not (np.isfinite(sr) and sr > 0):
         raise ValueError(f"sr must be a positive finite number; got sr={sr!r}")
 

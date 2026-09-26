@@ -433,6 +433,41 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   documented and accepted by `aud config`/`AUD_SAMPLE_RATE_POLICY` but never read at render time.
   `"preserve"` (default) writes at the input's own rate; an integer resamples the rendered output
   to that rate. An explicit `resample` stage in the plan always takes precedence.
+
+### Fixed
+
+- **`aud.dsp.bands.bark_zwicker_terhardt_to_hz`'s `tol`/`max_iter` were solver internals leaking
+  into the public signature (issue #29) -- removed entirely, not validated-and-kept.** They were
+  never guarded: `max_iter=0`/negative silently returned 25000 Hz (half the bracket seed) for any
+  input; `tol=inf` silently returned 12500 Hz after a single bisection step -- both dressed up as
+  real answers with no exception. This is the THIRD round of one defect class in this file (#25:
+  non-finite `f_min`/`f_max`; #26: non-finite `z`; this one: the solver options), so the surface
+  is removed rather than guarded -- a caller who does not know a bisection runs here had no
+  principled basis for choosing either value, and nothing in this codebase ever passed either one
+  explicitly (verified by grep before removing them). Fixed as module-level named constants
+  (`_BARK_INVERSE_TOL_HZ = 1e-9`, `_BARK_INVERSE_MAX_ITER = 60` -- the exact removed defaults).
+  **Bit-identical, not merely close**: across a 19,981-point dense 20 Hz-20 kHz sweep (1 Hz
+  steps) and a separate 200,000-point sweep, the post-removal function matches an independent
+  reconstruction of the pre-removal bisection (same seed/cap, same removed defaults) with max
+  absolute difference exactly `0.0`.
+  - **Full-file parameter sweep, the mandate that came with this item**: every public parameter
+    of every public function in `bands.py` was probed with `inf`/`-inf`/`nan`/negative/zero/wrong
+    type. Two more silent gaps found and closed: `bark_zwicker_terhardt_to_hz` accepted a
+    negative Bark value and silently converged on ~0 Hz (the bisection bracket's own floor,
+    symmetric with the existing asymptote/upper-bound guard -- now rejected); `band_edges`'s
+    `allow_extrapolation` was never type-checked, so any truthy non-bool -- including the string
+    `"False"` -- silently let >15.5 kHz Bark extrapolation through (now requires an actual
+    `bool`). Also newly rejected with a named `ValueError` instead of an unnamed `TypeError`/
+    `KeyError`: `band_edges`'s `n_bands` (non-integer) and `f_min`/`f_max` (non-numeric);
+    `bin_band_weights`'s `bands` argument (non-dict, or missing a required key) and `sr`
+    (non-numeric). The six one-line closed-form scalar maps (`hz_to_bark_peaq`,
+    `bark_peaq_to_hz`, `hz_to_bark_zwicker_terhardt`, `hz_to_erb_rate`, `erb_rate_to_hz`,
+    `critical_bandwidth_hz`, `erb_bandwidth_hz`) and `band_energy` are documented (module
+    docstring) as deliberately NOT validating -- each propagates non-finite/negative input
+    honestly (NaN in, NaN out) rather than searching or constructing a range, so there is no
+    plausible-wrong-answer failure mode for a guard to close, matching the precedent
+    `bark_peaq_to_hz` already established in PR #26 ("the honest sibling").
+
 ## [0.12.0] - 2026-09-21
 
 Three measured defects in `advise`'s diagnosis, found by controlled measurement
