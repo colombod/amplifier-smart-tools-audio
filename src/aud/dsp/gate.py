@@ -58,6 +58,58 @@ attenuated percentage, max/average attenuation in dB, and how many times the
 gate opened -- the open count is what tells a caller their hold time is
 wrong, and it is the number that makes chatter visible in a render report
 rather than only in a test built to provoke it.
+
+`dynamic_eq` -- Step 7 of the masking/ducking epic (issue #17): a per-band
+dynamic EQ with an EXTERNAL KEY
+------------------------------------------------------------------------
+USER RULING, binding: this is a **dynamic EQ with an external key**, not a
+sidechain level ducker. A sidechain level ducker computes ONE full-band gain
+from ONE level detector and applies it everywhere; a dynamic EQ computes the
+gain law INDEPENDENTLY PER BAND -- each band's own key level against its own
+threshold/ratio/knee/depth-limit -- which is what actually earns the name
+"EQ" (a frequency-dependent, not merely time-dependent, process).
+
+`gate`/`expand` above are FUSED: `_process_bands` detects on `band` and
+applies the resulting gain to that SAME `band`. `dynamic_eq` is the seam
+this step opens: `target` (the signal being gained down) and `key` (the
+external sidechain signal driving the decision) are two DIFFERENT signals,
+decoupled via `_process_bands`'s new `key=` parameter. In this epic's own
+vocabulary (`aud.dsp.collision`'s module docstring, Step 6): `target` is
+the MASKER, `key` is the MASKEE -- the same role assignment, carried over
+from a different mechanism (Step 6 is a psychoacoustic masking-threshold LP
+over STFT frames; Step 7 is an ordinary per-band level-vs-threshold law
+over crossover-split time-domain bands). The two are independent gain
+mechanisms, not a pipeline where one literally feeds the other's input --
+see `dynamic_eq`'s own docstring, "Relationship to Step 6", for exactly how
+depth-limiting here interacts with Step 6's own choice to leave `g_min` at
+its unbounded default.
+
+**Helper reuse (an acceptance criterion, not a preference).** `dynamic_eq`
+reuses `aud.dsp.dynamics.static_gain_reduction_db` UNMODIFIED, called once
+per band -- it already takes a `level_db` array and returns a gain, so it
+needs no changes to apply per band. It does NOT reuse `_gate_curve`/
+`_expander_curve` (this module, above): both attenuate BELOW threshold,
+the shape correct for cleaning a signal's OWN quiet passages, but the
+OPPOSITE of what an external-key duck needs -- attenuate the TARGET when
+the KEY is LOUD (above threshold). Using either here would silently invert
+the entire feature (ducking when the key falls quiet, backwards from
+"clear room for the key").
+
+**Naming hazard, resolved.** `sidechain_hpf_hz` (above) is a highpass on
+`gate`/`expand`'s own FUSED detector copy of `band` itself -- not an
+external key. `dynamic_eq` takes `key_hpf_hz` instead: a highpass on the
+EXTERNAL key's detector copy. Two different meanings of "sidechain
+highpass" get two different parameter names so they cannot collide on any
+call site.
+
+**Stereo mono-fold is inherited for free.** `_detector_level_db` already
+mono-folds (means channel power together) before computing a level -- this
+was written for `gate`/`expand`'s own stereo-image-safety property and
+applies unchanged when the detector signal is an external `key`:
+per-channel-independent detection on a stereo key would shift the stereo
+image of `target` per band, a WORSE version of the exact failure
+mono-linked detection exists to prevent. No new code needed; the existing
+mono-fold covers it.
 """
 
 from __future__ import annotations
@@ -67,9 +119,9 @@ from collections.abc import Callable
 import numpy as np
 from scipy import ndimage, signal
 
-from aud.dsp import crossover, detect
+from aud.dsp import crossover, detect, dynamics
 
-__all__ = ["expand", "gate"]
+__all__ = ["dynamic_eq", "expand", "gate"]
 
 _EPS = 1e-12
 _OPEN_EPS_DB = 0.01  # "no gain reduction requested" tolerance, floating-point slack only
@@ -231,6 +283,11 @@ def _hold_attack_release_db(
     return smoothed, open_count
 
 
+def _split_into_bands(x: np.ndarray, sr: int, crossovers_hz: list[float] | None) -> list[np.ndarray]:
+    """`crossover.split(x, ...)` if `crossovers_hz` names any crossovers, else `[x]` (full-band)."""
+    return crossover.split(x, sr, list(crossovers_hz)) if crossovers_hz else [x]
+
+
 def _process_bands(
     x: np.ndarray,
     sr: int,
@@ -242,17 +299,63 @@ def _process_bands(
     lookahead_ms: float,
     sidechain_hpf_hz: float | None,
     curve: Callable[[np.ndarray], np.ndarray],
+    key: np.ndarray | None = None,
+    smoothing: bool = True,
 ) -> tuple[np.ndarray, list[dict]]:
-    bands = crossover.split(x, sr, list(crossovers_hz)) if crossovers_hz else [x]
+    """Split `x` (and, optionally, a decoupled `key`) into bands, detect,
+    compute the gain, apply it to `x`'s band, recombine.
+
+    Args:
+        x: The signal being gained down (the "target"/"masker").
+        key: Step 7's seam (issue #17): an OPTIONAL, DIFFERENT signal to
+            detect on, decoupled from `x`. `None` (default) reproduces
+            `gate`/`expand`'s original fused behaviour exactly -- the same
+            band both detects and is gained, `key_bands` IS `bands`, no new
+            code path is exercised. When given, `key` is split into bands
+            with the SAME `crossovers_hz` as `x` (so band `i` of one
+            matches band `i` of the other by construction), and band `i`'s
+            LEVEL comes from `key`'s band while the resulting GAIN is
+            applied to `x`'s band -- detector-source and gain-target are
+            no longer required to be the same array. Must have the same
+            `n_samples` as `x`; channel count may differ from `x`'s (the
+            mono-fold in `_detector_level_db` does not care).
+        smoothing: `True` (default, `gate`/`expand`'s existing behaviour)
+            applies forward lookahead then hold/attack/release smoothing to
+            `curve`'s raw per-sample output. `False` (Step 7's own
+            boundary, issue #17's module-docstring note "stop at the
+            Step 8 boundary") applies `curve`'s raw output UNSMOOTHED --
+            `attack_ms`/`hold_ms`/`release_ms`/`lookahead_ms` are unused in
+            that case. Ballistics (attack/hold/release in time) and
+            cross-band (ERB-width) smoothing are Step 8's job (issue #18),
+            not this step's; keeping them out here, rather than defaulting
+            them to near-zero time constants, means Step 8 can add them
+            without this function having pretended to already own that
+            surface.
+
+    Raises:
+        ValueError: `key is not None` and `key.shape[0] != x.shape[0]`.
+    """
+    if key is not None and key.shape[0] != x.shape[0]:
+        raise ValueError(
+            f"key must have the same n_samples as x; got key.shape[0]={key.shape[0]}, x.shape[0]={x.shape[0]}"
+        )
+
+    bands = _split_into_bands(x, sr, crossovers_hz)
+    key_bands = bands if key is None else _split_into_bands(key, sr, crossovers_hz)
     window = max(1, round(lookahead_ms / 1000.0 * sr))
 
     processed: list[np.ndarray] = []
     reports: list[dict] = []
-    for index, band in enumerate(bands):
-        level_db = _detector_level_db(band, sr, sidechain_hpf_hz)
+    for index, (band, key_band) in enumerate(zip(bands, key_bands, strict=True)):
+        level_db = _detector_level_db(key_band, sr, sidechain_hpf_hz)
         raw_target_db = curve(level_db)
-        target_la = _lookahead_max(raw_target_db, window)
-        smoothed_db, open_count = _hold_attack_release_db(target_la, sr, attack_ms, hold_ms, release_ms)
+
+        if smoothing:
+            target_la = _lookahead_max(raw_target_db, window)
+            smoothed_db, open_count = _hold_attack_release_db(target_la, sr, attack_ms, hold_ms, release_ms)
+        else:
+            smoothed_db = raw_target_db
+            open_count = 0
 
         gain_lin = 10.0 ** (smoothed_db / 20.0)
         processed.append(band * gain_lin[:, None])
@@ -498,6 +601,171 @@ def expand(
             "ratio": float(ratio),
             "knee_db": float(knee_db),
             "sidechain_hpf_hz": sidechain_hpf_hz,
+            "bands": band_reports,
+        }
+    )
+    return y, stats
+
+
+def dynamic_eq(
+    target: np.ndarray,
+    key: np.ndarray,
+    sr: int,
+    *,
+    threshold_above_floor_db: float = 6.0,
+    threshold_db: float | None = None,
+    ratio: float = 2.0,
+    knee_db: float = 6.0,
+    max_depth_db: float = 12.0,
+    crossovers_hz: list[float] | None = None,
+    key_hpf_hz: float | None = 80.0,
+) -> tuple[np.ndarray, dict]:
+    """Per-band dynamic EQ driven by an EXTERNAL key -- Step 7 of the
+    masking/ducking epic (issue #17). See module docstring's "dynamic_eq"
+    section for the full design rationale (role assignment, helper reuse,
+    the naming hazard, and why the stereo mono-fold needs no new code).
+
+    `target` (the MASKER, in Step 6's vocabulary) is gained down;
+    `key` (the MASKEE) drives the decision. Per band, independently:
+    `key`'s own level (mono-folded, optionally highpassed via `key_hpf_hz`)
+    is run through `aud.dsp.dynamics.static_gain_reduction_db` UNMODIFIED
+    (this function's threshold/ratio/knee become that helper's own
+    `BandParams`), then the raw reduction is clipped to `-max_depth_db`
+    before being applied to `target`'s matching band -- so acceptance
+    criterion 1 ("rendered attenuation never exceeds the requested max
+    depth in any band") holds BY CONSTRUCTION, not merely by measurement.
+
+    No ballistics (attack/hold/release, lookahead) and no cross-band
+    (ERB-width) smoothing happen here (`_process_bands(..., smoothing=
+    False)`) -- both are Step 8's job (issue #18). This applies the raw,
+    per-sample static law directly. Stopping here, at this exact boundary,
+    is deliberate: Step 8 can add real ballistics on top without this
+    function's own surface having to change.
+
+    Relationship to Step 6 (`aud.dsp.collision`). `collision_gains` is a
+    DIFFERENT gain mechanism: a psychoacoustic masking-threshold LP solved
+    per STFT frame across ALL bands jointly (via a spreading matrix), with
+    `g_min` deliberately left at its unbounded default (0.0) -- its own
+    docstring states depth-limiting is Step 7/8's job, not its own. This
+    function does not consume `collision_gains`' output, and the two are
+    not wired into a single pipeline by this step: `dynamic_eq` is an
+    independent, ordinary per-band level-vs-threshold law, over
+    crossover-split TIME-DOMAIN bands, for a caller who wants a directly
+    dialled-in dynamic EQ rather than the full psychoacoustic model (or a
+    hard depth ceiling layered alongside it). Both gains are linear-power
+    multipliers in `[0, 1]` (equivalently, dB <= 0), so composing them
+    (e.g. multiplying a rendered `dynamic_eq` gain by a rendered
+    `collision_gains` gain on the same target/key pair) is well-defined in
+    principle -- no step in this epic performs that composition yet, and
+    none is added here. On the specific question of how a depth limit
+    here would interact with Step 6's own documented over-prediction of
+    masking (`aud.dsp.masking`'s missing outer/middle-ear weighting, ~2.75
+    dB/Bark too shallow a slope at 100 Hz -- see `collision.py`'s module
+    docstring): that over-prediction makes `collision_gains` ask for LESS
+    attenuation than a fully compliant model would (the safe-by-accident,
+    under-ducking direction). `max_depth_db` here is an unconditional
+    ceiling, independent of anything upstream -- composing it with Step 6's
+    own under-ducking bias can only make the combined result MORE
+    conservative (a hard cap on top of an already-conservative estimate),
+    never less; it has no mechanism by which it could compound Step 6's
+    bias in the opposite (over-attenuating) direction.
+
+    Args:
+        target: Array of shape (n_samples,) or (n_samples, n_channels) --
+            the signal being gained down.
+        key: The external sidechain signal driving the decision. Must have
+            the same `n_samples` as `target`; channel count may differ
+            (both are mono-folded independently by the detector / applied
+            per `target`'s own channel layout).
+        sr: Sample rate in Hz, shared by both signals.
+        threshold_above_floor_db: Threshold, dB above the KEY's OWN
+            measured noise floor (`aud.dsp.detect.measure_noise_floor`,
+            measured on `key`, not `target` -- the signal actually driving
+            the decision is what the floor must be relative to), above
+            which `target` is ducked. >= 0.
+        threshold_db: Absolute dBFS escape hatch, overriding
+            `threshold_above_floor_db` when given; the floor is still
+            measured (on `key`) and reported for context.
+        ratio: `>= 1.0`, forwarded verbatim to
+            `aud.dsp.dynamics.static_gain_reduction_db` via `BandParams`.
+            `1.0` is no reduction.
+        knee_db: `>= 0`, forwarded verbatim, same helper.
+        max_depth_db: `>= 0`. The depth limit: no band's rendered
+            attenuation may exceed this many dB, regardless of how far
+            above threshold the key climbs (ratio-based reduction is
+            otherwise unbounded as key level rises).
+        crossovers_hz: Ascending Linkwitz-Riley crossover frequencies, Hz.
+            `None` (or `[]`) is full-band -- a single "band" still driven
+            by the external key rather than by itself.
+        key_hpf_hz: Highpass corner, Hz, for the KEY's OWN level detector
+            only (mirrors `sidechain_hpf_hz`'s role on `gate`/`expand`,
+            renamed -- see module docstring's naming-hazard note -- because
+            it filters a DIFFERENT signal than that parameter does).
+            `None` disables it.
+
+    Returns:
+        (y, stats) -- `y` is `target`, gained down; `stats` mirrors
+        `gate`/`expand`'s own shape (see `_aggregate_band_reports`), plus
+        `ratio`/`knee_db`/`max_depth_db`/`key_hpf_hz`.
+
+    Raises:
+        ValueError: `key.shape[0] != target.shape[0]`; `ratio < 1.0`;
+            `knee_db < 0`; `max_depth_db < 0`; or (via
+            `aud.dsp.crossover.split`) `crossovers_hz` not strictly
+            ascending / out of range.
+    """
+    if ratio < 1.0:
+        raise ValueError(f"ratio must be >= 1.0 (below 1.0 is upward expansion, a different device), got {ratio}")
+    if knee_db < 0.0:
+        raise ValueError(f"knee_db must be >= 0, got {knee_db}")
+    if max_depth_db < 0.0:
+        raise ValueError(f"max_depth_db must be >= 0, got {max_depth_db}")
+
+    target = np.asarray(target, dtype=np.float64)
+    key = np.asarray(key, dtype=np.float64)
+    mono_input = target.ndim == 1
+    if mono_input:
+        target = target[:, None]
+    key_2d = key if key.ndim == 2 else key[:, None]
+    if key_2d.shape[0] != target.shape[0]:
+        raise ValueError(
+            f"key must have the same n_samples as target; got key.shape[0]={key_2d.shape[0]}, "
+            f"target.shape[0]={target.shape[0]}"
+        )
+
+    resolved_threshold_db, noise_floor_dbfs = _resolve_threshold_db(key_2d, sr, threshold_db, threshold_above_floor_db)
+    band_params = dynamics.BandParams(threshold_db=resolved_threshold_db, ratio=ratio, knee_db=knee_db)
+
+    def curve(level_db: np.ndarray) -> np.ndarray:
+        raw_db = dynamics.static_gain_reduction_db(level_db, band_params)
+        return np.maximum(raw_db, -max_depth_db)
+
+    y, band_reports = _process_bands(
+        target,
+        sr,
+        crossovers_hz,
+        attack_ms=0.0,
+        hold_ms=0.0,
+        release_ms=0.0,
+        lookahead_ms=0.0,
+        sidechain_hpf_hz=key_hpf_hz,
+        curve=curve,
+        key=key_2d,
+        smoothing=False,
+    )
+    if mono_input:
+        y = y[:, 0]
+
+    stats = _aggregate_band_reports(band_reports)
+    stats.update(
+        {
+            "threshold_db": resolved_threshold_db,
+            "threshold_above_floor_db": None if threshold_db is not None else float(threshold_above_floor_db),
+            "noise_floor_dbfs": float(noise_floor_dbfs),
+            "ratio": float(ratio),
+            "knee_db": float(knee_db),
+            "max_depth_db": float(max_depth_db),
+            "key_hpf_hz": key_hpf_hz,
             "bands": band_reports,
         }
     )
