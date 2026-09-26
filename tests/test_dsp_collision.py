@@ -236,8 +236,13 @@ def test_collision_gains_objective_prefers_cutting_low_importance_band_when_redu
     mutation already used, just measured on the right output. Doing that
     across many independently-random, ordinary (non-degenerate) broadband
     energy draws at this dynamic range (this session, n=30 seeds, no weight
-    vector hand-tuned): ~20-30% differ, sometimes across the full gain
-    range on a specific band; the rest are bit-identical. The LP only has a
+    vector hand-tuned): a substantial minority differ, sometimes across the
+    full gain range on a specific band; most are bit-identical. The exact
+    fraction is construction-dependent (distribution, shape, and draw order
+    all move it -- three independent measurements of this same property
+    produced three different percentages from three different
+    constructions, see PR #34's round-2 discussion), so no percentage is
+    cited here. The LP only has a
     genuine tie for the objective to break when two bands' constraint
     contributions land close enough together by chance -- most random
     draws do not create that tie, but plenty do, and the seed fixed below
@@ -247,7 +252,7 @@ def test_collision_gains_objective_prefers_cutting_low_importance_band_when_redu
     n_bands = bands["n_bands"]
     w = sii_band_importance(bands)
 
-    rng = np.random.default_rng(6)  # confirmed (this session) to land in the ~20-30% that differ
+    rng = np.random.default_rng(6)  # confirmed (this session) to land in the differing minority
     target = rng.uniform(0.01, 0.2, size=(n_bands, 4))
     key = rng.uniform(0.01, 0.2, size=(n_bands, 4))
 
