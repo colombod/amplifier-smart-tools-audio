@@ -169,7 +169,7 @@ def _expander_curve(level_db: np.ndarray, threshold_db: float, ratio: float, kne
 
     Below `threshold_db`, output moves `ratio` dB for every 1 dB the input
     drops (steeper than the unprocessed slope of 1); at/above it, the signal
-    is untouched. `aud.dsp.dynamics._static_gain_reduction_db` builds a
+    is untouched. `aud.dsp.dynamics.static_gain_reduction_db` builds a
     matching soft knee for a compressor's *above*-threshold curve; this is
     its mirror image, applied *below* threshold, with a quadratic connecting
     piece derived the same way (matching value and slope at both knee
