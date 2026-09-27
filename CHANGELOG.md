@@ -272,6 +272,45 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ### Fixed
 
+- **`aud.dsp.stft`'s minimum-input-length test was self-referential and hid a real odd-`n_fft`
+  bug** (issue #28, fifth instance of the same defect class as #25/#26): `tests/test_dsp_stft.py`'s
+  `test_signal_at_exact_minimum_length_round_trips` computed its expected `min_len` via
+  `-(-n_fft // 2)` -- copied VERBATIM from `_min_input_len`'s own implementation -- and exercised
+  only `n_fft=1024` (even), where `floor(n_fft/2) == ceil(n_fft/2)`, so the copy could never
+  disagree with the original no matter which was wrong. **Measured**: mutating `_min_input_len` to
+  `return n_fft // 2` (floor instead of ceiling) survived the entire pre-existing suite; at
+  `n_fft=1023` (odd), a 511-sample input succeeds on pristine source (internally zero-padded up to
+  the true minimum of 512) but raises `ValueError: ... must be >= ceil(m_num/2) = 512!` under the
+  mutant, because the wrong (too-small) reported minimum stops `analyze` from padding it. Odd
+  `n_fft` is supported and exercised elsewhere (PR #26 added `(1023, 48000)` coverage to the bands
+  module for exactly this reason), so this was a genuine latent bug in test coverage, not a
+  hypothetical.
+  - Added `test_min_input_len_matches_independently_derived_ceiling`: asserts `_min_input_len(n_fft)
+    == math.ceil(n_fft / 2)` -- a different code path (float division + ceiling) from the
+    implementation's own double-negation bit-trick -- across 30 values of `n_fft` straddling several
+    powers of two, odd and even.
+  - `test_signal_at_exact_minimum_length_round_trips` is now parametrized over `(1024, 256)` (even,
+    the original case) and `(1023, 341)` (odd, a COLA-compliant hop for that odd `n_fft`), with
+    `min_len` derived via `math.ceil` rather than copied from the source.
+  - Added `test_odd_n_fft_one_sample_short_of_minimum_still_round_trips_via_padding`: the direct
+    behavioural reproduction of the bug above (odd `n_fft=1023`, 511-sample input, must round-trip
+    via internal padding). Mutation-proved against all three candidate expressions:
+    `n_fft // 2` (wrong for odd -- CAUGHT, the exact `ValueError` above), `n_fft // 2 + 1` (wrong for
+    even -- CAUGHT by the new `[1024-256]` parametrized case instead), and `(n_fft + 1) // 2` (found
+    to be mathematically IDENTICAL to `-(-n_fft // 2)` for every `n_fft >= 1` -- not a real mutant,
+    correctly survives). Source restored byte-identical after each mutation trial; verified with a
+    `diff`.
+  - **Sweep of the rest of `tests/test_dsp_stft.py`** for the same two blind spots (an assertion that
+    reimplements production arithmetic; a parametrize/case list whose entries all share an unstated
+    property): the `cases` list in `test_null_test_various_window_n_fft_hop_combinations` was
+    all-even (512, 1024, 4096, 1024, 2048) -- added an odd-`n_fft` case
+    (`("hann", 1023, 341)`). `test_signal_shorter_than_one_window_round_trips_exactly` was a single
+    even-`n_fft` (2048) case -- added a companion odd-`n_fft` (1023) test rather than editing the
+    original, to keep the even case's own history intact. Every other hop-fraction list in the file
+    (`n_fft // 2`, `n_fft // 4`, `n_fft // 8` used as TEST INPUT overlap fractions, not as a copy of
+    `_min_input_len`) and the 48 kHz resolution table (plain floating-point `sr`/`n_fft` arithmetic,
+    no integer floor/ceil branching for parity to hide behind) were reviewed and are recorded in the
+    PR description as deliberate, stated non-findings -- not silently passed over.
 - **`aud.dsp.masking.masking_threshold`** was missing ITU-R BS.1387 Annex 2 Sec 2.1.9's eq. 24-26
   masking offset entirely: threshold-minus-excitation measured at exactly 0.00 dB at every band,
   3.0-6.75 dB too permissive (concluding material is masked when it audibly is not -- the unsafe
