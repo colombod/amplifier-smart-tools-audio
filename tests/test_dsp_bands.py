@@ -1475,6 +1475,52 @@ def test_band_energy_unchanged_on_valid_input():
     assert np.allclose(total_after, total_before, rtol=1e-9, atol=1e-9)
 
 
+def _reference_unguarded_band_energy(spectrum: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    """Independent reproduction of `main`'s (pre-this-PR) `band_energy`:
+    plain `tensordot`, no guard at all. Reconstructed here rather than
+    imported from production (AGENTS.md #3b) so the comparison below
+    cannot pass merely because it calls the same code on both sides."""
+    spectrum = np.asarray(spectrum, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+    return np.tensordot(weights, spectrum, axes=([1], [0]))
+
+
+@pytest.mark.parametrize(("n_bins", "n_bands", "n_frames"), [(513, 8, 64), (2049, 32, 64)])
+def test_band_energy_cheaper_guard_bit_identical_to_unguarded_tensordot(n_bins, n_bands, n_frames):
+    """The cheaper `min()`/`max()`-reduction guard must not change a single
+    bit of valid-input output relative to no guard at all -- not merely
+    relative to the elementwise-boolean-pass guard it replaced. Zero bins
+    are mixed into `spectrum` (every 11th bin) so the comparison also
+    covers real, legitimately-zero energy, not just strictly-positive
+    values."""
+    rng = np.random.default_rng(1)
+    spectrum = rng.uniform(0.0, 1.0, size=(n_bins, n_frames)) ** 2
+    spectrum[::11, :] = 0.0
+    weights = rng.uniform(0.0, 1.0, size=(n_bands, n_bins))
+    weights[:, ::7] = 0.0
+
+    guarded = bands.band_energy(spectrum, weights)
+    unguarded = _reference_unguarded_band_energy(spectrum, weights)
+
+    assert guarded.shape == unguarded.shape
+    max_diff = float(np.max(np.abs(guarded - unguarded)))
+    assert max_diff == 0.0, f"n_bins={n_bins} n_bands={n_bands} n_frames={n_frames}: max|diff|={max_diff}"
+
+
+def test_band_energy_empty_bin_axis_is_a_no_op_like_before_the_guard():
+    """Preserve exact pre-guard behaviour for a zero-size bin axis: an
+    empty `spectrum`/`weights` never raised before this guard existed
+    (`np.all(...)` over an empty array is vacuously True), and the new
+    `.min()`/`.max()`-based guard must not change that -- `.min()`/`.max()`
+    raise outright on a zero-size array, so size 0 must be special-cased
+    to skip the reduction entirely rather than accidentally calling it."""
+    spectrum = np.zeros((0,), dtype=np.float64)
+    weights = np.zeros((3, 0), dtype=np.float64)
+    result = bands.band_energy(spectrum, weights)
+    assert result.shape == (3,)
+    assert np.all(result == 0.0)
+
+
 @pytest.mark.parametrize(
     ("fn_name", "unit"),
     [
@@ -1493,11 +1539,27 @@ def test_remaining_closed_form_maps_keep_negative_input_visible_across_magnitude
     point. This is what actually justifies leaving them unguarded (see the
     module docstring); if a future edit to one of these formulas ever makes
     it produce a plausible-looking non-negative result for some negative
-    input, this test catches that regression."""
+    input, this test catches that regression.
+
+    `bark_peaq_to_hz` (`650*sinh(z/7)`) genuinely overflows float64 at
+    `z <= -10000` (`sinh` of a large-magnitude argument exceeds float64's
+    range) -- measured: `z` in `{-10000, -1e6, -1e9}` all raise
+    `RuntimeWarning: overflow encountered in sinh`. That overflow is
+    EXPECTED (it is exactly how this function keeps the sign visible: it
+    saturates to `-inf`, still visibly negative) rather than suppressed,
+    so it is asserted explicitly with `pytest.warns` for those specific
+    combinations -- a silent `np.errstate(over="ignore")` around the whole
+    loop would hide a future regression that made the warning fire (or
+    stop firing) somewhere unexpected."""
     fn = getattr(bands, fn_name)
     magnitudes = [-0.001, -0.01, -0.1, -1.0, -5.0, -10.0, -100.0, -228.0, -1000.0, -10000.0, -1e6, -1e9]
     for m in magnitudes:
+        expect_sinh_overflow = fn_name == "bark_peaq_to_hz" and m <= -10000.0
         with np.errstate(invalid="ignore"):
-            result = float(fn(np.asarray(m)))
+            if expect_sinh_overflow:
+                with pytest.warns(RuntimeWarning, match="overflow encountered in sinh"):
+                    result = float(fn(np.asarray(m)))
+            else:
+                result = float(fn(np.asarray(m)))
         visible = np.isnan(result) or result < 0.0
         assert visible, f"{fn_name}({m}) = {result} is neither negative nor NaN -- sign was hidden ({unit})"

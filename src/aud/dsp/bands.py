@@ -175,27 +175,49 @@ measured sweep of each one across 15 negative magnitudes from -0.001 Hz/Bark
 to -1e9 Hz/Bark (not just one large-magnitude probe): every one of them
 returns either a negative value (Bark/ERB-rate/Hz can never legitimately be
 negative, so this is always visible) or NaN, at every magnitude tested, with
-no silent sign-cancelling range. Each is a single published formula
-evaluated once with no search and no accumulated state: NaN in produces NaN
-out, +-inf in produces whatever that one formula's own limit is (finite or
-infinite), and because each of these five is odd (or reduces to an odd
-function's sign for any nonzero negative input) rather than even or a sum,
-a negative input cannot be absorbed back into a plausible positive answer.
-None of these five can produce a PLAUSIBLE WRONG ANSWER the way a search, a
-range construction, or an even/summing formula can: the output is always
-the literal, honestly-computed image of the input under that one formula,
-and a caller can already tell the answer is unusable by inspecting it for
-non-finiteness or an impossible sign. This is the same precedent
-`bark_peaq_to_hz` established in PR #26 ("the honest sibling"): propagate,
-don't add a guard whose only job would be to reject a value that is already
-self-evidently unusable -- but that precedent is now applied per-function,
-backed by a measured sweep, rather than assumed for the whole group.
+no silent sign-cancelling range **at any of the swept magnitudes**. Each is a
+single published formula evaluated once with no search and no accumulated
+state: NaN in produces NaN out, +-inf in produces whatever that one
+formula's own limit is (finite or infinite), and because each of these five
+is odd (or reduces to an odd function's sign for any nonzero negative input)
+rather than even or a sum, a negative input cannot be absorbed back into a
+plausible positive answer. None of these five can produce a PLAUSIBLE WRONG
+ANSWER the way a search, a range construction, or an even/summing formula
+can: the output is always the literal, honestly-computed image of the input
+under that one formula, and a caller can already tell the answer is unusable
+by inspecting it for non-finiteness or an impossible sign. This is the same
+precedent `bark_peaq_to_hz` established in PR #26 ("the honest sibling"):
+propagate, don't add a guard whose only job would be to reject a value that
+is already self-evidently unusable -- but that precedent is now applied
+per-function, backed by a measured sweep, rather than assumed for the whole
+group.
+
+**Two of the five have one float64-resolution exception the magnitude sweep
+above does not probe** (it starts at -0.001, far above either bound): very
+close to zero, `hz_to_erb_rate` and `erb_rate_to_hz` each have a tiny window
+where `1 + (small coefficient)*input` rounds to exactly `1.0` at float64
+precision, so the sign IS lost -- the function returns exactly `0.0`,
+indistinguishable from input `0.0`. Measured directly (see each function's
+own docstring): `hz_to_erb_rate` for `-1.27e-14 < f < 0`;
+`erb_rate_to_hz` for `-5.16e-16 < erb_rate < 0`. Outside those windows
+(i.e. at every magnitude the sweep above actually covers) the sign is
+visible as documented. Vanishingly small in absolute terms and not a
+practical concern for any real caller, but the literal boundary rather than
+an assumption.
 
 `band_energy`'s new guard sits in a per-frame hot path (see AGENTS.md #8:
 `dsp/` modules take arrays and return arrays without raising user-facing
 errors); this cost is measured directly (see the function's own docstring)
 and judged worth paying because the alternative is exactly the silent
 plausible-wrong-answer class this module exists to remove.
+
+The five non-guarded closed-form maps above accept a Python/NumPy `bool` as
+a number without complaint (e.g. `bark_peaq_to_hz(True)` returns `93.17`
+Hz, identical to passing `1.0`) -- `np.asarray`/arithmetic treat `bool` as
+`0`/`1`, and this module does not special-case it out. Recorded here as a
+fact about current behaviour, not changed: none of these five functions
+guard their input (see above), and a `bool` is, numerically, a perfectly
+well-defined `0` or `1`.
 """
 
 from __future__ import annotations
@@ -443,6 +465,17 @@ def hz_to_erb_rate(f: np.ndarray) -> np.ndarray:
     """Hz -> ERB-rate ("Cams"), Glasberg & Moore 1990 (Hearing Research 47:103):
 
     ERBrate(f) = 21.4*log10(4.37*f/1000 + 1)
+
+    Deliberately does not validate `f` (see module docstring) -- a negative
+    input's sign stays visible in the output (negative ERB-rate) across
+    virtually the entire negative range. One float64-resolution exception,
+    measured directly: for `-1.27e-14 < f < 0` (`4.37*f/1000` too small in
+    magnitude to move `1.0 + 4.37*f/1000` off exactly `1.0` at float64
+    precision), the sign is lost and this returns exactly `0.0`, identical
+    to `hz_to_erb_rate(0.0)`. Below that bound (`f <= -1.27e-14`) the sign
+    is visible again (a negative result). This is a vanishingly small
+    blind spot, not a practical concern for any real caller, but it is the
+    literal boundary, not an approximation.
     """
     f = np.asarray(f, dtype=np.float64)
     return 21.4 * np.log10(4.37 * f / 1000.0 + 1.0)
@@ -452,6 +485,17 @@ def erb_rate_to_hz(erb_rate: np.ndarray) -> np.ndarray:
     """ERB-rate -> Hz: exact algebraic inverse of `hz_to_erb_rate`.
 
     f = (10**(E/21.4) - 1)/0.00437
+
+    Deliberately does not validate `erb_rate` (see module docstring) -- a
+    negative input's sign stays visible in the output (negative Hz) across
+    virtually the entire negative range, with the same class of float64-
+    resolution exception as `hz_to_erb_rate`: measured directly, for
+    `-5.16e-16 < erb_rate < 0` (`erb_rate/21.4` too small in magnitude to
+    move `10**(erb_rate/21.4)` off exactly `1.0` at float64 precision),
+    the sign is lost and this returns exactly `0.0`. Below that bound
+    (`erb_rate <= -5.16e-16`) the sign is visible again. Vanishingly small,
+    not the practical range any real caller passes, but the literal
+    boundary rather than an approximation.
     """
     erb_rate = np.asarray(erb_rate, dtype=np.float64)
     return (10.0 ** (erb_rate / 21.4) - 1.0) / 0.00437
@@ -792,8 +836,30 @@ def band_energy(spectrum: np.ndarray, weights: np.ndarray) -> np.ndarray:
     bin changed a clean band value of `19.45` to `13.58`, with every band
     in the result still `>= 0` -- no signal anything was wrong. This is a
     hot per-frame path (see AGENTS.md #8), so the added cost is measured
-    directly rather than assumed -- see the PR this guard shipped in for
-    the before/after timing on a realistic (2049-bin, 32-band) call.
+    directly rather than assumed, both for the guard itself and for the
+    cheaper equivalent it was rewritten to below.
+
+    **Guard cost, measured (2049-bin, 32-band, float64, this machine --
+    see the PR for the harness)**: the guard is `a.min() >= 0 and
+    np.isfinite(a.max())` per array rather than an elementwise
+    `isfinite(a) & (a >= 0)` boolean pass -- two O(n) reductions with no
+    boolean temporaries instead of two temporaries plus a third `np.all`
+    reduction. At a single frame (the realistic per-hop call for a 48 kHz/
+    hop-512 stream), added overhead over the unguarded sum dropped from
+    **~47 us to ~24 us** (about a 2x reduction, repeated runs ranged
+    ~1.4x-2.3x depending on system noise); at 64 frames in one call,
+    **~149 us to ~74 us**. Against a 48 kHz/hop-512 frame budget of
+    10,667 us, that is **~0.44% -> ~0.22%** of one frame's time budget --
+    real, but small next to the alternative (a silent plausible-wrong band
+    value). The two reductions are equivalent to the elementwise check:
+    `a.min() >= 0` is False for ANY negative entry or a NaN (NaN
+    propagates through `min`, and `nan >= 0` is False) and for -inf (it
+    sorts as the minimum); `isfinite(a.max())` catches the one case the
+    min check cannot -- a +inf entry, which is not the array's minimum
+    unless every entry is +inf. An empty `spectrum`/`weights` is a
+    no-op here (matching this function's pre-guard behaviour): `.min()`/
+    `.max()` raise on a zero-size array, so size 0 short-circuits before
+    either reduction runs.
 
     Raises:
         ValueError: `spectrum`'s bin axis (0) does not match `weights`'s
@@ -807,11 +873,22 @@ def band_energy(spectrum: np.ndarray, weights: np.ndarray) -> np.ndarray:
             f"spectrum's bin axis (0) has length {spectrum.shape[0]}, but weights has "
             f"{weights.shape[1]} bins; they must come from the same n_fft"
         )
-    # Single combined pass per array on the happy path (measured cheaper
-    # than two separate np.isfinite/np.any(... < 0) passes -- see the PR
-    # this guard shipped in); only on the rare failure path do we pay for a
-    # second pass to say which condition failed.
-    if not np.all(np.isfinite(spectrum) & (spectrum >= 0)):
+    # Two reductions per array on the happy path, no boolean temporaries --
+    # measured cheaper than the elementwise `isfinite(a) & (a >= 0)` pass
+    # this replaced (see the PR this guard shipped in for the before/after
+    # timing). Equivalent to the elementwise check: `a.min() >= 0` is False
+    # whenever ANY element is negative OR NaN (NaN propagates through
+    # `min`, and `nan >= 0` is False), and covers -inf the same way (-inf
+    # sorts as the array's minimum, so `-inf >= 0` is False); `isfinite(a.max())`
+    # is False whenever the array's maximum is +inf (the one case the min
+    # check cannot see -- a +inf entry is not the minimum unless every
+    # other entry is also +inf). An empty array is a happy-path no-op here,
+    # matching this function's pre-guard behaviour (an empty `spectrum`/
+    # `weights` never raised): `array.min()`/`.max()` raise on a zero-size
+    # array, so size 0 is checked first and short-circuits to "valid".
+    # Only on the rare failure path do we pay for a second, elementwise
+    # pass to say which condition failed.
+    if not (spectrum.size == 0 or (spectrum.min() >= 0.0 and np.isfinite(spectrum.max()))):
         if not np.all(np.isfinite(spectrum)):
             raise ValueError("spectrum must be finite")
         raise ValueError(
@@ -819,7 +896,7 @@ def band_energy(spectrum: np.ndarray, weights: np.ndarray) -> np.ndarray:
             "silently absorbed into a smaller-but-still-plausible positive band energy by the "
             "weighted sum below, with no signal anything was wrong"
         )
-    if not np.all(np.isfinite(weights) & (weights >= 0)):
+    if not (weights.size == 0 or (weights.min() >= 0.0 and np.isfinite(weights.max()))):
         if not np.all(np.isfinite(weights)):
             raise ValueError("weights must be finite")
         raise ValueError(
