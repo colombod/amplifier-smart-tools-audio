@@ -1,5 +1,8 @@
 """Time-aliasing measurements for `aud.dsp.smoothing`'s frequency-axis
-(ERB) smoothing -- issue #18's "reason (b)" (a sharp gain edge in
+(Bark-width, since these tests build `bark_peaq` bands -- see
+`smooth_frequency_axis_db`'s own docstring for why the width is whatever
+`bands` it is given, not ERB-specific) smoothing -- issue #18's
+"reason (b)" (a sharp gain edge in
 frequency circularly convolves into the frame's own time-domain content).
 
 Both measurements are this session's OWN, independently reproduced numbers
@@ -13,7 +16,7 @@ from __future__ import annotations
 import numpy as np
 
 from aud.dsp import bands, stft
-from aud.dsp.smoothing import smooth_frequency_axis_erb_db
+from aud.dsp.smoothing import smooth_frequency_axis_db
 
 N_FFT = 2048
 SR = 48000
@@ -40,8 +43,9 @@ def test_smoothed_edge_reduces_time_domain_aliasing_vs_brick_wall():
     """A brick-wall 0/-60 dB gain edge at 1 kHz, evaluated at 32x this
     repo's own bin resolution (`n_fft=2048`) to reveal its TRUE impulse
     response, is compared against the SAME edge run through this module's
-    own `smooth_frequency_axis_erb_db`. Measured this session: brick-wall
-    leaves ~-26 dB of energy beyond +/-N/2 samples; ERB-smoothed leaves
+    own `smooth_frequency_axis_db` (called here with `bark_peaq` bands, so
+    this measures BARK-width smoothing). Measured this session: brick-wall
+    leaves ~-26 dB of energy beyond +/-N/2 samples; Bark-smoothed leaves
     ~-45 dB -- an ~19 dB improvement, reproduced here with an asserted
     conservative margin.
     """
@@ -52,13 +56,13 @@ def test_smoothed_edge_reduces_time_domain_aliasing_vs_brick_wall():
     raw_db = np.where(bin_hz < edge_hz, 0.0, -60.0)
 
     b = bands.band_edges(32, scale="bark_peaq", f_min=20.0, f_max=20000.0, allow_extrapolation=True)
-    smoothed_db = smooth_frequency_axis_erb_db(raw_db, b, n_fft=m, sr=SR)
+    smoothed_db = smooth_frequency_axis_db(raw_db, b, n_fft=m, sr=SR)
 
     beyond_raw = _energy_beyond_half_nfft(raw_db, m, N_FFT)
     beyond_smoothed = _energy_beyond_half_nfft(smoothed_db, m, N_FFT)
 
     assert beyond_raw > -35.0, f"test setup: brick-wall edge should leak substantially; got {beyond_raw:.1f} dB"
-    assert beyond_smoothed < -35.0, f"ERB-smoothed edge should leak much less; got {beyond_smoothed:.1f} dB"
+    assert beyond_smoothed < -35.0, f"Bark-smoothed edge should leak much less; got {beyond_smoothed:.1f} dB"
     assert beyond_smoothed < beyond_raw - 10.0, (
         f"expected at least a 10 dB improvement; brick_wall={beyond_raw:.1f} dB, smoothed={beyond_smoothed:.1f} dB"
     )

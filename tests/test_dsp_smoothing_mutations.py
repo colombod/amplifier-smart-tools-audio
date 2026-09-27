@@ -25,7 +25,7 @@ from aud.dsp.gate import _hold_attack_release_db
 from aud.dsp.smoothing import (
     TransitionFasterThanHopError,
     duck_gain_surface,
-    smooth_frequency_axis_erb_db,
+    smooth_frequency_axis_db,
     smooth_time_axis_db,
     upsample_bands_to_bins,
 )
@@ -35,12 +35,12 @@ from aud.dsp.smoothing import (
 
 def test_removing_frequency_smoothing_would_fail_this_isolated_bin_check():
     """NAMED TEST for the "remove frequency smoothing" mutation
-    (`smooth_frequency_axis_erb_db` replaced by `lambda x, *a: x`, an
+    (`smooth_frequency_axis_db` replaced by `lambda x, *a: x`, an
     identity pass-through): an isolated single-bin -40 dB cut, surrounded
     by unity neighbours, must come back SHALLOWER than -40 dB. An identity
     mutation leaves it at EXACTLY -40 dB, failing this assertion.
     Reproduced directly against the real function this session: mutating
-    `smooth_frequency_axis_erb_db` to `return bin_gain_db` unchanged makes
+    `smooth_frequency_axis_db` to `return bin_gain_db` unchanged makes
     this exact assertion fail (`-40.0 > -35.0` is False) -- confirmed RED,
     then reverted (`git diff` empty afterward).
     """
@@ -48,9 +48,9 @@ def test_removing_frequency_smoothing_would_fail_this_isolated_bin_check():
     n_bins = 2048 // 2 + 1
     raw = np.zeros(n_bins)
     raw[200] = -40.0
-    smoothed = smooth_frequency_axis_erb_db(raw, b, n_fft=2048, sr=48000)
+    smoothed = smooth_frequency_axis_db(raw, b, n_fft=2048, sr=48000)
     assert smoothed[200] > -35.0, (
-        f"an isolated single-bin cut must be diluted by ERB smoothing, not left untouched; got {smoothed[200]}"
+        f"an isolated single-bin cut must be diluted by Bark smoothing, not left untouched; got {smoothed[200]}"
     )
 
 
@@ -153,7 +153,7 @@ def test_removing_hop_limit_check_would_fail_this_error_assertion():
 
 def test_breaking_partition_of_unity_would_fail_the_constant_upsample_check():
     """NAMED TEST for the "break partition of unity" mutation (e.g.
-    `smooth_frequency_axis_erb_db` forgetting to divide by `row_sums`, or
+    `smooth_frequency_axis_db` forgetting to divide by `row_sums`, or
     `upsample_bands_to_bins` scaling `weights` by an arbitrary constant): a
     CONSTANT band value must upsample to that SAME constant everywhere --
     the direct, minimal consequence of `sum_b weights[b, k] == 1` for every

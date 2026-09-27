@@ -1,5 +1,8 @@
 """Two-axis smoothing of a ducking gain -- Step 8 of the masking/ducking
-epic (issue #18): TIME (attack/hold/release) and FREQUENCY (ERB width).
+epic (issue #18): TIME (attack/hold/release) and FREQUENCY (perceptual band
+width -- the width of whatever `bands` a caller passes in; see "FREQUENCY
+AXIS" below for why the shipped ducking path delivers BARK width, not ERB,
+and why that is a deliberate, ratified correction, not a defect).
 
 ***ROLE ASSIGNMENT -- READ THIS BEFORE TOUCHING ANY MATH BELOW***
 -------------------------------------------------------------------
@@ -25,17 +28,21 @@ Which axis applies to which stage
   `smoothing=False` boundary, issue #17's own docstring note, is exactly
   the seam this function is built to fill for a `dynamic_eq` caller who
   wants real ballistics -- see that function's own docstring).
-- **Frequency (ERB width)** applies ONLY to the STFT stage
+- **Frequency (perceptual band width)** applies ONLY to the STFT stage
   (`collision_gains`). `dynamic_eq`'s bands are wide crossover bands
   (typically 2-6 of them, Linkwitz-Riley split), not a dense per-bin
   spectrum -- there is no per-BIN frequency axis to smooth there in the
-  first place. `collision_gains` computes one gain per (Bark/ERB) band,
-  and that per-band step function has to be turned into a per-BIN gain
-  surface before it can be multiplied onto a target's complex STFT
-  spectrum -- `smooth_frequency_axis_erb_db` (operating directly on an
-  arbitrary per-bin curve) and `upsample_bands_to_bins` (the band -> bin
-  interpolation `collision_gains`' own output needs) are both specific to
-  that surface.
+  first place. `collision_gains` REQUIRES PEAQ-scale Bark bands
+  (`bands["scale"] == "bark_peaq"` -- see that function's own docstring)
+  and computes one gain per band, and that per-band step function has to
+  be turned into a per-BIN gain surface before it can be multiplied onto a
+  target's complex STFT spectrum -- `smooth_frequency_axis_db` (operating
+  directly on an arbitrary per-bin curve; its width is simply the width of
+  whatever `bands` it is given -- neither ERB- nor Bark-specific code)
+  and `upsample_bands_to_bins` (the band -> bin interpolation
+  `collision_gains`' own output needs) are both specific to that surface.
+  Because `collision_gains` fixes `bands` to `bark_peaq`, the width
+  actually delivered on the shipped ducking path is BARK width.
 
 Why the two named helpers this issue points at (`aud.dsp.dynamics.
 smooth_gain_db` and `aud.dsp.gate._hold_attack_release_db`) are reused
@@ -159,11 +166,35 @@ matches the pre-existing repo-wide default already used by
 `aud.dsp.gate.gate`/`expand`) -- a caller may still request a faster
 release explicitly, this is a documented default, not an enforced floor.
 
-FREQUENCY AXIS: ERB width, not linear Hz -- three measured reasons
+FREQUENCY AXIS: perceptual band width, not linear Hz -- three measured
+reasons, and why the shipped width is BARK, not ERB
 ------------------------------------------------------------------------
-(a) Musical noise from isolated per-bin outliers -- the ERB/Bark-spaced
-    triangular interpolation below removes an isolated bin's discontinuity
-    by construction (see `smooth_frequency_axis_erb_db`).
+USER RULING, binding (2026-09-27): this axis's smoothing width is NOT
+fixed and NOT ERB-specific -- it is simply the width of whatever `bands`
+the caller passes to `smooth_frequency_axis_db` (that function has no
+ERB-specific code and never inspects `bands["scale"]`). On the shipped
+ducking path (`duck_gain_surface`, fed by `collision_gains`), `bands` is
+always PEAQ-scale Bark (`bark_peaq`, REQUIRED by `collision_gains` -- see
+that function's own docstring), so the width actually delivered in
+production is BARK width. A caller could pass ERB bands instead
+(`aud.dsp.bands.band_edges(..., scale="erb_glasberg_moore")`) and get
+ERB-width smoothing from this same function; nothing in this repo does
+that today. An earlier revision of this module and its docs/CHANGELOG
+mislabelled this as ERB throughout; the user accepted Bark (also a
+perceptual scale, and it avoids the defect below same as ERB would) and
+declined building ERB interpolation -- this docstring, the function name,
+and every other ERB claim about this feature were corrected accordingly.
+
+Bark and ERB are both perceptual (auditory-critical-band) frequency
+scales that widen with frequency roughly the way the ear's own frequency
+resolution does (see `aud.dsp.bands`' own module docstring for the
+measured Bark<->ERB ratio, which is NOT a fixed constant). Three measured
+reasons SOME perceptual width -- here, Bark -- is needed at all, instead
+of a fixed linear-Hz kernel:
+
+(a) Musical noise from isolated per-bin outliers -- the perceptual-band-
+    spaced triangular interpolation below removes an isolated bin's
+    discontinuity by construction (see `smooth_frequency_axis_db`).
 (b) TIME ALIASING: a per-bin gain multiplies a frame's SPECTRUM, which
     means the INVERSE transform of that gain circularly convolves with the
     frame's own time-domain content -- a sharp gain edge in frequency
@@ -171,18 +202,19 @@ FREQUENCY AXIS: ERB width, not linear Hz -- three measured reasons
     (`n_fft=2048`, a 0/-60 dB edge at 1 kHz, Hann analysis + Hann synthesis
     at 75% overlap, `hop=512` -- this repo's own STFT defaults): a
     brick-wall edge left roughly -47 dB of energy beyond +-N/2 samples; a
-    half-octave-wide raised-cosine (ERB-comparable width) edge left
-    roughly -73 dB -- see
+    half-octave-wide raised-cosine (perceptual-band-comparable width) edge
+    left roughly -73 dB -- see
     `tests/test_dsp_smoothing_time_aliasing.py::
     test_smoothed_edge_reduces_time_domain_aliasing_vs_brick_wall` for the
     exact reproduced numbers (this module's own measurement, not a copy of
     the issue's reference table, though it lands in the same regime).
-(c) Auditory filters integrate over roughly 1 ERB -- a gain that varies
-    faster than that across frequency is finer detail than the ear can
-    resolve as separate bands in the first place.
+(c) Auditory filters integrate over roughly one critical band (~1 ERB,
+    comparably ~1 Bark) -- a gain that varies faster than that across
+    frequency is finer detail than the ear can resolve as separate bands
+    in the first place.
 
-Method: `smooth_frequency_axis_erb_db` downsamples an arbitrary per-bin
-dB curve to ERB/Bark bands (a weighted average using
+Method: `smooth_frequency_axis_db` downsamples an arbitrary per-bin
+dB curve to whatever bands it is given (a weighted average using
 `aud.dsp.bands.bin_band_weights`' own triangular partition-of-unity
 kernel, normalised by each band's row sum since ROWS of that matrix do NOT
 sum to 1 -- only COLUMNS do, by that module's own partition-of-unity
@@ -198,7 +230,9 @@ Do NOT copy the common mistake: `noisereduce` (MIT) smooths with a FIXED
 `freq_mask_smooth_hz=500` -- about 14 ERB wide at 100 Hz but only 0.45 ERB
 wide at 10 kHz (see `aud.dsp.bands`' own module docstring, which already
 names this exact defect for the bin/band-edge convention this module
-reuses unchanged).
+reuses unchanged, in ERB terms as its own illustration -- the same
+fixed-Hz defect would show up the same way whether the perceptual scale
+used to avoid it is Bark or ERB).
 
 Musical-noise measurement: Step 3's own proxy does not exist -- disclosed,
 not silently substituted
@@ -246,7 +280,7 @@ __all__ = [
     "DUCK_ENGAGE_EPS_DB",
     "TransitionFasterThanHopError",
     "duck_gain_surface",
-    "smooth_frequency_axis_erb_db",
+    "smooth_frequency_axis_db",
     "smooth_time_axis_db",
     "upsample_bands_to_bins",
 ]
@@ -470,8 +504,22 @@ def upsample_bands_to_bins(band_values: np.ndarray, bands: dict, n_fft: int, sr:
     return np.tensordot(weights, band_values, axes=([0], [0]))
 
 
-def smooth_frequency_axis_erb_db(bin_gain_db: np.ndarray, bands: dict, n_fft: int, sr: float) -> np.ndarray:
-    """ERB/Bark-width smoothing of an ARBITRARY per-bin dB gain curve.
+def smooth_frequency_axis_db(bin_gain_db: np.ndarray, bands: dict, n_fft: int, sr: float) -> np.ndarray:
+    """Perceptual-band-width smoothing of an ARBITRARY per-bin dB gain
+    curve.
+
+    This function is NOT ERB-specific (nor Bark-specific): it has no
+    scale-specific code and never inspects `bands["scale"]`. Its
+    smoothing width is simply the width of whatever `bands` the caller
+    passes in. On the shipped ducking path (`duck_gain_surface`, fed by
+    `collision_gains`), `bands` is always PEAQ-scale Bark
+    (`bands["scale"] == "bark_peaq"`, REQUIRED by `collision_gains` -- see
+    that function's own docstring), so the width actually delivered in
+    production is BARK width, not ERB. A caller could pass ERB bands
+    instead (`aud.dsp.bands.band_edges(..., scale="erb_glasberg_moore")`)
+    and get ERB-width smoothing from this same function; nothing in this
+    repo does that today (USER RULING, binding, 2026-09-27: named and
+    documented for what it actually does; no ERB interpolation was built).
 
     Two passes of `aud.dsp.bands.bin_band_weights`' own triangular
     partition-of-unity kernel: downsample bins to bands (a weighted
@@ -480,15 +528,18 @@ def smooth_frequency_axis_erb_db(bin_gain_db: np.ndarray, bands: dict, n_fft: in
     NOT the same operation as `aud.dsp.bands.band_energy`, which sums
     rather than averages), then interpolate the band values back to bins
     with `upsample_bands_to_bins` (the same kernel's other half). See
-    module docstring's "FREQUENCY AXIS" section for why ERB/Bark width
-    rather than a fixed linear-Hz kernel, and for the measured time-domain
-    aliasing this smoothing removes.
+    module docstring's "FREQUENCY AXIS" section for why a perceptual band
+    width (here: Bark) is needed at all, rather than a fixed linear-Hz
+    kernel, and for the measured time-domain aliasing this smoothing
+    removes.
 
     Args:
         bin_gain_db: `(n_bins, ...)`, log-domain (dB) gain -- smoothing
             happens in dB (log-gain), per the issue's own instruction, not
             in linear power/amplitude.
-        bands: As returned by `aud.dsp.bands.band_edges`.
+        bands: As returned by `aud.dsp.bands.band_edges` -- this
+            function's smoothing width follows whatever scale `bands` was
+            built with (see above).
         n_fft: Must match whatever produced the spectrum this will apply to.
         sr: Sample rate in Hz.
 
@@ -522,9 +573,10 @@ def duck_gain_surface(
     release_ms: float = 150.0,
 ) -> tuple[np.ndarray, dict]:
     """The Step 8 orchestrator for the STFT-based (`collision_gains`) gain
-    stage: TIME-axis ballistics per band, then FREQUENCY-axis (ERB) upsample
-    to bins, producing a per-bin AMPLITUDE gain ready to multiply directly
-    onto a target's complex STFT spectrum (`aud.dsp.stft.analyze`'s own
+    stage: TIME-axis ballistics per band, then FREQUENCY-axis (BARK width --
+    `collision_gains` requires `bark_peaq` bands, see that function's own
+    docstring) upsample to bins, producing a per-bin AMPLITUDE gain ready
+    to multiply directly onto a target's complex STFT spectrum (`aud.dsp.stft.analyze`'s own
     `(n_bins, n_frames)`/`(n_bins, n_channels, n_frames)` convention --
     reshape this surface's `(n_bins, n_frames)` to add a channel axis if
     needed).

@@ -21,7 +21,7 @@ from aud.dsp.smoothing import (
     DUCK_ENGAGE_EPS_DB,
     TransitionFasterThanHopError,
     duck_gain_surface,
-    smooth_frequency_axis_erb_db,
+    smooth_frequency_axis_db,
     smooth_time_axis_db,
     upsample_bands_to_bins,
 )
@@ -152,30 +152,30 @@ def test_upsample_bands_to_bins_is_partition_of_unity_preserving():
     assert np.allclose(bin_db, -7.5, atol=1e-9), "a constant band value must upsample to the identical constant"
 
 
-def test_smooth_frequency_axis_erb_db_is_partition_of_unity_preserving():
+def test_smooth_frequency_axis_db_is_partition_of_unity_preserving():
     """Same property as above, but through the full downsample->upsample
     round trip: a constant per-bin curve must smooth to the SAME constant.
     """
     b = bands.band_edges(16, scale="bark_peaq", f_min=20.0, f_max=20000.0, allow_extrapolation=True)
     n_bins = 2048 // 2 + 1
     constant_db = np.full(n_bins, -12.0)
-    smoothed = smooth_frequency_axis_erb_db(constant_db, b, n_fft=2048, sr=48000)
+    smoothed = smooth_frequency_axis_db(constant_db, b, n_fft=2048, sr=48000)
     assert np.allclose(smoothed, -12.0, atol=1e-9)
 
 
-def test_smooth_frequency_axis_erb_db_removes_isolated_single_bin_discontinuity():
+def test_smooth_frequency_axis_db_removes_isolated_single_bin_discontinuity():
     """A single isolated deep-cut bin surrounded by unity neighbours must
-    come out shallower (blended with its neighbours) after ERB smoothing,
-    not still isolated at its original depth.
+    come out shallower (blended with its neighbours) after Bark smoothing
+    (these bands are `bark_peaq`), not still isolated at its original depth.
     """
     b = bands.band_edges(32, scale="bark_peaq", f_min=20.0, f_max=20000.0, allow_extrapolation=True)
     n_bins = 2048 // 2 + 1
     raw = np.zeros(n_bins)
     isolated_bin = 200
     raw[isolated_bin] = -40.0
-    smoothed = smooth_frequency_axis_erb_db(raw, b, n_fft=2048, sr=48000)
+    smoothed = smooth_frequency_axis_db(raw, b, n_fft=2048, sr=48000)
     assert smoothed[isolated_bin] > -40.0 + 5.0, (
-        f"an isolated single-bin cut must be substantially diluted by ERB smoothing; got {smoothed[isolated_bin]} dB"
+        f"an isolated single-bin cut must be substantially diluted by Bark smoothing; got {smoothed[isolated_bin]} dB"
     )
     assert smoothed[isolated_bin] < 0.0, "the smoothed bin should still show SOME residual dip, not disappear entirely"
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 
 from aud.dsp import stft
-from aud.dsp.smoothing import duck_gain_surface, smooth_frequency_axis_erb_db
+from aud.dsp.smoothing import duck_gain_surface, smooth_frequency_axis_db
 
 N_FFT = 2048
 HOP = 512
@@ -77,6 +77,6 @@ def frame_level_db(y: np.ndarray, sr: int = SR, n_fft: int = N_FFT, hop: int = H
 def smoothed_comb_bin_gain_db(
     n_bins: int, period: int, depth_db: float, bands: dict, n_fft: int, sr: int
 ) -> np.ndarray:
-    """`comb_bin_gain_db` run through `smooth_frequency_axis_erb_db`."""
+    """`comb_bin_gain_db` run through `smooth_frequency_axis_db`."""
     raw = comb_bin_gain_db(n_bins, period, depth_db)
-    return smooth_frequency_axis_erb_db(raw, bands, n_fft, sr)
+    return smooth_frequency_axis_db(raw, bands, n_fft, sr)

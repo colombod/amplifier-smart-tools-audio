@@ -23,7 +23,7 @@ from aud.dsp.bands import band_edges
 from aud.dsp.smoothing import (
     TransitionFasterThanHopError,
     duck_gain_surface,
-    smooth_frequency_axis_erb_db,
+    smooth_frequency_axis_db,
     smooth_time_axis_db,
     upsample_bands_to_bins,
 )
@@ -59,7 +59,7 @@ def test_frequency_discontinuous_surface_smoothing_improves_kurtosis_ratio():
     ducked floor -- the textbook musical-noise shape, Saruwatari et al.'s
     own description: "the amount of musical noise is highly correlated
     with the number of isolated power spectral components") is rendered
-    both UNSMOOTHED and ERB-smoothed; the smoothed render's kurtosis ratio
+    both UNSMOOTHED and Bark-smoothed (these bands are `bark_peaq`); the smoothed render's kurtosis ratio
     against the same observed signal must be measurably lower (closer to
     1, i.e. less musical noise), not merely different.
     """
@@ -80,7 +80,7 @@ def test_frequency_discontinuous_surface_smoothing_improves_kurtosis_ratio():
 
     smoothed_bin_db = np.empty_like(raw_bin_db)
     for frame in range(n_frames):
-        smoothed_bin_db[:, frame] = smooth_frequency_axis_erb_db(raw_bin_db[:, frame], b, h.N_FFT, h.SR)
+        smoothed_bin_db[:, frame] = smooth_frequency_axis_db(raw_bin_db[:, frame], b, h.N_FFT, h.SR)
 
     y_unsmoothed = h.apply_bin_gain_db_and_render(x, raw_bin_db)
     y_smoothed = h.apply_bin_gain_db_and_render(x, smoothed_bin_db)
@@ -97,7 +97,7 @@ def test_frequency_discontinuous_surface_smoothing_improves_kurtosis_ratio():
     assert ratio_unsmoothed > 10.0, (
         f"test setup: expected the unsmoothed surface to read as heavily musical-noisy, got {ratio_unsmoothed}"
     )
-    assert ratio_smoothed < 3.0, f"ERB smoothing did not bring the kurtosis ratio near 1; got {ratio_smoothed}"
+    assert ratio_smoothed < 3.0, f"Bark smoothing did not bring the kurtosis ratio near 1; got {ratio_smoothed}"
     assert ratio_smoothed < ratio_unsmoothed / 5.0, (
         f"expected smoothing to improve (lower) the kurtosis ratio by at least 5x; "
         f"unsmoothed={ratio_unsmoothed:.3f}, smoothed={ratio_smoothed:.3f}"
@@ -105,14 +105,14 @@ def test_frequency_discontinuous_surface_smoothing_improves_kurtosis_ratio():
 
 
 # --- Acceptance 1b (PR #40 review round 2, BLOCKING): the SHIPPED path's ---
-# --- own frequency axis, not `smooth_frequency_axis_erb_db` in isolation ---
+# --- own frequency axis, not `smooth_frequency_axis_db` in isolation ---
 #
 # The review found that `duck_gain_surface` -- the only production ducking
-# path -- never calls `smooth_frequency_axis_erb_db`; its frequency axis is
+# path -- never calls `smooth_frequency_axis_db`; its frequency axis is
 # `upsample_bands_to_bins` (band values are already per-band from
 # `collision_gains`, so there is nothing to downsample first -- see
 # `aud.dsp.smoothing`'s own module docstring). Acceptance criterion 1 above
-# is demonstrated only against `smooth_frequency_axis_erb_db` called
+# is demonstrated only against `smooth_frequency_axis_db` called
 # directly, a function that is NOT on the shipped call path. Proved by
 # mutation: replacing `duck_gain_surface`'s interpolation with hard
 # nearest-band steps left all 40 pre-existing smoothing tests passing (see
@@ -122,7 +122,7 @@ def test_frequency_discontinuous_surface_smoothing_improves_kurtosis_ratio():
 # for band-discontinuous inputs, bounding the maximum adjacent-bin gain
 # jump against a bound derived from the band GEOMETRY alone -- never by
 # calling `duck_gain_surface`/`upsample_bands_to_bins`/
-# `smooth_frequency_axis_erb_db` a second time to manufacture the bound.
+# `smooth_frequency_axis_db` a second time to manufacture the bound.
 #
 # The bound's derivation
 # ------------------------
