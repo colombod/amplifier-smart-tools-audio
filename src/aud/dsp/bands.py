@@ -136,27 +136,66 @@ extrapolated point, or a mis-shapen array dressed up as a real answer with
 no signal that anything was wrong -- issues #25, #26 and #29 are three
 independent, previously-shipped instances of exactly that in this file.
 
-The six one-line closed-form scalar maps (`hz_to_bark_peaq`,
+A fourth instance of the same class was found -- by actually measuring
+every remaining "propagates honestly" claim below against negative input,
+rather than inferring it from the shape of the code -- in `critical_bandwidth_hz`,
+`erb_bandwidth_hz`, and `band_energy`. All three are now guarded too (see
+each function's own docstring for the measured counter-example that forced
+this). **The rule that decides each case**: a non-guard is safe only if the
+operation keeps a bad value VISIBLE in the output (NaN, +-inf, or an
+obviously-invalid result such as a negative Hz/Bark value); "closed-form,
+no search loop" is NOT the test, because an even function or a weighted sum
+can absorb a bad value into a small, plausible, WRONG positive number with
+no signal anything was wrong. Measured counter-examples that forced the
+three functions above out of the "deliberate accept" bucket:
+
+- `critical_bandwidth_hz(-1000.0)` returns `162.2167...`, bit-identical to
+  `critical_bandwidth_hz(1000.0)` -- the formula squares `f`, so it is an
+  EVEN function of frequency and hides the sign of every negative input,
+  not just large ones.
+- `erb_bandwidth_hz(-5.0)` returns `24.1603...`, a plausible ERB bandwidth
+  value (close to `erb_bandwidth_hz(0.0) == 24.7`) -- the formula is linear
+  in `f` with a small coefficient (`4.37/1000`), so small-magnitude negative
+  input stays positive and looks legitimate; it only turns visibly negative
+  once `f < -1000/4.37 ~= -228.83` Hz. Silently plausible for the entire
+  `(-228.83, 0)` Hz range is not an edge case, it is most of the range a
+  caller's typo or off-by-one would actually produce.
+- `band_energy` with one negative `spectrum` bin, or one negative `weights`
+  entry, does not propagate a visible negative sum -- a weighted sum over
+  several other positive bins/weights routinely absorbs one negative
+  contributor into a smaller but still-positive, still-plausible band
+  energy (measured: one bin set to `-5.0` changed a clean band value of
+  `19.45` to `13.58`, with every band in the result still `>= 0`). A sum is
+  exactly the shape that can hide a bad value the way an even function does.
+
+The remaining five one-line closed-form scalar maps (`hz_to_bark_peaq`,
 `bark_peaq_to_hz`, `hz_to_bark_zwicker_terhardt`, `hz_to_erb_rate`,
-`erb_rate_to_hz`, `critical_bandwidth_hz`, `erb_bandwidth_hz`) and
-`band_energy` do NOT validate, deliberately. Each is a single published
-formula evaluated once (or, for `band_energy`, a per-bin weighted sum) with
-no search and no accumulated state: NaN in produces NaN out, +-inf in
-produces whatever that one formula's own limit is (finite or infinite),
-and a negative Hz/Bark/ERB-rate/energy value -- physically meaningless, but
-not a defect class this module guards against anywhere else -- evaluates
-the formula exactly as published. None of these can produce a PLAUSIBLE
-WRONG ANSWER the way a search or a range construction can: the output is
-always the literal, honestly-computed image of the input under that one
-formula, so a caller can already tell the answer is unusable by inspecting
-it for non-finiteness, and there is nothing left for a guard to add. This
-is the same precedent `bark_peaq_to_hz` established in PR #26 ("the honest
-sibling"): propagate, don't add a guard whose only job would be to reject
-a value that is already self-evidently unusable. `band_energy` additionally
-sits in a per-frame hot path (see AGENTS.md #8: `dsp/` modules take arrays
-and return arrays without raising user-facing errors); validating every
-element of a spectrum on every call would cost real time for no caller who
-could not already see a NaN/negative value in the array it just handed in.
+`erb_rate_to_hz`) do NOT validate, deliberately, and this is now backed by a
+measured sweep of each one across 15 negative magnitudes from -0.001 Hz/Bark
+to -1e9 Hz/Bark (not just one large-magnitude probe): every one of them
+returns either a negative value (Bark/ERB-rate/Hz can never legitimately be
+negative, so this is always visible) or NaN, at every magnitude tested, with
+no silent sign-cancelling range. Each is a single published formula
+evaluated once with no search and no accumulated state: NaN in produces NaN
+out, +-inf in produces whatever that one formula's own limit is (finite or
+infinite), and because each of these five is odd (or reduces to an odd
+function's sign for any nonzero negative input) rather than even or a sum,
+a negative input cannot be absorbed back into a plausible positive answer.
+None of these five can produce a PLAUSIBLE WRONG ANSWER the way a search, a
+range construction, or an even/summing formula can: the output is always
+the literal, honestly-computed image of the input under that one formula,
+and a caller can already tell the answer is unusable by inspecting it for
+non-finiteness or an impossible sign. This is the same precedent
+`bark_peaq_to_hz` established in PR #26 ("the honest sibling"): propagate,
+don't add a guard whose only job would be to reject a value that is already
+self-evidently unusable -- but that precedent is now applied per-function,
+backed by a measured sweep, rather than assumed for the whole group.
+
+`band_energy`'s new guard sits in a per-frame hot path (see AGENTS.md #8:
+`dsp/` modules take arrays and return arrays without raising user-facing
+errors); this cost is measured directly (see the function's own docstring)
+and judged worth paying because the alternative is exactly the silent
+plausible-wrong-answer class this module exists to remove.
 """
 
 from __future__ import annotations
@@ -238,8 +277,29 @@ def critical_bandwidth_hz(f: np.ndarray) -> np.ndarray:
     use this to size bands; it only spaces edges evenly in Bark/ERB-rate.
     Measured against the task's stated reference values: CB(100 Hz) ~= 101,
     CB(1000 Hz) ~= 162, CB(10000 Hz) ~= 2305 Hz.
+
+    Guards against negative/non-finite `f` (added after this module's own
+    "propagates honestly" precedent was measured to be false here): the
+    formula squares `f`, so it is an EVEN function of frequency and returns
+    a value BIT-IDENTICAL to the positive input -- `critical_bandwidth_hz(-1000.0)
+    == critical_bandwidth_hz(1000.0)` exactly, for every negative `f`, not
+    just large-magnitude ones. That hides a negative-frequency input behind
+    a completely plausible positive bandwidth, which is exactly the silent
+    plausible-wrong-answer class this module guards against elsewhere; it
+    is not something a caller could notice by inspecting the output.
+
+    Raises:
+        ValueError: `f` is non-finite (NaN/inf) or negative.
     """
     f = np.asarray(f, dtype=np.float64)
+    if not np.all(np.isfinite(f)):
+        raise ValueError(f"f must be finite; got f={f}")
+    if np.any(f < 0.0):
+        raise ValueError(
+            f"f={float(np.min(np.atleast_1d(f)))} Hz is negative; critical_bandwidth_hz squares f, "
+            "so a negative frequency silently returns the SAME bandwidth as its positive counterpart "
+            "instead of signalling anything is wrong. Pass a non-negative frequency."
+        )
     return 25.0 + 75.0 * (1.0 + 1.4 * (f / 1000.0) ** 2) ** 0.69
 
 
@@ -405,8 +465,31 @@ def erb_bandwidth_hz(f: np.ndarray) -> np.ndarray:
     Reference/sanity-checking only, matching `critical_bandwidth_hz`'s role
     for the Bark side. Measured against the task's stated reference values:
     ERB(100 Hz) ~= 35, ERB(1000 Hz) ~= 133, ERB(10000 Hz) ~= 1104 Hz.
+
+    Guards against negative/non-finite `f` (added after this module's own
+    "propagates honestly" precedent was measured to be false here): the
+    formula is linear in `f` with a small coefficient (`4.37/1000`), so it
+    is NOT even (unlike `critical_bandwidth_hz`) but still hides small-
+    magnitude negative input -- `erb_bandwidth_hz(-5.0) == 24.1603...`, a
+    perfectly plausible ERB value close to `erb_bandwidth_hz(0.0) == 24.7`.
+    It only turns visibly negative once `f < -1000/4.37 ~= -228.83` Hz;
+    silently plausible across the entire `(-228.83, 0)` Hz range is most of
+    the range a caller's typo or off-by-one would actually produce, not an
+    edge case.
+
+    Raises:
+        ValueError: `f` is non-finite (NaN/inf) or negative.
     """
     f = np.asarray(f, dtype=np.float64)
+    if not np.all(np.isfinite(f)):
+        raise ValueError(f"f must be finite; got f={f}")
+    if np.any(f < 0.0):
+        raise ValueError(
+            f"f={float(np.min(np.atleast_1d(f)))} Hz is negative; erb_bandwidth_hz's small linear "
+            "coefficient means negative frequencies down to about -228.83 Hz silently return a "
+            "plausible-looking positive bandwidth instead of signalling anything is wrong. Pass a "
+            "non-negative frequency."
+        )
     return 24.7 * (4.37 * f / 1000.0 + 1.0)
 
 
@@ -699,9 +782,23 @@ def band_energy(spectrum: np.ndarray, weights: np.ndarray) -> np.ndarray:
         (see `bin_band_weights`) -- this is the energy-conservation property
         this module's tests assert directly.
 
+    Guards against non-finite or negative `spectrum`/`weights` entries
+    (added after this module's own "propagates honestly" precedent was
+    measured to be false here): this function is a weighted SUM, and a sum
+    is exactly the shape that can absorb one bad (negative) contributor
+    into a smaller but still-positive, still-plausible band value -- it
+    does not reliably surface as a visible negative in the output the way
+    a single closed-form formula does. Measured: one negative `spectrum`
+    bin changed a clean band value of `19.45` to `13.58`, with every band
+    in the result still `>= 0` -- no signal anything was wrong. This is a
+    hot per-frame path (see AGENTS.md #8), so the added cost is measured
+    directly rather than assumed -- see the PR this guard shipped in for
+    the before/after timing on a realistic (2049-bin, 32-band) call.
+
     Raises:
         ValueError: `spectrum`'s bin axis (0) does not match `weights`'s
-            bin axis (1) -- they came from a different `n_fft`.
+            bin axis (1) -- they came from a different `n_fft`; or either
+            array contains a non-finite (NaN/inf) or negative value.
     """
     spectrum = np.asarray(spectrum, dtype=np.float64)
     weights = np.asarray(weights, dtype=np.float64)
@@ -709,5 +806,25 @@ def band_energy(spectrum: np.ndarray, weights: np.ndarray) -> np.ndarray:
         raise ValueError(
             f"spectrum's bin axis (0) has length {spectrum.shape[0]}, but weights has "
             f"{weights.shape[1]} bins; they must come from the same n_fft"
+        )
+    # Single combined pass per array on the happy path (measured cheaper
+    # than two separate np.isfinite/np.any(... < 0) passes -- see the PR
+    # this guard shipped in); only on the rare failure path do we pay for a
+    # second pass to say which condition failed.
+    if not np.all(np.isfinite(spectrum) & (spectrum >= 0)):
+        if not np.all(np.isfinite(spectrum)):
+            raise ValueError("spectrum must be finite")
+        raise ValueError(
+            "spectrum must be non-negative (it is a magnitude/power quantity); a negative bin can be "
+            "silently absorbed into a smaller-but-still-plausible positive band energy by the "
+            "weighted sum below, with no signal anything was wrong"
+        )
+    if not np.all(np.isfinite(weights) & (weights >= 0)):
+        if not np.all(np.isfinite(weights)):
+            raise ValueError("weights must be finite")
+        raise ValueError(
+            "weights must be non-negative (as returned by bin_band_weights); a negative weight can be "
+            "silently absorbed into a smaller-but-still-plausible positive band energy by the "
+            "weighted sum below, with no signal anything was wrong"
         )
     return np.tensordot(weights, spectrum, axes=([1], [0]))

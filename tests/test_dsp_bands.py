@@ -1341,3 +1341,163 @@ def test_bin_band_weights_rejects_non_numeric_sr(bad_sr):
     result = bands.band_edges(8, "bark_zwicker_terhardt", f_min=20.0, f_max=15500.0)
     with pytest.raises(ValueError, match="sr"):
         bands.bin_band_weights(result, n_fft=1024, sr=bad_sr)
+
+
+# --- 10. Review-round finding: the "propagates honestly" rationale was false
+# for critical_bandwidth_hz, erb_bandwidth_hz and band_energy -- measured,
+# not inferred. New guards for those three; a measured sweep confirming the
+# remaining five closed-form maps are genuinely safe unguarded. ---
+
+
+@pytest.mark.parametrize("bad_f", [float("nan"), float("inf"), float("-inf")])
+def test_critical_bandwidth_hz_rejects_non_finite(bad_f):
+    with pytest.raises(ValueError, match="finite"):
+        bands.critical_bandwidth_hz(bad_f)
+
+
+def test_critical_bandwidth_hz_rejects_negative():
+    """Review-round finding: critical_bandwidth_hz squares f, so it is an
+    EVEN function of frequency -- critical_bandwidth_hz(-1000.0) used to
+    return a value BIT-IDENTICAL to critical_bandwidth_hz(1000.0), hiding
+    every negative input behind a completely plausible positive bandwidth,
+    for every magnitude, not just large ones."""
+    with pytest.raises(ValueError, match="negative"):
+        bands.critical_bandwidth_hz(-1000.0)
+    with pytest.raises(ValueError, match="negative"):
+        bands.critical_bandwidth_hz(np.array([100.0, -0.001, 5.0]))
+
+
+def test_critical_bandwidth_hz_unchanged_on_valid_input():
+    """New guard must not touch valid-input behaviour: the task's stated
+    reference values (also asserted in test_critical_bandwidth_matches_reference_values)
+    still hold exactly."""
+    for f, expected in [(100.0, 101.0), (1000.0, 162.0), (10000.0, 2305.0)]:
+        assert bands.critical_bandwidth_hz(f) == pytest.approx(expected, abs=1.0)
+
+
+@pytest.mark.parametrize("bad_f", [float("nan"), float("inf"), float("-inf")])
+def test_erb_bandwidth_hz_rejects_non_finite(bad_f):
+    with pytest.raises(ValueError, match="finite"):
+        bands.erb_bandwidth_hz(bad_f)
+
+
+def test_erb_bandwidth_hz_rejects_negative():
+    """Review-round finding: erb_bandwidth_hz's small linear coefficient
+    (4.37/1000) means erb_bandwidth_hz(-5.0) used to return 24.1603..., a
+    perfectly plausible ERB value close to erb_bandwidth_hz(0.0) == 24.7 --
+    silently plausible across the entire (-228.83, 0) Hz range, not merely
+    at one probed magnitude."""
+    with pytest.raises(ValueError, match="negative"):
+        bands.erb_bandwidth_hz(-5.0)
+    with pytest.raises(ValueError, match="negative"):
+        bands.erb_bandwidth_hz(np.array([100.0, -0.001, 5.0]))
+
+
+def test_erb_bandwidth_hz_unchanged_on_valid_input():
+    for f, expected in [(100.0, 35.0), (1000.0, 133.0), (10000.0, 1104.0)]:
+        assert bands.erb_bandwidth_hz(f) == pytest.approx(expected, abs=1.0)
+
+
+def _make_bands_and_weights(n_bands=32, n_fft=4096, sr=48000.0):
+    result = bands.band_edges(n_bands, "erb_glasberg_moore", f_min=20.0, f_max=20000.0)
+    weights = bands.bin_band_weights(result, n_fft=n_fft, sr=sr)
+    return weights
+
+
+@pytest.mark.parametrize("bad_val", [float("nan"), float("inf"), float("-inf")])
+def test_band_energy_rejects_non_finite_spectrum(bad_val):
+    weights = _make_bands_and_weights()
+    spectrum = np.ones(weights.shape[1])
+    spectrum[10] = bad_val
+    with pytest.raises(ValueError, match="spectrum must be finite"):
+        bands.band_energy(spectrum, weights)
+
+
+@pytest.mark.parametrize("bad_val", [float("nan"), float("inf"), float("-inf")])
+def test_band_energy_rejects_non_finite_weights(bad_val):
+    weights = _make_bands_and_weights()
+    spectrum = np.ones(weights.shape[1])
+    weights = weights.copy()
+    weights[0, 10] = bad_val
+    with pytest.raises(ValueError, match="weights must be finite"):
+        bands.band_energy(spectrum, weights)
+
+
+def test_band_energy_rejects_negative_spectrum():
+    """Review-round finding: band_energy is a weighted SUM, which can
+    absorb one negative spectrum bin into a smaller-but-still-plausible
+    positive band value -- measured: one bin set to -5.0 changed a clean
+    band value of 19.45 to 13.58, with every returned band still >= 0. No
+    signal anything was wrong; this is the same silent-plausible-wrong-
+    answer class the module guards against elsewhere."""
+    weights = _make_bands_and_weights()
+    rng = np.random.default_rng(0)
+    spectrum = np.abs(rng.standard_normal(weights.shape[1]))
+    nz = np.nonzero(weights[3])[0]
+    bin_idx = int(nz[len(nz) // 2])
+    clean = bands.band_energy(spectrum, weights)
+    assert np.all(clean >= 0.0)
+
+    bad_spectrum = spectrum.copy()
+    bad_spectrum[bin_idx] = -5.0
+    with pytest.raises(ValueError, match="spectrum must be non-negative"):
+        bands.band_energy(bad_spectrum, weights)
+
+
+def test_band_energy_rejects_negative_weights():
+    """Symmetric with test_band_energy_rejects_negative_spectrum: a
+    negative weight is absorbed the same way."""
+    weights = _make_bands_and_weights()
+    spectrum = np.ones(weights.shape[1])
+    bad_weights = weights.copy()
+    bad_weights[3, 10] = -1.0
+    with pytest.raises(ValueError, match="weights must be non-negative"):
+        bands.band_energy(spectrum, bad_weights)
+
+
+def test_band_energy_unchanged_on_valid_input():
+    """New guards must not touch valid-input behaviour: bit-identical to
+    pre-guard output (energy conservation still holds exactly)."""
+    sr = 48000
+    n_fft = 2048
+    rng = np.random.default_rng(0)
+    n_bins = n_fft // 2 + 1
+    n_frames = 20
+    power = rng.uniform(0.0, 1.0, size=(n_bins, n_frames)) ** 2
+
+    result = bands.band_edges(32, "bark_zwicker_terhardt", f_min=20.0, f_max=15500.0)
+    weights = bands.bin_band_weights(result, n_fft=n_fft, sr=sr)
+    per_band = bands.band_energy(power, weights)
+
+    assert per_band.shape == (32, n_frames)
+    total_before = power.sum(axis=0)
+    total_after = per_band.sum(axis=0)
+    assert np.allclose(total_after, total_before, rtol=1e-9, atol=1e-9)
+
+
+@pytest.mark.parametrize(
+    ("fn_name", "unit"),
+    [
+        ("hz_to_bark_peaq", "Bark"),
+        ("bark_peaq_to_hz", "Hz"),
+        ("hz_to_bark_zwicker_terhardt", "Bark"),
+        ("hz_to_erb_rate", "Cams"),
+        ("erb_rate_to_hz", "Hz"),
+    ],
+)
+def test_remaining_closed_form_maps_keep_negative_input_visible_across_magnitudes(fn_name, unit):
+    """Review-round finding, applied as a permanent regression pin: unlike
+    critical_bandwidth_hz/erb_bandwidth_hz, these five closed-form maps
+    genuinely keep a negative input VISIBLE (as a negative output, or NaN)
+    across every magnitude from -0.001 to -1e9 -- not merely at one probed
+    point. This is what actually justifies leaving them unguarded (see the
+    module docstring); if a future edit to one of these formulas ever makes
+    it produce a plausible-looking non-negative result for some negative
+    input, this test catches that regression."""
+    fn = getattr(bands, fn_name)
+    magnitudes = [-0.001, -0.01, -0.1, -1.0, -5.0, -10.0, -100.0, -228.0, -1000.0, -10000.0, -1e6, -1e9]
+    for m in magnitudes:
+        with np.errstate(invalid="ignore"):
+            result = float(fn(np.asarray(m)))
+        visible = np.isnan(result) or result < 0.0
+        assert visible, f"{fn_name}({m}) = {result} is neither negative nor NaN -- sign was hidden ({unit})"
