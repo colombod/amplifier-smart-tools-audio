@@ -441,17 +441,40 @@ def test_odd_n_fft_one_sample_short_of_minimum_still_round_trips_via_padding():
 
 
 def test_short_multichannel_signal_round_trips():
-    """SWEEP NOTE (issue #28): this uses a single, even n_fft (2048), same
-    shared property flagged elsewhere in this sweep. Deliberately left as-is
-    rather than duplicated for an odd n_fft: this test's purpose is
-    multichannel independence/shape handling, which indexes channels
-    element-wise and shares no arithmetic path with `_min_input_len` -- the
-    odd/even axis is already covered by the mono short-signal and
-    exact-minimum-length tests above. Stated here rather than left silent."""
+    """This uses a single, even n_fft (2048); see the companion
+    `test_short_multichannel_signal_round_trips_with_odd_n_fft` below (added
+    by a correction to the issue #28 sweep) for the odd-n_fft case.
+
+    A 50-sample input is shorter than `_min_input_len(2048) == 1024`, so this
+    DOES take `analyze`'s internal zero-padding path, which calls
+    `_min_input_len` -- verified by instrumenting the call directly:
+    `_min_input_len` is invoked with `n_fft=2048` and returns `1024` before
+    the 50-sample, 2-channel signal is padded up to it. An earlier revision
+    of this docstring claimed the opposite ("shares no arithmetic path with
+    `_min_input_len`"); that claim was false and is corrected here rather
+    than repeated.
+    """
     n_fft = 2048
     x = _white_noise(1.0, channels=2, seed=10)[:50]
     spectrum = stft.analyze(x, SR, n_fft=n_fft, hop=512)
     y = stft.resynthesize(spectrum, SR, len(x), n_fft=n_fft, hop=512)
+    assert y.shape == x.shape
+    err_db = _reconstruction_error_db(x, y)
+    assert err_db <= _NULL_TEST_TOLERANCE_DB
+
+
+def test_short_multichannel_signal_round_trips_with_odd_n_fft():
+    """Same check as `test_short_multichannel_signal_round_trips`, with an
+    ODD n_fft (1023) instead of even (2048) -- issue #28's defect class is
+    exactly "a test sweep that only ever used even n_fft", and the
+    multichannel padding path exercises `_min_input_len` the same way the
+    mono short-signal tests do (both call `analyze`, which pads via
+    `_min_input_len` whenever the input is shorter than that minimum)."""
+    n_fft = 1023
+    hop = 341  # COLA-compliant (n_fft // 3, an exact divisor) -- see check_cola_nola
+    x = _white_noise(1.0, channels=2, seed=14)[:50]
+    spectrum = stft.analyze(x, SR, n_fft=n_fft, hop=hop)
+    y = stft.resynthesize(spectrum, SR, len(x), n_fft=n_fft, hop=hop)
     assert y.shape == x.shape
     err_db = _reconstruction_error_db(x, y)
     assert err_db <= _NULL_TEST_TOLERANCE_DB
