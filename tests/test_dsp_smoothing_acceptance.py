@@ -104,6 +104,162 @@ def test_frequency_discontinuous_surface_smoothing_improves_kurtosis_ratio():
     )
 
 
+# --- Acceptance 1b (PR #40 review round 2, BLOCKING): the SHIPPED path's ---
+# --- own frequency axis, not `smooth_frequency_axis_erb_db` in isolation ---
+#
+# The review found that `duck_gain_surface` -- the only production ducking
+# path -- never calls `smooth_frequency_axis_erb_db`; its frequency axis is
+# `upsample_bands_to_bins` (band values are already per-band from
+# `collision_gains`, so there is nothing to downsample first -- see
+# `aud.dsp.smoothing`'s own module docstring). Acceptance criterion 1 above
+# is demonstrated only against `smooth_frequency_axis_erb_db` called
+# directly, a function that is NOT on the shipped call path. Proved by
+# mutation: replacing `duck_gain_surface`'s interpolation with hard
+# nearest-band steps left all 40 pre-existing smoothing tests passing (see
+# the PR description for the mutate/run/revert transcript).
+#
+# These tests assert directly on `duck_gain_surface`'s OWN per-bin output
+# for band-discontinuous inputs, bounding the maximum adjacent-bin gain
+# jump against a bound derived from the band GEOMETRY alone -- never by
+# calling `duck_gain_surface`/`upsample_bands_to_bins`/
+# `smooth_frequency_axis_erb_db` a second time to manufacture the bound.
+#
+# The bound's derivation
+# ------------------------
+# `bin_band_weights` (`aud.dsp.bands`) builds a triangular partition-of-
+# unity kernel: in the Hz segment between two adjacent band centers `c_i`
+# and `c_{i+1}`, exactly those two bands have nonzero weight, and their
+# weights are complementary linear ramps of `bin_hz` (`w_i + w_{i+1} == 1`
+# -- see that module's own `rising`/`falling` construction and its
+# partition-of-unity tests). `upsample_bands_to_bins` therefore performs
+# ORDINARY LINEAR INTERPOLATION IN HZ of the per-band dB values across each
+# such segment. A piecewise-linear function's secant over any interval is
+# bounded by its own maximum segment slope times the interval width (this
+# holds even when the interval straddles one breakpoint, since the secant
+# is then a convex combination of the two neighbouring slopes), so for
+# adjacent STFT bins (spaced `sr / n_fft` Hz apart):
+#
+#     max |bin_gain_db[k+1] - bin_gain_db[k]|
+#         <= (sr / n_fft) * max_i(
+#                |band_db[i+1] - band_db[i]| / (centers_hz[i+1] - centers_hz[i])
+#            )
+#
+# `centers_hz` comes from `band_edges` -- called independently, before
+# `duck_gain_surface` ever runs -- and `band_db` is the exact per-band
+# input each test hands to `duck_gain_surface`, known without calling
+# anything under test. Each configuration below runs its band curve for
+# enough frames for the time axis to settle (attack-only, `hold_ms=0`, a
+# steady target from frame 0) so the measured per-bin curve reflects
+# `band_db` itself, not a partially-attacked intermediate value -- verified
+# directly this session: at full settle, the measured jump equals this
+# bound to float64 precision (the bound is tight, not merely conservative,
+# for these band-only-two-values-per-segment shapes).
+#
+# A hard nearest-band-step mutation at the real call site (verified this
+# session, then reverted -- see PR description) produces a jump equal to
+# the FULL band-to-band difference (18.0 dB for the two 18-dB-apart
+# shapes below) on every one of these nine cases, which exceeds every one
+# of these bounds -- i.e. the mutant fails every test below.
+#
+# Do NOT use the kurtosis-ratio metric (`tests/musical_noise.py`) here: it
+# measures RANDOM isolated-outlier musical noise, not adjacent-bin
+# smoothness of a DETERMINISTIC band shape, and (measured) ranks the
+# smoother interpolated result WORSE than the harder-edged stepped one on
+# these exact shapes (5.42 vs 2.60) -- see that module's own docstring.
+
+_GEOMETRY_BOUND_CONFIGS = [
+    pytest.param(2048, 512, 48000, 32, "bark_peaq", id="nfft2048_sr48000_32bands_bark_peaq"),
+    pytest.param(1024, 256, 44100, 24, "bark_zwicker_terhardt", id="nfft1024_sr44100_24bands_bark_zt"),
+    pytest.param(4096, 1024, 16000, 16, "erb_glasberg_moore", id="nfft4096_sr16000_16bands_erb"),
+]
+
+
+def _alternating_band_db(n_bands: int) -> np.ndarray:
+    """0 dB / -18 dB alternating every other band -- a hard per-band step."""
+    return np.array([0.0 if i % 2 == 0 else -18.0 for i in range(n_bands)])
+
+
+def _single_notch_band_db(n_bands: int) -> np.ndarray:
+    """Every band at 0 dB except one, isolated, at -18 dB."""
+    band_db = np.zeros(n_bands)
+    band_db[n_bands // 2] = -18.0
+    return band_db
+
+
+def _staircase_band_db(n_bands: int) -> np.ndarray:
+    """A monotonic ramp from 0 dB to -30 dB across every band."""
+    return np.linspace(0.0, -30.0, n_bands)
+
+
+_BAND_SHAPES = {
+    "alternating_0_-18": _alternating_band_db,
+    "single_notch_-18": _single_notch_band_db,
+    "staircase_0_to_-30": _staircase_band_db,
+}
+
+
+def _geometry_bound_db(bands: dict, n_fft: int, sr: float, band_db: np.ndarray) -> float:
+    """The analytic adjacent-bin-jump bound derived above, from `bands`'
+    own `centers_hz` (geometry) and `band_db` (the known input) alone --
+    never from calling `upsample_bands_to_bins`/`duck_gain_surface`.
+    """
+    centers_hz = np.asarray(bands["centers_hz"], dtype=np.float64)
+    bin_spacing_hz = sr / n_fft
+    band_diffs_db = np.diff(np.asarray(band_db, dtype=np.float64))
+    center_widths_hz = np.diff(centers_hz)
+    segment_slopes_db_per_hz = np.abs(band_diffs_db) / center_widths_hz
+    return float(bin_spacing_hz * np.max(segment_slopes_db_per_hz))
+
+
+def _max_adjacent_bin_jump_db(bin_gain_amplitude_column: np.ndarray) -> float:
+    """Max |dB[k+1] - dB[k]| over one frame of a per-bin AMPLITUDE gain --
+    `duck_gain_surface`'s own output convention.
+    """
+    bin_db = 20.0 * np.log10(np.maximum(bin_gain_amplitude_column, 1e-12))
+    return float(np.max(np.abs(np.diff(bin_db))))
+
+
+@pytest.mark.parametrize(("n_fft", "hop", "sr", "n_bands", "scale"), _GEOMETRY_BOUND_CONFIGS)
+@pytest.mark.parametrize("shape_name", list(_BAND_SHAPES))
+def test_duck_gain_surface_own_output_bounds_adjacent_bin_jump_by_band_geometry(
+    n_fft, hop, sr, n_bands, scale, shape_name
+):
+    """`duck_gain_surface`'s OWN per-bin output, for a band-discontinuous
+    input, must never jump between adjacent bins by more than the bound
+    band geometry allows (see module-level derivation above). Varies
+    n_fft/sr/hop/n_bands/scale across cases so this cannot pass by
+    accident at one fixed configuration -- this repo's own history (module
+    docstring, AGENTS.md) names that exact blind spot as previously shipped
+    five times.
+    """
+    bands = band_edges(n_bands, scale=scale, f_min=20.0, f_max=min(20000.0, sr / 2.0 - 1.0), allow_extrapolation=True)
+    band_db = _BAND_SHAPES[shape_name](n_bands)
+
+    hop_ms = hop / sr * 1000.0
+    attack_ms = max(20.0, hop_ms)
+    release_ms = max(150.0, hop_ms)
+    frame_rate_hz = sr / hop
+    # Enough frames for the attack-only (hold_ms=0), steady-from-frame-0
+    # target to settle to float64 precision before the measurement frame.
+    settle_frames = math.ceil(20.0 * (attack_ms / 1000.0) * frame_rate_hz) + 5
+    n_frames = settle_frames + 5
+
+    band_gain_power = np.tile((10.0 ** (band_db / 10.0))[:, None], (1, n_frames))
+    bin_gain_amplitude, _stats = duck_gain_surface(
+        band_gain_power, bands, n_fft, hop, sr, attack_ms=attack_ms, hold_ms=0.0, release_ms=release_ms
+    )
+
+    measured_jump_db = _max_adjacent_bin_jump_db(bin_gain_amplitude[:, -1])
+    bound_db = _geometry_bound_db(bands, n_fft, sr, band_db)
+
+    assert measured_jump_db > 0.0, "test setup: a band-discontinuous input must produce a nonzero adjacent-bin jump"
+    assert measured_jump_db <= bound_db + 1e-6, (
+        f"duck_gain_surface's own output jumped {measured_jump_db:.4f} dB between adjacent bins, exceeding the "
+        f"{bound_db:.4f} dB bound the band geometry (centers_hz spacing) and the known band-to-band difference "
+        "allow for smooth (linear-in-Hz) interpolation -- a hard nearest-band step would fail this bound"
+    )
+
+
 # --- Acceptance 2: speech-over-music -> no audible pumping/musical noise ---
 
 

@@ -11,6 +11,24 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ### Added
 
+- **PR #40 review round 2: `duck_gain_surface`'s OWN frequency-axis output is now directly
+  tested, not just `smooth_frequency_axis_erb_db` in isolation.** The shipped ducking path never
+  calls `smooth_frequency_axis_erb_db` -- its frequency axis is `upsample_bands_to_bins` (proved
+  by mutation: a hard nearest-band step at the real call site left all 40 pre-existing smoothing
+  tests passing). `tests/test_dsp_smoothing_acceptance.py` adds nine tests
+  (`test_duck_gain_surface_own_output_bounds_adjacent_bin_jump_by_band_geometry`, three band
+  shapes -- alternating, single notch, staircase -- across three independent
+  n_fft/hop/sr/n_bands/scale configurations) that bound `duck_gain_surface`'s own measured
+  per-bin adjacent jump against an analytic bound derived from `band_edges`' `centers_hz`
+  spacing and the STFT's own bin spacing (`sr/n_fft`), never from calling the function under
+  test. The nearest-band-step mutation, re-applied and reverted this round (byte-identical,
+  sha256-verified), fails all nine; a second mutation of the shared triangular kernel
+  (`bin_band_weights`) also fails them, plus three pre-existing kernel-shape tests. Also
+  strengthens `test_gate_hold_attack_release_cannot_be_reused_by_negation` with a second test
+  covering a VARYING duck depth (not just one steady value), and adds a one-line caveat to
+  `tests/musical_noise.py`'s `kurtosis_ratio` docstring: it measures random isolated-outlier
+  musical noise, not deterministic-shape adjacent-bin smoothness, and (measured) ranks the
+  smoother interpolated result worse than a harder-edged stepped one on these exact shapes.
 - **`aud.dsp.smoothing` -- two-axis smoothing of a ducking gain, TIME (attack/hold/release) and
   FREQUENCY (ERB width)** -- Step 8 of the masking/ducking epic (issue #18). Per the binding
   ruling on Step 6/7, this does NOT merge `collision_gains` (Step 6) and `dynamic_eq` (Step 7)

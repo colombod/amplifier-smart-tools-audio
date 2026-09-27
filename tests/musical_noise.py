@@ -64,6 +64,15 @@ def kurtosis_ratio(observed_power: np.ndarray, processed_power: np.ndarray) -> f
     processing INCREASED the tonal/isolated-outlier character of the power
     spectrum relative to the observed signal, i.e. generated musical noise;
     closer to 1 (from above) means less musical noise was generated.
+
+    Measures RANDOM isolated-outlier musical noise (Saruwatari et al.'s own
+    target), not adjacent-bin smoothness of a DETERMINISTIC band-discontinuous
+    surface -- on such deterministic shapes it can rank a smoother,
+    interpolated result WORSE than a harder-edged stepped one (measured
+    directly this session on the 32-band alternating-0/-18-dB shape in
+    `tests/test_dsp_smoothing_acceptance.py`: ~5.2 interpolated vs ~2.6
+    stepped), so it must not be used to judge that kind of smoothness
+    directly.
     """
     kurt_org = power_spectrogram_kurtosis(observed_power)
     kurt_proc = power_spectrogram_kurtosis(processed_power)

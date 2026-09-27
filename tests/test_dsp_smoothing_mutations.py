@@ -195,3 +195,31 @@ def test_gate_hold_attack_release_cannot_be_reused_by_negation():
     assert np.allclose(smoothed, 0.0), (
         f"negated reuse of gate's hold+ballistics silently discards the whole duck request; got {smoothed}"
     )
+
+
+def test_gate_hold_attack_release_negation_reuse_fails_across_varying_duck_depth():
+    """STRENGTHENS the test above (PR #40 review round 2): the original
+    test used one STEADY -30 dB curve, which leaves open whether the
+    failure is specific to a constant/deep request or general to any duck
+    curve. Reproduced directly this session with a curve that VARIES --
+    briefly returns near unity, dips to two different engaged depths (-30
+    and -18 dB), and returns to unity again -- the same eps-threshold
+    mirror-image argument applies at every value in `(-inf, 0]`, since
+    `negated = -target_db >= 0` for ANY duck curve, and `negated > -eps` is
+    true for every non-negative value regardless of magnitude. Confirms the
+    claim is not an artifact of the original test's constant input: the
+    entire time-varying request -- not just its deepest point -- is
+    silently discarded to a flat 0.0, and the hold counter never once
+    counts an engagement despite the curve genuinely engaging and releasing
+    twice.
+    """
+    target_db = np.array([0.0, -5.0, -30.0, -30.0, -10.0, 0.0, -18.0, -18.0, -2.0, 0.0])
+    negated = -target_db
+    smoothed, open_count = _hold_attack_release_db(negated, 100.0, 5.0, 50.0, 150.0)
+    assert open_count == 0, (
+        "negation should (wrongly) read every frame as 'open'/unity regardless of how the duck curve varies"
+    )
+    assert np.allclose(smoothed, 0.0), (
+        f"a duck curve that genuinely varies (engages twice, releases twice) must not collapse to a flat 0.0 "
+        f"under negated reuse of gate's hold+ballistics; got {smoothed}"
+    )
