@@ -19,7 +19,7 @@ import numpy as np
 
 from aud.dsp import crossover
 
-__all__ = ["BandParams", "compress", "multiband_compress", "static_gain_reduction_db"]
+__all__ = ["BandParams", "compress", "multiband_compress", "smooth_gain_db", "static_gain_reduction_db"]
 
 _EPS = 1e-12
 
@@ -102,8 +102,38 @@ def static_gain_reduction_db(level_db: np.ndarray, params: BandParams) -> np.nda
     return y_db - level_db  # <= 0 everywhere
 
 
-def _smooth_gain_db(gain_db: np.ndarray, sr: int, attack_ms: float, release_ms: float) -> np.ndarray:
-    """Attack/release smoothing of a (per-sample) gain-reduction dB signal."""
+def smooth_gain_db(gain_db: np.ndarray, sr: float, attack_ms: float, release_ms: float) -> np.ndarray:
+    """Attack/release smoothing of a (per-sample) gain-reduction dB signal.
+
+    Public (not `_`-prefixed): `aud.dsp.smoothing` (Step 8 of the
+    masking/ducking epic, issue #18) reuses this UNMODIFIED, per band, for
+    the TIME axis of its two-axis smoothing -- this function already takes
+    an arbitrary dB curve plus a rate and returns an attack/release-smoothed
+    curve; it needs no changes to run at STFT frame rate instead of audio
+    sample rate (`sr` here is just "updates per second", and the one-pole
+    coefficient math (`exp(-1/(rate*tau_seconds))`) does not care which
+    rate that is). Renamed from `_smooth_gain_db` (private) to this public
+    name for that reuse -- this repo's own convention (see
+    `aud.dsp.collision`'s `masking_offset` docstring, and
+    `static_gain_reduction_db`'s own rename below) is cross-module reuse
+    via a PUBLIC API, never a private import.
+
+    Polarity (load-bearing for Step 8's reuse decision -- see
+    `aud.dsp.smoothing`'s own module docstring for the full argument):
+    `attack_coeff` is selected whenever `target < prev` -- i.e. whenever the
+    requested curve is MORE NEGATIVE (more gain reduction) than the current
+    smoothed value -- and `release_coeff` otherwise (recovering toward 0 dB
+    / unity). That is the correct polarity for a compressor's OWN gain
+    curve (attenuate when driven louder) and, not incidentally, for an
+    external-key DUCK's gain curve too (same `target_db <= 0`, 0 = unity
+    convention `aud.dsp.gate.dynamic_eq` and `aud.dsp.collision.collision_
+    gains` both use) -- unlike `aud.dsp.gate._hold_attack_release_db`,
+    whose OWN polarity is deliberately the mirror image (see that
+    function's docstring): gate/expander "attack" moves TOWARD unity
+    (opening), because gate curves are 0 dB when LOUD and negative when
+    QUIET, the opposite of a duck's own curve. `aud.dsp.smoothing` reuses
+    THIS function for exactly that reason, not gate's.
+    """
     attack_coeff = np.exp(-1.0 / (sr * max(attack_ms, 1e-3) / 1000.0))
     release_coeff = np.exp(-1.0 / (sr * max(release_ms, 1e-3) / 1000.0))
 
@@ -157,7 +187,7 @@ def compress(
         level_db = level_db[:, 0]
 
     raw_gain_db = static_gain_reduction_db(level_db, params)
-    smoothed_gain_db = _smooth_gain_db(raw_gain_db, sr, params.attack_ms, params.release_ms)
+    smoothed_gain_db = smooth_gain_db(raw_gain_db, sr, params.attack_ms, params.release_ms)
 
     gain_lin = _db_to_lin(smoothed_gain_db)
     makeup_lin = _db_to_lin(params.makeup_db)
