@@ -7,6 +7,8 @@ array functions, so real generated signals are the correct substitute).
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 from scipy.signal import get_window
@@ -71,7 +73,14 @@ def test_null_test_sqrt_hann_50_percent_overlap():
 
 def test_null_test_various_window_n_fft_hop_combinations():
     """Sweep a handful of compliant (window, n_fft, hop) choices -- all must
-    clear the same honest tolerance, not just the one "hero" configuration."""
+    clear the same honest tolerance, not just the one "hero" configuration.
+
+    SWEEP FINDING (issue #28's defect class): every case here used to be an
+    EVEN n_fft (512, 1024, 4096, 1024, 2048) -- an unstated shared property
+    that would hide an odd-n_fft-only null-test regression. The
+    ("hann", 1023, 341) case breaks that: 1023 is odd, and 341 = 1023 // 3 is
+    one of the rare hops at which Hann-squared is still exactly COLA-compliant
+    for an odd n_fft (verified via check_cola_nola; most hops are not)."""
     x = _white_noise(1.0, seed=2)
     cases = [
         ("hann", 512, 128),  # 512, 75%
@@ -84,6 +93,7 @@ def test_null_test_various_window_n_fft_hop_combinations():
         # sibling reasoning); 87.5% overlap (hop = n_fft // 8) is where it
         # IS compliant, so that is what is exercised here.
         ("blackman", 2048, 256),  # Blackman x Blackman, 87.5%
+        ("hann", 1023, 341),  # ODD n_fft, COLA-compliant hop -- breaks the all-even blind spot
     ]
     for window, n_fft, hop in cases:
         spectrum = stft.analyze(x, SR, window=window, n_fft=n_fft, hop=hop)
@@ -262,7 +272,11 @@ def test_signal_shorter_than_one_window_round_trips_exactly():
     """Defined behaviour for a short signal: `analyze` zero-pads internally
     up to the minimum ShortTimeFFT needs, and `resynthesize`'s `length`
     trims the padding back off, so the caller never sees it and the
-    round trip is still sample-accurate."""
+    round trip is still sample-accurate.
+
+    This case alone only ever exercised an EVEN n_fft (2048); see the
+    companion `test_signal_shorter_than_one_window_round_trips_with_odd_n_fft`
+    below, added by the issue #28 sweep to cover the odd case too."""
     n_fft = 2048
     x = _white_noise(1.0, seed=8)[:100]  # far shorter than n_fft
     assert len(x) < n_fft
@@ -276,26 +290,191 @@ def test_signal_shorter_than_one_window_round_trips_exactly():
     assert err_db <= _NULL_TEST_TOLERANCE_DB
 
 
-def test_signal_at_exact_minimum_length_round_trips():
+def test_signal_shorter_than_one_window_round_trips_with_odd_n_fft():
+    """Same check as `test_signal_shorter_than_one_window_round_trips_exactly`,
+    with an ODD n_fft (1023) instead of even (2048) -- issue #28's defect
+    class is exactly "a test sweep that only ever used even n_fft"."""
+    n_fft = 1023
+    hop = 341  # COLA-compliant (n_fft // 3, an exact divisor) -- see check_cola_nola
+    x = _white_noise(1.0, seed=13)[:50]  # far shorter than n_fft
+    assert len(x) < n_fft
+
+    spectrum = stft.analyze(x, SR, window="hann", n_fft=n_fft, hop=hop)
+    y = stft.resynthesize(spectrum, SR, len(x), window="hann", n_fft=n_fft, hop=hop)
+
+    assert y.shape == x.shape
+    err_db = _reconstruction_error_db(x, y)
+    print(f"\n[stft] short-signal odd n_fft={n_fft} ({len(x)} samples) null-test err = {err_db:.2f} dB")
+    assert err_db <= _NULL_TEST_TOLERANCE_DB
+
+
+def test_min_input_len_matches_independently_derived_ceiling():
+    """`_min_input_len(n_fft)` must equal ceil(n_fft / 2).
+
+    Issue #28: the original boundary test computed its expectation via
+    `-(-n_fft // 2)` -- the EXACT SAME bit-trick expression used inside
+    `_min_input_len` itself -- so a bug in that expression could not be
+    caught; it would agree with itself by construction. Here the expectation
+    comes from `math.ceil(n_fft / 2)`, a different code path (float division
+    then ceiling, not the double-negation integer trick), so the two must
+    be independently derived and can actually disagree if `_min_input_len`
+    is wrong. Swept across n_fft on both sides of several powers of two --
+    ODD and EVEN -- rather than the single n_fft=1024 the original test used.
+    """
+    from aud.dsp.stft import _min_input_len
+
+    for n_fft in (
+        1,
+        2,
+        3,
+        4,
+        5,
+        7,
+        8,
+        15,
+        16,
+        17,
+        31,
+        32,
+        33,
+        63,
+        64,
+        65,
+        127,
+        128,
+        129,
+        255,
+        256,
+        257,
+        511,
+        512,
+        513,
+        1023,
+        1024,
+        1025,
+        2047,
+        2048,
+        2049,
+    ):
+        expected = math.ceil(n_fft / 2)
+        actual = _min_input_len(n_fft)
+        assert actual == expected, f"_min_input_len({n_fft}) = {actual}, expected ceil({n_fft}/2) = {expected}"
+
+
+@pytest.mark.parametrize(
+    ("n_fft", "hop"),
+    [
+        (1024, 256),  # EVEN n_fft -- the original (only) case
+        (1023, 341),  # ODD n_fft -- COLA-compliant hop (n_fft // 3)
+    ],
+)
+def test_signal_at_exact_minimum_length_round_trips(n_fft, hop):
     """Boundary case: exactly `ceil(n_fft / 2)` samples -- the smallest
-    length ShortTimeFFT accepts without any padding at all."""
-    n_fft = 1024
-    min_len = -(-n_fft // 2)
+    length ShortTimeFFT accepts without any padding at all.
+
+    Issue #28: the original test only exercised n_fft=1024 (even), where
+    floor(n_fft/2) == ceil(n_fft/2), so a `_min_input_len` mutated to floor
+    division is indistinguishable here. The added ODD case (1023) is where
+    floor and ceil actually differ and the test can tell them apart.
+
+    `min_len` is derived via `math.ceil`, independent of `_min_input_len`'s
+    own `-(-n_fft // 2)` expression -- see
+    `test_min_input_len_matches_independently_derived_ceiling` for the
+    dedicated unit-level version of that same independence requirement.
+    """
+    min_len = math.ceil(n_fft / 2)
+    assert stft._min_input_len(n_fft) == min_len
     x = _white_noise(1.0, seed=9)[:min_len]
 
-    spectrum = stft.analyze(x, SR, window="hann", n_fft=n_fft, hop=256)
-    y = stft.resynthesize(spectrum, SR, len(x), window="hann", n_fft=n_fft, hop=256)
+    spectrum = stft.analyze(x, SR, window="hann", n_fft=n_fft, hop=hop)
+    y = stft.resynthesize(spectrum, SR, len(x), window="hann", n_fft=n_fft, hop=hop)
 
+    assert y.shape == x.shape
+    err_db = _reconstruction_error_db(x, y)
+    print(f"\n[stft] exact-min-length n_fft={n_fft} hop={hop} ({len(x)} samples) err = {err_db:.2f} dB")
+    assert err_db <= _NULL_TEST_TOLERANCE_DB
+
+
+def test_odd_n_fft_one_sample_short_of_minimum_still_round_trips_via_padding():
+    """THE regression this issue is about (issue #28): for an ODD n_fft,
+    `floor(n_fft / 2)` is exactly ONE LESS than the true minimum
+    `ceil(n_fft / 2)`. An input of that in-between length must still
+    round-trip -- `analyze` pads it up internally to the true minimum. If
+    `_min_input_len` is ever wrong (reports the floor instead of the ceiling),
+    this exact input length stops being seen as "too short to pad" and
+    `ShortTimeFFT` itself raises instead.
+
+    Mutation proof captured 2026-09-26 (source restored byte-identical
+    immediately after; see PR description for the full transcripts):
+
+      MUTANT `return n_fft // 2`:
+        this test's 511-sample input is no longer < the (wrong) reported
+        minimum of 511, so `analyze` skips padding, and scipy raises
+        `ValueError: ... must be >= ceil(m_num/2) = 512!` -- CAUGHT.
+
+      MUTANT `return n_fft // 2 + 1`:
+        wrong for EVEN n_fft, not this (odd) case -- CAUGHT instead by the
+        n_fft=1024 branch of `test_signal_at_exact_minimum_length_round_trips`
+        (512 + 1 = 513 != the true minimum of 512).
+
+      CANDIDATE `return (n_fft + 1) // 2`:
+        mathematically IDENTICAL to `-(-n_fft // 2)` for every n_fft >= 1
+        (both are the standard integer ceiling-division idiom; verified by
+        exhaustive comparison for n_fft in [1, 5000)). This is not a real
+        mutant and correctly SURVIVES -- there is no bug for it to catch.
+    """
+    n_fft = 1023
+    hop = 341  # COLA-compliant (n_fft // 3, an exact divisor) -- see check_cola_nola
+    min_len = stft._min_input_len(n_fft)
+    assert min_len == math.ceil(1023 / 2) == 512
+
+    x = _white_noise(1.0, seed=12)[: min_len - 1]
+    assert len(x) == 511  # one below the true minimum -- floor(1023 / 2)
+
+    spectrum = stft.analyze(x, SR, window="hann", n_fft=n_fft, hop=hop)
+    y = stft.resynthesize(spectrum, SR, len(x), window="hann", n_fft=n_fft, hop=hop)
+
+    assert y.shape == x.shape
+    err_db = _reconstruction_error_db(x, y)
+    print(f"\n[stft] one-below-minimum odd n_fft={n_fft} ({len(x)} samples) err = {err_db:.2f} dB")
+    assert err_db <= _NULL_TEST_TOLERANCE_DB
+
+
+def test_short_multichannel_signal_round_trips():
+    """This uses a single, even n_fft (2048); see the companion
+    `test_short_multichannel_signal_round_trips_with_odd_n_fft` below (added
+    by a correction to the issue #28 sweep) for the odd-n_fft case.
+
+    A 50-sample input is shorter than `_min_input_len(2048) == 1024`, so this
+    DOES take `analyze`'s internal zero-padding path, which calls
+    `_min_input_len` -- verified by instrumenting the call directly:
+    `_min_input_len` is invoked with `n_fft=2048` and returns `1024` before
+    the 50-sample, 2-channel signal is padded up to it. An earlier revision
+    of this docstring claimed the opposite ("shares no arithmetic path with
+    `_min_input_len`"); that claim was false and is corrected here rather
+    than repeated.
+    """
+    n_fft = 2048
+    x = _white_noise(1.0, channels=2, seed=10)[:50]
+    spectrum = stft.analyze(x, SR, n_fft=n_fft, hop=512)
+    y = stft.resynthesize(spectrum, SR, len(x), n_fft=n_fft, hop=512)
     assert y.shape == x.shape
     err_db = _reconstruction_error_db(x, y)
     assert err_db <= _NULL_TEST_TOLERANCE_DB
 
 
-def test_short_multichannel_signal_round_trips():
-    n_fft = 2048
-    x = _white_noise(1.0, channels=2, seed=10)[:50]
-    spectrum = stft.analyze(x, SR, n_fft=n_fft, hop=512)
-    y = stft.resynthesize(spectrum, SR, len(x), n_fft=n_fft, hop=512)
+def test_short_multichannel_signal_round_trips_with_odd_n_fft():
+    """Same check as `test_short_multichannel_signal_round_trips`, with an
+    ODD n_fft (1023) instead of even (2048) -- issue #28's defect class is
+    exactly "a test sweep that only ever used even n_fft", and the
+    multichannel padding path exercises `_min_input_len` the same way the
+    mono short-signal tests do (both call `analyze`, which pads via
+    `_min_input_len` whenever the input is shorter than that minimum)."""
+    n_fft = 1023
+    hop = 341  # COLA-compliant (n_fft // 3, an exact divisor) -- see check_cola_nola
+    x = _white_noise(1.0, channels=2, seed=14)[:50]
+    spectrum = stft.analyze(x, SR, n_fft=n_fft, hop=hop)
+    y = stft.resynthesize(spectrum, SR, len(x), n_fft=n_fft, hop=hop)
     assert y.shape == x.shape
     err_db = _reconstruction_error_db(x, y)
     assert err_db <= _NULL_TEST_TOLERANCE_DB
