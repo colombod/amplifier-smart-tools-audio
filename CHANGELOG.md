@@ -499,13 +499,33 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
     `bool`). Also newly rejected with a named `ValueError` instead of an unnamed `TypeError`/
     `KeyError`: `band_edges`'s `n_bands` (non-integer) and `f_min`/`f_max` (non-numeric);
     `bin_band_weights`'s `bands` argument (non-dict, or missing a required key) and `sr`
-    (non-numeric). The six one-line closed-form scalar maps (`hz_to_bark_peaq`,
-    `bark_peaq_to_hz`, `hz_to_bark_zwicker_terhardt`, `hz_to_erb_rate`, `erb_rate_to_hz`,
-    `critical_bandwidth_hz`, `erb_bandwidth_hz`) and `band_energy` are documented (module
-    docstring) as deliberately NOT validating -- each propagates non-finite/negative input
-    honestly (NaN in, NaN out) rather than searching or constructing a range, so there is no
-    plausible-wrong-answer failure mode for a guard to close, matching the precedent
-    `bark_peaq_to_hz` already established in PR #26 ("the honest sibling").
+    (non-numeric).
+  - **Review-round correction: the "propagates honestly, so no guard is needed" rationale was
+    itself measured false for three of the eight functions first documented as deliberate
+    non-guards.** `critical_bandwidth_hz` squares its input, so it is an EVEN function of
+    frequency: `critical_bandwidth_hz(-1000.0)` returned a value BIT-IDENTICAL to
+    `critical_bandwidth_hz(1000.0)` for every negative magnitude, not just large ones -- silently
+    hiding the sign entirely. `erb_bandwidth_hz`'s small linear coefficient (`4.37/1000`) hid
+    every negative input from -228.83 Hz to 0 Hz behind a plausible-looking positive bandwidth
+    (`erb_bandwidth_hz(-5.0) == 24.1603...`, close to `erb_bandwidth_hz(0.0) == 24.7`).
+    `band_energy` is a weighted SUM, which absorbed one negative `spectrum`/`weights` entry into
+    a smaller-but-still-plausible positive band value (measured: one bad bin turned a clean band
+    value of `19.45` into `13.58`, with every returned band still `>= 0`) instead of surfacing a
+    visible negative. All three are now guarded (`ValueError` on non-finite or negative input;
+    `band_energy`'s guard is a single combined `isfinite & >= 0` pass per array on the happy
+    path, measured ~16us -> ~65us per call at a realistic 2049-bin/32-band size -- the added cost
+    of correctness on a hot per-frame path, paid once per call rather than per element on the
+    common case). The remaining **five** closed-form maps (`hz_to_bark_peaq`, `bark_peaq_to_hz`,
+    `hz_to_bark_zwicker_terhardt`, `hz_to_erb_rate`, `erb_rate_to_hz`) are re-verified, by a
+    measured sweep across 12 negative magnitudes from -0.001 to -1e9 (not one probed point), to
+    genuinely keep a negative input visible (negative output or NaN, every magnitude) and are the
+    ones actually left undocumented as deliberate non-guards now -- five, not eight. The rule
+    that decides each case: a non-guard is safe only if the operation keeps a bad value VISIBLE
+    in the output; "closed-form, no search loop" alone is not the test, because an even function
+    or a weighted sum can absorb a bad value into a plausible, wrong, positive answer. All valid-
+    input behaviour is unchanged (bit-identical, including the dense/200,000-point
+    `bark_zwicker_terhardt_to_hz` sweeps above); every new guard is mutation-proven (disabled,
+    confirmed a named test fails, restored byte-identical by sha256).
 
 ## [0.12.0] - 2026-09-21
 
