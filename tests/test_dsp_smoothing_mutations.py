@@ -63,12 +63,13 @@ def test_forcing_symmetric_attack_release_would_fail_this_recovery_timing_check(
     `attack_ms`): the release-timing prediction below
     (`hold_ms + release_ms * ln(depth/tol)`) is specific to an
     asymmetric release constant SLOWER than attack. Reproduced directly
-    this session: patching `smooth_time_axis_db` to ignore its own
-    `release_ms` argument and reuse `attack_ms` for both directions made a
-    duck engaged at -18 dB recover to within 1 dB in ~64 ms (predicted from
-    attack_ms=20 ms: `50 + 20*ln(18) = 108 ms`) instead of the ~484 ms this
-    test expects from the real (asymmetric, release_ms=150 ms) behaviour --
-    confirmed RED against this test's own tolerance, then reverted.
+    this session: patching `smooth_time_axis_db`'s call to `smooth_gain_db`
+    to pass `attack_ms` in place of `release_ms` made a duck engaged at
+    -18 dB recover to within 1 dB in 10 frames (100 ms) instead of the
+    ~48 frames (~484 ms) this test expects from the real (asymmetric,
+    release_ms=150 ms) behaviour -- confirmed RED against this test's own
+    2-frame tolerance (`assert 38.4 <= 2` failed), then reverted
+    (`git diff`/`sha256sum` both confirmed byte-identical afterward).
     """
     frame_rate_hz = 100.0  # 10 ms per frame, round numbers
     hold_ms, attack_ms, release_ms = 50.0, 20.0, 150.0
