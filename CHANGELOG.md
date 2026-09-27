@@ -270,6 +270,26 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   `s = min(-4, -24 - 230/f_c + 0.2*L)` -- so the ear model must be named whenever those
   constants are quoted.
 
+- **Two new deterministic plan stages: `downmix` and `resample`.** Both are output-format
+  decisions rather than mastering ones, so they sit at the very end of canonical order,
+  immediately before the file is written (`contracts/plan.v1.md#why-downmixresample-sit-at-the-very-end`).
+  - `downmix` folds a multichannel programme to one channel by taking the arithmetic mean across
+    channels (sum-and-divide, never a plain sum) -- provably unable to push a sample outside
+    [-1.0, 1.0] for in-range input. Its render report always includes the mean pairwise channel
+    correlation and an `antiphase_detected` flag, so a caller can tell a good fold from an
+    accidental near-silent one caused by out-of-phase channels, rather than getting a quiet file
+    with no explanation.
+  - `resample` converts to a target sample rate via `scipy.signal.resample_poly`'s polyphase
+    resampler (its own anti-aliasing filter, never hand-rolled decimation).
+  - Consolidated four independent one-line mono-fold copies (`aud.dsp.eqmatch._mono`,
+    `aud.dsp.speech`'s pre-whisper fold, `aud.dsp.reverb`'s IR downmix) into one shared
+    `aud.dsp.channels.fold_to_mono`; `aud.dsp.resolve._mono_sum` is deliberately left alone (it
+    sums rather than averages -- a different computation, not the same one spelled differently).
+- **`sample_rate_policy` (docs/CONFIGURATION.md) is now wired to `render`.** It was previously
+  documented and accepted by `aud config`/`AUD_SAMPLE_RATE_POLICY` but never read at render time.
+  `"preserve"` (default) writes at the input's own rate; an integer resamples the rendered output
+  to that rate. An explicit `resample` stage in the plan always takes precedence.
+
 ### Fixed
 
 - **`aud.dsp.stft`'s minimum-input-length test was self-referential and hid a real odd-`n_fft`
@@ -451,27 +471,76 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   unchanged and needed no change; the measured audit numbers and bundled-runtime sizes are
   untouched.
 
-### Added
+- **`aud.dsp.bands.bark_zwicker_terhardt_to_hz`'s `tol`/`max_iter` were solver internals leaking
+  into the public signature (issue #29) -- removed entirely, not validated-and-kept.** They were
+  never guarded: `max_iter=0`/negative silently returned 25000 Hz (half the bracket seed) for any
+  input; `tol=inf` silently returned 12500 Hz after a single bisection step -- both dressed up as
+  real answers with no exception. This is the THIRD round of one defect class in this file (#25:
+  non-finite `f_min`/`f_max`; #26: non-finite `z`; this one: the solver options), so the surface
+  is removed rather than guarded -- a caller who does not know a bisection runs here had no
+  principled basis for choosing either value, and nothing in this codebase ever passed either one
+  explicitly (verified by grep before removing them). Fixed as module-level named constants
+  (`_BARK_INVERSE_TOL_HZ = 1e-9`, `_BARK_INVERSE_MAX_ITER = 60` -- the exact removed defaults).
+  **Bit-identical, not merely close**: across a 19,981-point dense 20 Hz-20 kHz sweep (1 Hz
+  steps) and a separate 200,000-point sweep, the post-removal function matches an independent
+  reconstruction of the pre-removal bisection (same seed/cap, same removed defaults) with max
+  absolute difference exactly `0.0`.
+  - **Full-file parameter sweep, the mandate that came with this item**: every public parameter
+    of every public function in `bands.py` was probed with `inf`/`-inf`/`nan`/negative/zero/wrong
+    type. Two more silent gaps found and closed: `bark_zwicker_terhardt_to_hz` accepted a
+    negative Bark value and silently converged on ~0 Hz (the bisection bracket's own floor,
+    symmetric with the existing asymptote/upper-bound guard -- now rejected); `band_edges`'s
+    `allow_extrapolation` was never type-checked, so any truthy non-bool -- including the string
+    `"False"` -- silently let >15.5 kHz Bark extrapolation through (now requires an actual
+    `bool`). Also newly rejected with a named `ValueError` instead of an unnamed `TypeError`/
+    `KeyError`: `band_edges`'s `n_bands` (non-integer) and `f_min`/`f_max` (non-numeric);
+    `bin_band_weights`'s `bands` argument (non-dict, or missing a required key) and `sr`
+    (non-numeric).
+  - **Review-round correction: the "propagates honestly, so no guard is needed" rationale was
+    itself measured false for three of the eight functions first documented as deliberate
+    non-guards.** `critical_bandwidth_hz` squares its input, so it is an EVEN function of
+    frequency: `critical_bandwidth_hz(-1000.0)` returned a value BIT-IDENTICAL to
+    `critical_bandwidth_hz(1000.0)` for every negative magnitude, not just large ones -- silently
+    hiding the sign entirely. `erb_bandwidth_hz`'s small linear coefficient (`4.37/1000`) hid
+    every negative input from -228.83 Hz to 0 Hz behind a plausible-looking positive bandwidth
+    (`erb_bandwidth_hz(-5.0) == 24.1603...`, close to `erb_bandwidth_hz(0.0) == 24.7`).
+    `band_energy` is a weighted SUM, which absorbed one negative `spectrum`/`weights` entry into
+    a smaller-but-still-plausible positive band value (measured: one bad bin turned a clean band
+    value of `19.45` into `13.58`, with every returned band still `>= 0`) instead of surfacing a
+    visible negative. All three are now guarded (`ValueError` on non-finite or negative input;
+    `band_energy`'s guard is `a.min() >= 0 and np.isfinite(a.max())` per array on the happy path
+    -- two reductions with no boolean temporaries, cheaper than an elementwise
+    `isfinite(a) & (a >= 0)` pass over the whole array. Measured (2049-bin, 32-band, this
+    machine), added overhead over the unguarded sum at a single frame: **~47us -> ~24us**
+    (~2x reduction; repeated runs ranged ~1.4x-2.3x); at 64 frames per call: **~149us -> ~74us**.
+    Against a 48 kHz/hop-512 frame budget of 10,667us, that is **~0.44% -> ~0.22%** of one
+    frame's time -- the earlier "~4x"/"~16us -> ~65us" figures recorded here were measured on a
+    single machine/run and are now superseded by the above; bit-identical to an unguarded
+    `tensordot` on valid input, confirmed at 8x513x64 and 32x2049x64 with zero bins mixed in, and
+    each half of the guard mutation-proven separately). The remaining **five** closed-form maps
+    (`hz_to_bark_peaq`, `bark_peaq_to_hz`, `hz_to_bark_zwicker_terhardt`, `hz_to_erb_rate`,
+    `erb_rate_to_hz`) are re-verified, by a measured sweep across 12 negative magnitudes from
+    -0.001 to -1e9 (not one probed point), to genuinely keep a negative input visible (negative
+    output or NaN, every magnitude) and are the ones actually left undocumented as deliberate
+    non-guards now -- five, not eight. The rule that decides each case: a non-guard is safe only
+    if the operation keeps a bad value VISIBLE in the output; "closed-form, no search loop" alone
+    is not the test, because an even function or a weighted sum can absorb a bad value into a
+    plausible, wrong, positive answer. All valid-input behaviour is unchanged (bit-identical,
+    including the dense/200,000-point `bark_zwicker_terhardt_to_hz` sweeps above); every new
+    guard is mutation-proven (disabled, confirmed a named test fails, restored byte-identical by
+    sha256).
+  - **Review round 3, addressed**: `hz_to_erb_rate`/`erb_rate_to_hz` each have one float64-
+    resolution blind spot the magnitude sweep above does not probe (it starts at -0.001, far
+    above either bound) -- measured directly, negative input in `(-1.27e-14, 0)` Hz
+    (`hz_to_erb_rate`) or `(-5.16e-16, 0)` Cams (`erb_rate_to_hz`) rounds to exactly `0.0` at
+    float64 precision, losing the sign; now documented on both functions and in the module
+    docstring. Also recorded (behaviour unchanged): the five non-guarded closed-form maps accept
+    a Python/NumPy `bool` as a number without complaint (`bark_peaq_to_hz(True) == 93.17` Hz,
+    identical to `1.0`). And the suite's one warning (a `sinh` overflow in `bark_peaq_to_hz` at
+    the sweep's `z <= -10000` magnitudes -- expected, since saturating to `-inf` is exactly how
+    the sign stays visible there) is now asserted explicitly with `pytest.warns`, not silently
+    suppressed; full suite reports zero warnings.
 
-- **Two new deterministic plan stages: `downmix` and `resample`.** Both are output-format
-  decisions rather than mastering ones, so they sit at the very end of canonical order,
-  immediately before the file is written (`contracts/plan.v1.md#why-downmixresample-sit-at-the-very-end`).
-  - `downmix` folds a multichannel programme to one channel by taking the arithmetic mean across
-    channels (sum-and-divide, never a plain sum) -- provably unable to push a sample outside
-    [-1.0, 1.0] for in-range input. Its render report always includes the mean pairwise channel
-    correlation and an `antiphase_detected` flag, so a caller can tell a good fold from an
-    accidental near-silent one caused by out-of-phase channels, rather than getting a quiet file
-    with no explanation.
-  - `resample` converts to a target sample rate via `scipy.signal.resample_poly`'s polyphase
-    resampler (its own anti-aliasing filter, never hand-rolled decimation).
-  - Consolidated four independent one-line mono-fold copies (`aud.dsp.eqmatch._mono`,
-    `aud.dsp.speech`'s pre-whisper fold, `aud.dsp.reverb`'s IR downmix) into one shared
-    `aud.dsp.channels.fold_to_mono`; `aud.dsp.resolve._mono_sum` is deliberately left alone (it
-    sums rather than averages -- a different computation, not the same one spelled differently).
-- **`sample_rate_policy` (docs/CONFIGURATION.md) is now wired to `render`.** It was previously
-  documented and accepted by `aud config`/`AUD_SAMPLE_RATE_POLICY` but never read at render time.
-  `"preserve"` (default) writes at the input's own rate; an integer resamples the rendered output
-  to that rate. An explicit `resample` stage in the plan always takes precedence.
 ## [0.12.0] - 2026-09-21
 
 Three measured defects in `advise`'s diagnosis, found by controlled measurement

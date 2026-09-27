@@ -1192,3 +1192,374 @@ def test_band_edges_and_weights_are_deterministic():
     w1 = bands.bin_band_weights(r1, n_fft=2048, sr=48000)
     w2 = bands.bin_band_weights(r2, n_fft=2048, sr=48000)
     assert np.array_equal(w1, w2)
+
+
+# --- 10. Issue #29: `bark_zwicker_terhardt_to_hz`'s `tol`/`max_iter` were
+# solver internals leaking into the public signature -- removed entirely,
+# not guarded -- plus a full parameter sweep of the rest of this file ---
+
+
+def _reference_bisect_bark_zwicker_terhardt_to_hz(z, tol=1e-9, max_iter=60):
+    """Independent reconstruction of the bisection `bark_zwicker_terhardt_to_hz`
+    ran BEFORE issue #29 removed `tol`/`max_iter` from its public signature.
+    Lives only here, in the test file -- deliberately NOT imported from
+    production, so it cannot silently track a future change to the
+    production narrowing loop (AGENTS.md #3b: building an expected value by
+    calling the code under test proves nothing). Used exactly once, below,
+    to pin that removing the surface changed no valid answer: same seed
+    (`bands._BARK_BRACKET_SEED_HZ`) and expansion cap
+    (`bands._BARK_BRACKET_EXPANSION_CAP`, both untouched by this change) and
+    the exact narrowing `tol`/`max_iter` (1e-9 / 60) that used to be the
+    removed parameters' own defaults.
+    """
+    z = np.asarray(z, dtype=np.float64)
+    lo = np.zeros_like(z)
+    hi = np.full_like(z, bands._BARK_BRACKET_SEED_HZ)
+    for _ in range(bands._BARK_BRACKET_EXPANSION_CAP):
+        too_low = bands.hz_to_bark_zwicker_terhardt(hi) < z
+        if not np.any(too_low):
+            break
+        hi = np.where(too_low, hi * 2.0, hi)
+    for _ in range(max_iter):
+        mid = 0.5 * (lo + hi)
+        too_high = bands.hz_to_bark_zwicker_terhardt(mid) > z
+        hi = np.where(too_high, mid, hi)
+        lo = np.where(too_high, lo, mid)
+        if np.all(hi - lo < tol):
+            break
+    return 0.5 * (lo + hi)
+
+
+def test_bark_zwicker_terhardt_to_hz_bit_identical_to_pre_removal_defaults_dense_sweep():
+    """This is a SURFACE REMOVAL, not a behaviour change: across every
+    audible frequency (the same 19,981-point, 1 Hz-step, 20 Hz-20 kHz sweep
+    `test_bark_round_trip_dense` above uses), the production function (now
+    with no `tol`/`max_iter` to pass) must match the independent reference
+    reconstruction above -- called with the exact removed defaults -- with
+    max absolute difference EXACTLY 0.0, not merely close."""
+    z = bands.hz_to_bark_zwicker_terhardt(_DENSE_FREQS_HZ)
+    reference = _reference_bisect_bark_zwicker_terhardt_to_hz(z, tol=1e-9, max_iter=60)
+    production = bands.bark_zwicker_terhardt_to_hz(z)
+    max_abs_diff = float(np.max(np.abs(production - reference)))
+    print(f"\n[bands] issue #29 tol/max_iter removal: max abs diff vs pre-removal defaults = {max_abs_diff!r}")
+    assert max_abs_diff == 0.0
+    assert np.array_equal(production, reference)
+
+
+def test_bark_zwicker_terhardt_to_hz_no_longer_accepts_tol_or_max_iter():
+    """The whole point of removing these: a caller can no longer choose an
+    invalid solver internal at all. `max_iter=0` used to silently return
+    25000 Hz (half the bracket seed) for any input; `tol=inf` used to
+    silently return 12500 Hz after a single iteration. Both are now simply
+    not parameters -- passing either is a `TypeError` from Python's own
+    argument binding, not a validated-and-rejected `ValueError`."""
+    with pytest.raises(TypeError):
+        bands.bark_zwicker_terhardt_to_hz(10.0, tol=1e-9)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        bands.bark_zwicker_terhardt_to_hz(10.0, max_iter=60)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        bands.bark_zwicker_terhardt_to_hz(10.0, max_iter=0)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        bands.bark_zwicker_terhardt_to_hz(10.0, tol=float("inf"))  # type: ignore[call-arg]
+
+
+def test_bark_zwicker_terhardt_to_hz_rejects_negative_z():
+    """Full-file sweep finding: a negative Bark request used to silently
+    converge to ~0 Hz -- the bisection bracket's own floor (`lo` starts at
+    0.0) -- with no signal that a negative Bark value has no meaning on
+    this scale (`z(0 Hz) = 0` is the floor). Symmetric with the existing
+    asymptote (upper-bound) guard."""
+    with pytest.raises(ValueError, match="negative"):
+        bands.bark_zwicker_terhardt_to_hz(-100.0)
+    with pytest.raises(ValueError, match="negative"):
+        bands.bark_zwicker_terhardt_to_hz(np.array([5.0, -0.001, 10.0]))
+    # Reachable through the hz_to_bark/bark_to_hz dispatch layer too.
+    with pytest.raises(ValueError, match="negative"):
+        bands.bark_to_hz(-1.0, "bark_zwicker_terhardt")
+
+
+@pytest.mark.parametrize("bad_n_bands", [32.5, "32", None, float("nan"), True])
+def test_band_edges_rejects_non_integer_n_bands(bad_n_bands):
+    """Full-file sweep finding: a non-int `n_bands` (a float, a numeric
+    string, `None`, NaN, or a `bool`) used to raise an unnamed `TypeError`
+    (e.g. `'<' not supported between instances of 'str' and 'int'`) instead
+    of a documented `ValueError` naming `n_bands` and its constraint -- or,
+    for some inputs, silently propagate into `np.linspace` deeper inside."""
+    with pytest.raises(ValueError, match="n_bands"):
+        bands.band_edges(bad_n_bands, "bark_zwicker_terhardt", f_min=20.0, f_max=15000.0)
+
+
+@pytest.mark.parametrize("bad_value", ["20", None, True, [20.0]])
+def test_band_edges_rejects_non_numeric_f_min_f_max(bad_value):
+    """Full-file sweep finding: a non-numeric `f_min`/`f_max` (a string, a
+    bool, `None`, a list) used to raise an unnamed `TypeError` from
+    `np.isfinite` (e.g. \"ufunc 'isfinite' not supported for the input
+    types...\") rather than a `ValueError` naming which parameter and why."""
+    with pytest.raises(ValueError, match="f_min"):
+        bands.band_edges(8, "bark_zwicker_terhardt", f_min=bad_value, f_max=15000.0)
+    with pytest.raises(ValueError, match="f_max"):
+        bands.band_edges(8, "bark_zwicker_terhardt", f_min=20.0, f_max=bad_value)
+
+
+@pytest.mark.parametrize("bad_value", ["False", 1, 0, "True"])
+def test_band_edges_rejects_non_bool_allow_extrapolation(bad_value):
+    """Full-file sweep finding: `allow_extrapolation` was never type-checked,
+    so ANY truthy non-bool -- including the string `"False"` -- silently let
+    >15.5 kHz Bark extrapolation through with no signal that the caller's
+    apparently-negative value was ignored. `0` (falsy) must still raise: the
+    point is the wrong TYPE, not merely the wrong truthiness."""
+    with pytest.raises(ValueError, match="allow_extrapolation"):
+        bands.band_edges(8, "bark_zwicker_terhardt", f_min=20.0, f_max=20000.0, allow_extrapolation=bad_value)
+
+
+@pytest.mark.parametrize("bad_bands", [None, [1, 2, 3], "not_a_dict", 42])
+def test_bin_band_weights_rejects_non_dict_bands(bad_bands):
+    """Full-file sweep finding: a non-dict `bands` used to raise an unnamed
+    `TypeError` (`'NoneType' object is not subscriptable`,
+    `list indices must be integers or slices, not str`, ...) instead of a
+    `ValueError` naming the constraint."""
+    with pytest.raises(ValueError, match="bands"):
+        bands.bin_band_weights(bad_bands, n_fft=1024, sr=48000.0)
+
+
+@pytest.mark.parametrize(
+    "incomplete_bands",
+    [{}, {"n_bands": 4}, {"n_bands": 4, "f_min": 20.0, "f_max": 15000.0}],
+)
+def test_bin_band_weights_rejects_bands_missing_required_keys(incomplete_bands):
+    """Full-file sweep finding: a dict missing `centers_hz` (or other
+    required keys) used to raise an unnamed `KeyError` instead of a
+    `ValueError` naming which key(s) are missing."""
+    with pytest.raises(ValueError, match="missing required key"):
+        bands.bin_band_weights(incomplete_bands, n_fft=1024, sr=48000.0)
+
+
+@pytest.mark.parametrize("bad_sr", ["48000", None, True, [48000.0]])
+def test_bin_band_weights_rejects_non_numeric_sr(bad_sr):
+    """Full-file sweep finding: a non-numeric `sr` used to raise an unnamed
+    `TypeError` from `np.isfinite` rather than a `ValueError` naming `sr`."""
+    result = bands.band_edges(8, "bark_zwicker_terhardt", f_min=20.0, f_max=15500.0)
+    with pytest.raises(ValueError, match="sr"):
+        bands.bin_band_weights(result, n_fft=1024, sr=bad_sr)
+
+
+# --- 10. Review-round finding: the "propagates honestly" rationale was false
+# for critical_bandwidth_hz, erb_bandwidth_hz and band_energy -- measured,
+# not inferred. New guards for those three; a measured sweep confirming the
+# remaining five closed-form maps are genuinely safe unguarded. ---
+
+
+@pytest.mark.parametrize("bad_f", [float("nan"), float("inf"), float("-inf")])
+def test_critical_bandwidth_hz_rejects_non_finite(bad_f):
+    with pytest.raises(ValueError, match="finite"):
+        bands.critical_bandwidth_hz(bad_f)
+
+
+def test_critical_bandwidth_hz_rejects_negative():
+    """Review-round finding: critical_bandwidth_hz squares f, so it is an
+    EVEN function of frequency -- critical_bandwidth_hz(-1000.0) used to
+    return a value BIT-IDENTICAL to critical_bandwidth_hz(1000.0), hiding
+    every negative input behind a completely plausible positive bandwidth,
+    for every magnitude, not just large ones."""
+    with pytest.raises(ValueError, match="negative"):
+        bands.critical_bandwidth_hz(-1000.0)
+    with pytest.raises(ValueError, match="negative"):
+        bands.critical_bandwidth_hz(np.array([100.0, -0.001, 5.0]))
+
+
+def test_critical_bandwidth_hz_unchanged_on_valid_input():
+    """New guard must not touch valid-input behaviour: the task's stated
+    reference values (also asserted in test_critical_bandwidth_matches_reference_values)
+    still hold exactly."""
+    for f, expected in [(100.0, 101.0), (1000.0, 162.0), (10000.0, 2305.0)]:
+        assert bands.critical_bandwidth_hz(f) == pytest.approx(expected, abs=1.0)
+
+
+@pytest.mark.parametrize("bad_f", [float("nan"), float("inf"), float("-inf")])
+def test_erb_bandwidth_hz_rejects_non_finite(bad_f):
+    with pytest.raises(ValueError, match="finite"):
+        bands.erb_bandwidth_hz(bad_f)
+
+
+def test_erb_bandwidth_hz_rejects_negative():
+    """Review-round finding: erb_bandwidth_hz's small linear coefficient
+    (4.37/1000) means erb_bandwidth_hz(-5.0) used to return 24.1603..., a
+    perfectly plausible ERB value close to erb_bandwidth_hz(0.0) == 24.7 --
+    silently plausible across the entire (-228.83, 0) Hz range, not merely
+    at one probed magnitude."""
+    with pytest.raises(ValueError, match="negative"):
+        bands.erb_bandwidth_hz(-5.0)
+    with pytest.raises(ValueError, match="negative"):
+        bands.erb_bandwidth_hz(np.array([100.0, -0.001, 5.0]))
+
+
+def test_erb_bandwidth_hz_unchanged_on_valid_input():
+    for f, expected in [(100.0, 35.0), (1000.0, 133.0), (10000.0, 1104.0)]:
+        assert bands.erb_bandwidth_hz(f) == pytest.approx(expected, abs=1.0)
+
+
+def _make_bands_and_weights(n_bands=32, n_fft=4096, sr=48000.0):
+    result = bands.band_edges(n_bands, "erb_glasberg_moore", f_min=20.0, f_max=20000.0)
+    weights = bands.bin_band_weights(result, n_fft=n_fft, sr=sr)
+    return weights
+
+
+@pytest.mark.parametrize("bad_val", [float("nan"), float("inf"), float("-inf")])
+def test_band_energy_rejects_non_finite_spectrum(bad_val):
+    weights = _make_bands_and_weights()
+    spectrum = np.ones(weights.shape[1])
+    spectrum[10] = bad_val
+    with pytest.raises(ValueError, match="spectrum must be finite"):
+        bands.band_energy(spectrum, weights)
+
+
+@pytest.mark.parametrize("bad_val", [float("nan"), float("inf"), float("-inf")])
+def test_band_energy_rejects_non_finite_weights(bad_val):
+    weights = _make_bands_and_weights()
+    spectrum = np.ones(weights.shape[1])
+    weights = weights.copy()
+    weights[0, 10] = bad_val
+    with pytest.raises(ValueError, match="weights must be finite"):
+        bands.band_energy(spectrum, weights)
+
+
+def test_band_energy_rejects_negative_spectrum():
+    """Review-round finding: band_energy is a weighted SUM, which can
+    absorb one negative spectrum bin into a smaller-but-still-plausible
+    positive band value -- measured: one bin set to -5.0 changed a clean
+    band value of 19.45 to 13.58, with every returned band still >= 0. No
+    signal anything was wrong; this is the same silent-plausible-wrong-
+    answer class the module guards against elsewhere."""
+    weights = _make_bands_and_weights()
+    rng = np.random.default_rng(0)
+    spectrum = np.abs(rng.standard_normal(weights.shape[1]))
+    nz = np.nonzero(weights[3])[0]
+    bin_idx = int(nz[len(nz) // 2])
+    clean = bands.band_energy(spectrum, weights)
+    assert np.all(clean >= 0.0)
+
+    bad_spectrum = spectrum.copy()
+    bad_spectrum[bin_idx] = -5.0
+    with pytest.raises(ValueError, match="spectrum must be non-negative"):
+        bands.band_energy(bad_spectrum, weights)
+
+
+def test_band_energy_rejects_negative_weights():
+    """Symmetric with test_band_energy_rejects_negative_spectrum: a
+    negative weight is absorbed the same way."""
+    weights = _make_bands_and_weights()
+    spectrum = np.ones(weights.shape[1])
+    bad_weights = weights.copy()
+    bad_weights[3, 10] = -1.0
+    with pytest.raises(ValueError, match="weights must be non-negative"):
+        bands.band_energy(spectrum, bad_weights)
+
+
+def test_band_energy_unchanged_on_valid_input():
+    """New guards must not touch valid-input behaviour: bit-identical to
+    pre-guard output (energy conservation still holds exactly)."""
+    sr = 48000
+    n_fft = 2048
+    rng = np.random.default_rng(0)
+    n_bins = n_fft // 2 + 1
+    n_frames = 20
+    power = rng.uniform(0.0, 1.0, size=(n_bins, n_frames)) ** 2
+
+    result = bands.band_edges(32, "bark_zwicker_terhardt", f_min=20.0, f_max=15500.0)
+    weights = bands.bin_band_weights(result, n_fft=n_fft, sr=sr)
+    per_band = bands.band_energy(power, weights)
+
+    assert per_band.shape == (32, n_frames)
+    total_before = power.sum(axis=0)
+    total_after = per_band.sum(axis=0)
+    assert np.allclose(total_after, total_before, rtol=1e-9, atol=1e-9)
+
+
+def _reference_unguarded_band_energy(spectrum: np.ndarray, weights: np.ndarray) -> np.ndarray:
+    """Independent reproduction of `main`'s (pre-this-PR) `band_energy`:
+    plain `tensordot`, no guard at all. Reconstructed here rather than
+    imported from production (AGENTS.md #3b) so the comparison below
+    cannot pass merely because it calls the same code on both sides."""
+    spectrum = np.asarray(spectrum, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+    return np.tensordot(weights, spectrum, axes=([1], [0]))
+
+
+@pytest.mark.parametrize(("n_bins", "n_bands", "n_frames"), [(513, 8, 64), (2049, 32, 64)])
+def test_band_energy_cheaper_guard_bit_identical_to_unguarded_tensordot(n_bins, n_bands, n_frames):
+    """The cheaper `min()`/`max()`-reduction guard must not change a single
+    bit of valid-input output relative to no guard at all -- not merely
+    relative to the elementwise-boolean-pass guard it replaced. Zero bins
+    are mixed into `spectrum` (every 11th bin) so the comparison also
+    covers real, legitimately-zero energy, not just strictly-positive
+    values."""
+    rng = np.random.default_rng(1)
+    spectrum = rng.uniform(0.0, 1.0, size=(n_bins, n_frames)) ** 2
+    spectrum[::11, :] = 0.0
+    weights = rng.uniform(0.0, 1.0, size=(n_bands, n_bins))
+    weights[:, ::7] = 0.0
+
+    guarded = bands.band_energy(spectrum, weights)
+    unguarded = _reference_unguarded_band_energy(spectrum, weights)
+
+    assert guarded.shape == unguarded.shape
+    max_diff = float(np.max(np.abs(guarded - unguarded)))
+    assert max_diff == 0.0, f"n_bins={n_bins} n_bands={n_bands} n_frames={n_frames}: max|diff|={max_diff}"
+
+
+def test_band_energy_empty_bin_axis_is_a_no_op_like_before_the_guard():
+    """Preserve exact pre-guard behaviour for a zero-size bin axis: an
+    empty `spectrum`/`weights` never raised before this guard existed
+    (`np.all(...)` over an empty array is vacuously True), and the new
+    `.min()`/`.max()`-based guard must not change that -- `.min()`/`.max()`
+    raise outright on a zero-size array, so size 0 must be special-cased
+    to skip the reduction entirely rather than accidentally calling it."""
+    spectrum = np.zeros((0,), dtype=np.float64)
+    weights = np.zeros((3, 0), dtype=np.float64)
+    result = bands.band_energy(spectrum, weights)
+    assert result.shape == (3,)
+    assert np.all(result == 0.0)
+
+
+@pytest.mark.parametrize(
+    ("fn_name", "unit"),
+    [
+        ("hz_to_bark_peaq", "Bark"),
+        ("bark_peaq_to_hz", "Hz"),
+        ("hz_to_bark_zwicker_terhardt", "Bark"),
+        ("hz_to_erb_rate", "Cams"),
+        ("erb_rate_to_hz", "Hz"),
+    ],
+)
+def test_remaining_closed_form_maps_keep_negative_input_visible_across_magnitudes(fn_name, unit):
+    """Review-round finding, applied as a permanent regression pin: unlike
+    critical_bandwidth_hz/erb_bandwidth_hz, these five closed-form maps
+    genuinely keep a negative input VISIBLE (as a negative output, or NaN)
+    across every magnitude from -0.001 to -1e9 -- not merely at one probed
+    point. This is what actually justifies leaving them unguarded (see the
+    module docstring); if a future edit to one of these formulas ever makes
+    it produce a plausible-looking non-negative result for some negative
+    input, this test catches that regression.
+
+    `bark_peaq_to_hz` (`650*sinh(z/7)`) genuinely overflows float64 at
+    `z <= -10000` (`sinh` of a large-magnitude argument exceeds float64's
+    range) -- measured: `z` in `{-10000, -1e6, -1e9}` all raise
+    `RuntimeWarning: overflow encountered in sinh`. That overflow is
+    EXPECTED (it is exactly how this function keeps the sign visible: it
+    saturates to `-inf`, still visibly negative) rather than suppressed,
+    so it is asserted explicitly with `pytest.warns` for those specific
+    combinations -- a silent `np.errstate(over="ignore")` around the whole
+    loop would hide a future regression that made the warning fire (or
+    stop firing) somewhere unexpected."""
+    fn = getattr(bands, fn_name)
+    magnitudes = [-0.001, -0.01, -0.1, -1.0, -5.0, -10.0, -100.0, -228.0, -1000.0, -10000.0, -1e6, -1e9]
+    for m in magnitudes:
+        expect_sinh_overflow = fn_name == "bark_peaq_to_hz" and m <= -10000.0
+        with np.errstate(invalid="ignore"):
+            if expect_sinh_overflow:
+                with pytest.warns(RuntimeWarning, match="overflow encountered in sinh"):
+                    result = float(fn(np.asarray(m)))
+            else:
+                result = float(fn(np.asarray(m)))
+        visible = np.isnan(result) or result < 0.0
+        assert visible, f"{fn_name}({m}) = {result} is neither negative nor NaN -- sign was hidden ({unit})"
