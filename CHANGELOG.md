@@ -11,6 +11,31 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ### Added
 
+- **PR #40 review round 3 (test-only): a single continuous engagement changing DEPTH is now
+  covered in both directions, closing the gap a mutation found in `_duck_hold_attack_release_db`.**
+  Review mutated that function to latch only the FIRST engaged depth instead of the most recently
+  observed one; all 50 pre-existing smoothing tests still passed, because every one of them either
+  engages at one constant depth throughout, or releases and re-engages (a fresh engagement each
+  time) -- never changes depth WITHIN a single continuous engagement (target never returns above
+  `-DUCK_ENGAGE_EPS_DB`). On a continuous duck deepening -6 dB -> -18 dB, the mutant read -6.000 dB
+  at frame 100 where the shipped code reads -18.000 dB. `tests/test_dsp_smoothing_mutations.py`
+  adds `test_hold_latching_only_first_engaged_depth_would_fail_the_deepening_check` (-6 dB -> -18 dB)
+  and its mirror-image `..._would_fail_the_shallowing_check` (-18 dB -> -6 dB), each asserting the
+  measured settle time against the exact one-pole formula (`tau_ms * ln(gap_db / tol_db)`) already
+  used by this file's own recovery-timing tests, on BOTH `smooth_time_axis_db` (the per-band
+  helper, lookahead disabled for an exact formula) and `duck_gain_surface` (the public STFT path),
+  at two different (n_fft, hop, sr) configurations and different attack/hold/release constants so
+  neither case passes by coincidence at one fixed configuration. The shallowing direction's correct
+  behaviour (settle on the RELEASE timescale, not just toward unity) is derived from
+  `aud.dsp.dynamics.smooth_gain_db`'s own documented polarity rule (`attack_coeff` iff
+  `target < prev`, `release_coeff` otherwise) -- the condition is relative to `prev`, not to 0 dB,
+  so it already settles a move to a shallower non-zero depth, not only a move to unity. Both tests
+  reproduced RED against the first-engaged-depth-latch mutant this session (mutate/run/revert,
+  sha256-verified restore); a second mutant tried on the reviewer's suggestion ("hold latches the
+  shallowest depth seen") fails the deepening test but is NOT caught by the shallowing test, since
+  that mutant's own running-max happens to coincide with the shipped value on a single
+  ever-shallower transition -- recorded, not silently fixed. Tests only; no production code changed
+  (`git diff --stat` from the pre-mutation-testing commit shows only test/CHANGELOG files touched).
 - **PR #40 review round 3, USER RULING (2026-09-27): frequency-axis smoothing renamed and
   relabelled from ERB to BARK.** Review found `smooth_frequency_axis_erb_db` has no ERB-specific
   code and never checks `bands["scale"]` -- its width is simply the width of whatever `bands` are

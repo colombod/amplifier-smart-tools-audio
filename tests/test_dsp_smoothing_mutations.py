@@ -223,3 +223,191 @@ def test_gate_hold_attack_release_negation_reuse_fails_across_varying_duck_depth
         f"a duck curve that genuinely varies (engages twice, releases twice) must not collapse to a flat 0.0 "
         f"under negated reuse of gate's hold+ballistics; got {smoothed}"
     )
+
+
+# --- Mutation guard: PR #40 review round 3 -- hold must latch EVERY ---
+# --- engaged frame's own target, not just the depth seen when the ---
+# --- engagement first began ---
+#
+# The review mutated `_duck_hold_attack_release_db` to latch only the
+# FIRST engage depth (`held_value` set once, on the released->engaged
+# transition, instead of on every engaged frame) and all 50 pre-existing
+# smoothing tests still passed, because every one of them either engages
+# at one CONSTANT depth throughout, or releases and RE-engages (a fresh
+# engagement each time) -- never changes depth WITHIN a single continuous
+# engagement. That is the gap the two tests below close: a single
+# continuous duck (target never returns above `-DUCK_ENGAGE_EPS_DB`
+# between the two depths, so `engage_count` must read exactly 1) whose
+# depth changes mid-engagement, in each direction.
+#
+# Shipped `_duck_hold_attack_release_db` sets `held_value =
+# float(target_db[n])` on every frame where `is_engaged_raw[n]` is True
+# (that function's own source) -- so during a continuous engagement the
+# held curve tracks the raw target exactly, frame for frame, and a
+# mid-engagement depth change reaches the ballistics-predicted new depth
+# on the timescale the CHANGE's own direction calls for. A first-depth
+# latch instead freezes `held_value` at the first engaged sample and never
+# updates it again while continuously engaged, so neither direction of
+# change ever reaches the smoothed curve -- reproduced directly this
+# session (see PR description for the mutate/run/revert transcript; the
+# two tests below are the NAMED tests that transcript's RED run cites).
+#
+# The settle-time bound both tests assert against is the same exact
+# one-pole exponential-decay formula this file's own
+# `test_forcing_symmetric_attack_release_...` test and
+# `tests/test_dsp_smoothing_acceptance.py::
+# test_bed_returns_to_unity_after_release_following_key_gap` already use:
+# `settle_ms = tau_ms * ln(gap_db / tol_db)`, `tau_ms` being whichever of
+# `attack_ms`/`release_ms` the direction of change selects (see
+# `aud.dsp.dynamics.smooth_gain_db`'s own docstring, quoted below).
+
+
+def _settle_frames_by_formula(tau_ms: float, gap_db: float, tol_db: float, frame_rate_hz: float) -> int:
+    """Frames after a step for a one-pole (dB-domain) curve to be within
+    `tol_db` of its new target: `settle_ms = tau_ms * ln(gap_db / tol_db)`,
+    converted to frames at `frame_rate_hz`. Derived, not measured -- the
+    same formula this file's own recovery-timing tests already use.
+    """
+    settle_ms = tau_ms * math.log(gap_db / tol_db)
+    return math.ceil(settle_ms / (1000.0 / frame_rate_hz))
+
+
+def test_hold_latching_only_first_engaged_depth_would_fail_the_deepening_check():
+    """NAMED TEST (deepening direction): a single continuous engagement
+    whose target DEEPENS mid-engagement (-6 dB then -18 dB, never
+    returning to unity in between). Reproduced directly this session:
+    applying the first-engaged-depth-latch mutant to
+    `_duck_hold_attack_release_db` freezes `held_value` at -6 dB forever,
+    so the smoothed curve never reaches within `tol_db` of -18 dB at
+    either the helper level (`smooth_time_axis_db`) or the public path
+    (`duck_gain_surface`) -- both assertions below go RED under the
+    mutant; confirmed, then reverted (`git diff`/`sha256sum` both
+    byte-identical afterward -- see PR description for the transcript).
+
+    Uses a DIFFERENT (hop, sr, n_fft) than the shallowing test below (per
+    review instruction: cases must not all share one hop, sample rate, or
+    n_fft).
+    """
+    # --- helper level: smooth_time_axis_db, lookahead=0 for an exact formula ---
+    frame_rate_hz = 100.0  # 10 ms/frame, round numbers
+    attack_ms, hold_ms, release_ms = 20.0, 10.0, 150.0
+    depth1_db, depth2_db = -6.0, -18.0
+    tol_db = 0.5
+    n_pre, n_post = 100, 100
+    target_db = np.concatenate([np.full(n_pre, depth1_db), np.full(n_post, depth2_db)])
+
+    smoothed, stats = smooth_time_axis_db(
+        target_db, frame_rate_hz, attack_ms=attack_ms, hold_ms=hold_ms, release_ms=release_ms, lookahead_frames=0
+    )
+    assert stats["engage_count"] == 1, "test setup: target never returns to unity, so this must be ONE engagement"
+    assert smoothed[n_pre - 1] == pytest.approx(depth1_db), "test setup: must be fully settled at depth1 pre-transition"
+
+    gap_db = abs(depth2_db - depth1_db)
+    expected_recovery_frames = _settle_frames_by_formula(attack_ms, gap_db, tol_db, frame_rate_hz)
+    recovered_frame = next(
+        (f for f in range(n_pre, n_pre + n_post - 5) if np.all(np.abs(smoothed[f : f + 5] - depth2_db) < tol_db)),
+        None,
+    )
+    assert recovered_frame is not None, (
+        f"the smoothed curve never reached within {tol_db} dB of the deeper target {depth2_db} dB; "
+        f"final value {smoothed[-1]:.4f} dB (a first-engaged-depth latch would freeze it at {depth1_db} dB)"
+    )
+    measured_recovery_frames = recovered_frame - n_pre
+    assert abs(measured_recovery_frames - expected_recovery_frames) <= 2, (
+        f"deepening took {measured_recovery_frames} frames to settle; expected ~{expected_recovery_frames} frames "
+        f"from attack_ms={attack_ms} * ln({gap_db}/{tol_db})"
+    )
+
+    # --- public path: duck_gain_surface, a DIFFERENT n_fft/hop/sr ---
+    n_fft, hop, sr = 1024, 256, 44100
+    attack_ms2, hold_ms2, release_ms2 = 20.0, 10.0, 150.0
+    n_bands = 4
+    b = bands_module.band_edges(
+        n_bands, scale="bark_peaq", f_min=20.0, f_max=min(20000.0, sr / 2.0 - 1.0), allow_extrapolation=True
+    )
+    n_pre2, n_post2 = 150, 150
+    band_db = np.concatenate([np.full(n_pre2, depth1_db), np.full(n_post2, depth2_db)])
+    band_gain_power = np.tile((10.0 ** (band_db / 10.0))[None, :], (n_bands, 1))
+
+    bin_gain_amp, _stats2 = duck_gain_surface(
+        band_gain_power, b, n_fft, hop, sr, attack_ms=attack_ms2, hold_ms=hold_ms2, release_ms=release_ms2
+    )
+    final_db = 20.0 * np.log10(bin_gain_amp[:, -5:].mean())
+    assert abs(final_db - depth2_db) < tol_db, (
+        f"duck_gain_surface's own output never settled near the deeper target {depth2_db} dB well after the "
+        f"transition; got {final_db:.4f} dB (a first-engaged-depth latch would freeze it near {depth1_db} dB)"
+    )
+
+
+def test_hold_latching_only_first_engaged_depth_would_fail_the_shallowing_check():
+    """NAMED TEST (shallowing direction, the reverse case the review also
+    asked for): a single continuous engagement whose target becomes
+    SHALLOWER mid-engagement (-18 dB then -6 dB, never returning to
+    unity). Correct behaviour here is settled by the documented polarity
+    rule this module reuses UNMODIFIED (`aud.dsp.dynamics.smooth_gain_db`'s
+    own docstring: "`attack_coeff` is selected whenever `target < prev` ...
+    and `release_coeff` otherwise (recovering toward 0 dB / unity)") -- the
+    code's own condition is `target < prev`, not `target < 0`, so ANY move
+    toward LESS reduction, including toward a shallower NON-ZERO depth and
+    not only toward unity, takes the RELEASE coefficient. Correct
+    behaviour is therefore to reach the shallower target on the RELEASE
+    timescale, the mirror image of the deepening test above reaching its
+    deeper target on the ATTACK timescale.
+
+    Reproduced directly this session: the same first-engaged-depth-latch
+    mutant freezes `held_value` at -18 dB forever, so this direction fails
+    too -- both assertions below go RED under the mutant; confirmed, then
+    reverted.
+
+    Uses a DIFFERENT (hop, sr, n_fft) and different attack/hold/release
+    constants than the deepening test above.
+    """
+    # --- helper level: smooth_time_axis_db, lookahead=0 for an exact formula ---
+    frame_rate_hz = 50.0  # 20 ms/frame
+    attack_ms, hold_ms, release_ms = 15.0, 25.0, 90.0
+    depth1_db, depth2_db = -18.0, -6.0
+    tol_db = 0.5
+    n_pre, n_post = 100, 80
+    target_db = np.concatenate([np.full(n_pre, depth1_db), np.full(n_post, depth2_db)])
+
+    smoothed, stats = smooth_time_axis_db(
+        target_db, frame_rate_hz, attack_ms=attack_ms, hold_ms=hold_ms, release_ms=release_ms, lookahead_frames=0
+    )
+    assert stats["engage_count"] == 1, "test setup: target never returns to unity, so this must be ONE engagement"
+    assert smoothed[n_pre - 1] == pytest.approx(depth1_db), "test setup: must be fully settled at depth1 pre-transition"
+
+    gap_db = abs(depth2_db - depth1_db)
+    expected_recovery_frames = _settle_frames_by_formula(release_ms, gap_db, tol_db, frame_rate_hz)
+    recovered_frame = next(
+        (f for f in range(n_pre, n_pre + n_post - 5) if np.all(np.abs(smoothed[f : f + 5] - depth2_db) < tol_db)),
+        None,
+    )
+    assert recovered_frame is not None, (
+        f"the smoothed curve never reached within {tol_db} dB of the shallower target {depth2_db} dB; "
+        f"final value {smoothed[-1]:.4f} dB (a first-engaged-depth latch would freeze it at {depth1_db} dB)"
+    )
+    measured_recovery_frames = recovered_frame - n_pre
+    assert abs(measured_recovery_frames - expected_recovery_frames) <= 2, (
+        f"shallowing took {measured_recovery_frames} frames to settle; expected ~{expected_recovery_frames} frames "
+        f"from release_ms={release_ms} * ln({gap_db}/{tol_db})"
+    )
+
+    # --- public path: duck_gain_surface, a DIFFERENT n_fft/hop/sr ---
+    n_fft, hop, sr = 4096, 1024, 16000
+    attack_ms2, hold_ms2, release_ms2 = 80.0, 50.0, 200.0
+    n_bands = 4
+    b = bands_module.band_edges(
+        n_bands, scale="bark_peaq", f_min=20.0, f_max=min(20000.0, sr / 2.0 - 1.0), allow_extrapolation=True
+    )
+    n_pre2, n_post2 = 60, 80
+    band_db = np.concatenate([np.full(n_pre2, depth1_db), np.full(n_post2, depth2_db)])
+    band_gain_power = np.tile((10.0 ** (band_db / 10.0))[None, :], (n_bands, 1))
+
+    bin_gain_amp, _stats2 = duck_gain_surface(
+        band_gain_power, b, n_fft, hop, sr, attack_ms=attack_ms2, hold_ms=hold_ms2, release_ms=release_ms2
+    )
+    final_db = 20.0 * np.log10(bin_gain_amp[:, -5:].mean())
+    assert abs(final_db - depth2_db) < tol_db, (
+        f"duck_gain_surface's own output never settled near the shallower target {depth2_db} dB well after the "
+        f"transition; got {final_db:.4f} dB (a first-engaged-depth latch would freeze it near {depth1_db} dB)"
+    )
