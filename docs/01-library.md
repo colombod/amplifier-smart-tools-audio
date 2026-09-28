@@ -300,6 +300,7 @@ lowercase `snake_case`, never a second convention:
 | `bad_path` | A text artifact (e.g. a curve JSON) could not be written atomically. |
 | `bad_plan` | Plan JSON (from stdin or `--from`) is not valid JSON, or does not match the plan shape. |
 | `crossfade_exceeds_gap` | A `cut`/`strip_silence` crossfade is longer than the material available at that join. |
+| `duck_transition_faster_than_hop` | `aud.dsp.smoothing.duck_gain_surface`'s `attack_ms`/`release_ms` requests a transition faster than the STFT hop can resolve. Raised today as `aud.dsp.smoothing.TransitionFasterThanHopError` (dsp-layer only -- ducking is not yet wired to `aud.lib`/the CLI, see issue #21); listed here so the code is reserved ahead of that wiring, the same way `crossfade_exceeds_gap` was named before its own boundary mapping existed. |
 | `file_not_found` | A given path does not exist. |
 | `internal_error` | An exception `aud` did not already turn into a named `AudError` — an internal bug, not a usage error. |
 | `not_implemented` | A capability needs `aud.dsp`, which is not available in this build. |

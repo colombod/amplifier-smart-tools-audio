@@ -326,7 +326,9 @@ def _process_bands(
             Step 8 boundary") applies `curve`'s raw output UNSMOOTHED --
             `attack_ms`/`hold_ms`/`release_ms`/`lookahead_ms` are unused in
             that case. Ballistics (attack/hold/release in time) and
-            cross-band (ERB-width) smoothing are Step 8's job (issue #18),
+            cross-band (perceptual-band-width -- shipped as Bark, see
+            `aud.dsp.smoothing`'s own module docstring, "FREQUENCY AXIS")
+            smoothing are Step 8's job (issue #18),
             not this step's; keeping them out here, rather than defaulting
             them to near-zero time constants, means Step 8 can add them
             without this function having pretended to already own that
@@ -636,8 +638,10 @@ def dynamic_eq(
     depth in any band") holds BY CONSTRUCTION, not merely by measurement.
 
     No ballistics (attack/hold/release, lookahead) and no cross-band
-    (ERB-width) smoothing happen here (`_process_bands(..., smoothing=
-    False)`) -- both are Step 8's job (issue #18). This applies the raw,
+    (perceptual-band-width -- shipped as Bark, see `aud.dsp.smoothing`'s
+    own module docstring, "FREQUENCY AXIS") smoothing happen here
+    (`_process_bands(..., smoothing=False)`) -- both are Step 8's job
+    (issue #18). This applies the raw,
     per-sample static law directly. Stopping here, at this exact boundary,
     is deliberate: Step 8 can add real ballistics on top without this
     function's own surface having to change.
