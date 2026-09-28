@@ -506,8 +506,29 @@ class ReplayAdviceBackend:
     def recorded_model(self) -> str:
         return self._recording["request"]["model"]
 
-    def complete(self, system: str, user: str, *, model: str, max_tokens: int = 2000) -> str:
-        self.calls.append({"system": system, "user": user, "model": model, "max_tokens": max_tokens})
+    def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: str,
+        max_tokens: int = 2000,
+        response_schema: Any = None,
+    ) -> str:
+        # Ignores response_schema -- replays what the real recorded call
+        # returned (never a hand-authored plan), and every recording here
+        # predates ResponseSchema. A REAL schema-constrained recording is
+        # replayed instead via install_anthropic_urlopen_replay (the raw
+        # HTTP layer), not through this convenience wrapper.
+        self.calls.append(
+            {
+                "system": system,
+                "user": user,
+                "model": model,
+                "max_tokens": max_tokens,
+                "response_schema": response_schema,
+            }
+        )
         return recorded_text_block(self._recording)
 
 

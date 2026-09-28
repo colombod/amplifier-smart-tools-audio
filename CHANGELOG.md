@@ -391,6 +391,66 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ### Fixed
 
+- **`aud advise` returned `bad_model_output` ("Extra data") for a real, correct plan the model had
+  already produced** (issue #35), reported by a real Expertise Probe run (Anthropic
+  claude-haiku-4-5-20251001, one trial each on a clean control and a "boxy" defect fixture; the
+  clean control failed, the boxy fixture succeeded). **Reproduced and measured before changing
+  any code**: 20 trials each on the SAME two fixtures (regenerated via `expertise-probe fixtures
+  generate` from its own `audio_defects.yaml`), same model. **6/20 (30%) control, 8/20 (40%)
+  boxy failed** -- all 14 failures were the model answering correctly in a ```json fence and then
+  continuing with an unrequested "**Rationale:**"/"**Reasoning:**" bullet list after its own
+  closing fence, never a second JSON object. **The reported asymmetry (clean fails, defect
+  succeeds) did NOT replicate** at this sample size -- if anything the defect fixture failed
+  *more* often; the real pattern is a flat ~30-40% trailing-content rate independent of whether
+  there is anything to recommend, refuting the "nothing to fix -> keeps talking" hypothesis as
+  stated (still plausibly A cause, just not the dominant or exclusive one at n=20/n=20).
+  - **Primary fix -- strict structured output**, preferred over parsing repair because it makes
+    trailing content structurally impossible rather than cleaning it up after the fact:
+    `aud.intelligence.interface.IntelligenceBackend.complete` gained an optional `response_schema`
+    parameter (`ResponseSchema`, additive -- `None` default, no behaviour change for an
+    implementer that ignores it). `AnthropicBackend` forces a `tool_choice`-pinned tool call with
+    an `input_schema` matching `advisor`'s exact `{"stages": [...]}` shape and returns
+    `json.dumps` of the API's own already-parsed `tool_use` input -- proved against a REAL
+    captured tool_use response (`tests/fixtures/recorded/anthropic/advise-clean-haiku-tool-use.json`),
+    not just asserted. `OpenAIBackend`/`AzureOpenAIBackend` set `response_format:
+    {"type": "json_object"}` (GA on Chat Completions; guarantees one valid JSON value, not
+    schema-conformance); `GoogleBackend` sets `generationConfig.responseMimeType:
+    "application/json"` for the same guarantee. Full per-field `json_schema` strict mode
+    (OpenAI/Azure) and `responseSchema` (Google) were assessed and deliberately NOT implemented
+    this pass -- see each backend's `complete()` comment for the provider/API-version reasoning --
+    because they need a 10-way discriminated-union schema (one per `advisor.ALLOWED_STAGES` stage)
+    that was not live-verified.
+  - **Fallback -- bounded repair for whatever text a backend without schema support returns**:
+    `advisor._parse_model_json` now decodes only the FIRST complete JSON value
+    (`json.JSONDecoder.raw_decode`) and accepts it when the remainder is empty or does not itself
+    parse as JSON (prose). If the remainder DOES parse as JSON -- two distinct proposed plans --
+    it still refuses exactly as before (`bad_model_output`): the tool must never silently pick
+    between two answers the model actually gave. No real call in either 40-trial run ever produced
+    two JSON values; that refusal test is the one hand-built (SYNTHETIC, labelled as such) case in
+    `tests/test_intelligence.py`, kept because the behaviour it guards must survive this fix even
+    though this fix's own evidence never exercised it.
+  - **Related content-block hazard, checked for all four backends (not assumed)**: Anthropic's
+    existing `content[0]["text"]` guard (skips a leading `thinking` block) was already correct.
+    **Google was not** -- Gemini's own docs confirm a thinking-enabled response returns a part
+    carrying `"thought": true` ahead of the answer part
+    (https://ai.google.dev/gemini-api/docs/generate-content/thinking), the same hazard class,
+    unguarded. `GoogleBackend.complete` now skips any `thought` part and takes the first real text
+    part. OpenAI/Azure OpenAI's Chat Completions `message.content` is a plain string in both
+    shapes, not a list of blocks -- no hazard there.
+  - New real recorded fixtures (`tests/fixtures/recorded/anthropic/`):
+    `advise-clean-haiku-trailing-prose.json` (the exact issue #35 failure, captured live) and
+    `advise-clean-haiku-tool-use.json` (the new forced-tool-call response, captured live).
+  - **Re-ran end-to-end against both real fixtures after the fix, same model, same trial counts
+    (20 control + 20 boxy)**: **0/20 (0%) control, 0/20 (0%) boxy failed** -- down from 6/20 (30%)
+    and 8/20 (40%) before the fix. Every one of the 40 post-fix calls used the forced-tool-call
+    structured-output path and returned a valid plan; the parsing fallback was not exercised by
+    this run (expected, since the schema-constrained path removes the trailing-content case it
+    exists for).
+  - `IntelligenceBackend.complete`'s signature change (additive `response_schema` kwarg) is inside
+    `aud`'s intelligence seam only -- `aud-mix`'s planned routing through this same backend layer
+    (smart_tools-9h0) inherits the fix, and every existing Protocol implementer (two test fakes)
+    was updated to accept-and-ignore the new kwarg.
+
 - **`aud.dsp.stft`'s minimum-input-length test was self-referential and hid a real odd-`n_fft`
   bug** (issue #28, fifth instance of the same defect class as #25/#26): `tests/test_dsp_stft.py`'s
   `test_signal_at_exact_minimum_length_round_trips` computed its expected `min_len` via

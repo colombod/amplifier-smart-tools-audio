@@ -43,8 +43,8 @@ class _GarbageTextBackend:
     `bad_model_output` error path, not for any provider's real shape.
     """
 
-    def complete(self, system: str, user: str, *, model: str, max_tokens: int = 2000) -> str:
-        del system, user, model, max_tokens
+    def complete(self, system: str, user: str, *, model: str, max_tokens: int = 2000, response_schema=None) -> str:
+        del system, user, model, max_tokens, response_schema
         return "garbage, not json"
 
 

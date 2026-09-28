@@ -31,8 +31,48 @@ __all__ = [
     "GoogleBackend",
     "IntelligenceBackend",
     "OpenAIBackend",
+    "ResponseSchema",
     "resolve_backend",
 ]
+
+
+class ResponseSchema:
+    """A named JSON Schema a caller wants the model's response constrained to.
+
+    Passed to `IntelligenceBackend.complete` as the optional `response_schema`
+    kwarg, this asks the backend to use whatever schema-constrained decoding
+    its provider supports, so trailing content after the JSON value becomes
+    STRUCTURALLY IMPOSSIBLE rather than something the caller must detect and
+    repair after the fact -- see issue #35 (`aud advise` returning a valid
+    plan followed by trailing prose the model kept writing after its own
+    closing code fence).
+
+    Each backend uses whatever subset of this it can act on; `complete`'s
+    return type is unchanged (still `str`) either way:
+
+    - `AnthropicBackend` forces a tool call named `name` with `input_schema
+      = schema`, and returns `json.dumps(tool_use_block["input"])` -- the
+      full schema is enforced by the API itself, and the returned string is
+      a fresh serialisation of a value the API already parsed, never raw
+      model text, so there is nothing left for prose to trail.
+    - `OpenAIBackend`/`AzureOpenAIBackend` set `response_format: {"type":
+      "json_object"}` -- guarantees the ENTIRE response is one valid JSON
+      value (no trailing content), but does not itself enforce `schema`'s
+      shape. See this module's docstring for why full per-field
+      `json_schema` strict mode is not implemented here.
+    - `GoogleBackend` sets `generationConfig.responseMimeType =
+      "application/json"` for the same "one valid JSON value" guarantee;
+      also does not enforce `schema`'s shape.
+
+    A backend given no `response_schema` (the default, `None`) behaves
+    exactly as before this existed: free text, parsed and bounded-repaired
+    by the caller (see `aud.intelligence.advisor._parse_model_json`).
+    """
+
+    def __init__(self, name: str, schema: dict, description: str = "") -> None:
+        self.name = name
+        self.schema = schema
+        self.description = description or f"Return {name}."
 
 
 class IntelligenceBackend(Protocol):
@@ -42,9 +82,22 @@ class IntelligenceBackend(Protocol):
     back. No SDK type crosses this boundary in either direction. A test
     implements this Protocol with a canned string and passes it as `advise`'s
     `backend=` parameter -- no network, no credential, no cost.
+
+    `response_schema` (added for issue #35) is optional and additive: an
+    implementer that ignores it keeps working exactly as before -- every
+    caller passes it as a keyword with a default of `None`, never
+    positionally, and no existing behaviour changes when it is omitted.
     """
 
-    def complete(self, system: str, user: str, *, model: str, max_tokens: int = 2000) -> str:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: str,
+        max_tokens: int = 2000,
+        response_schema: ResponseSchema | None = None,
+    ) -> str:
         """Return the model's raw text response to `user`, guided by `system`."""
         ...
 
@@ -111,7 +164,15 @@ class AnthropicBackend:
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
 
-    def complete(self, system: str, user: str, *, model: str, max_tokens: int = 2000) -> str:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: str,
+        max_tokens: int = 2000,
+        response_schema: ResponseSchema | None = None,
+    ) -> str:
         body = {
             "model": model,
             "max_tokens": max_tokens,
@@ -123,7 +184,33 @@ class AnthropicBackend:
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
+        if response_schema is not None:
+            # A forced tool call: the API itself parses the model's answer
+            # into `input_schema`-shaped JSON server-side (Anthropic's own
+            # constrained decoding) and hands it back already-parsed as the
+            # tool_use block's `input`. There is no free-text channel left
+            # for trailing prose to occupy -- see issue #35 and
+            # ResponseSchema's docstring above. `tool_choice` pins the
+            # model to exactly this one tool, so it cannot choose to
+            # answer in plain text instead.
+            body["tools"] = [
+                {
+                    "name": response_schema.name,
+                    "description": response_schema.description,
+                    "input_schema": response_schema.schema,
+                }
+            ]
+            body["tool_choice"] = {"type": "tool", "name": response_schema.name}
         data = _post_json("https://api.anthropic.com/v1/messages", headers, body, provider=self.provider)
+        if response_schema is not None:
+            try:
+                blocks = data["content"]
+                for block in blocks:
+                    if block.get("type") == "tool_use" and block.get("name") == response_schema.name:
+                        return json.dumps(block["input"])
+            except (KeyError, TypeError) as exc:
+                raise _bad_shape(self.provider, data) from exc
+            raise _bad_shape(self.provider, data)
         # `content` is a LIST OF BLOCKS and the text is not always first. A
         # reasoning-capable model returns a `thinking` block ahead of it, so
         # `content[0]["text"]` raises KeyError and every such model looks like
@@ -147,7 +234,15 @@ class OpenAIBackend:
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
 
-    def complete(self, system: str, user: str, *, model: str, max_tokens: int = 2000) -> str:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: str,
+        max_tokens: int = 2000,
+        response_schema: ResponseSchema | None = None,
+    ) -> str:
         body = {
             "model": model,
             "messages": [
@@ -156,6 +251,28 @@ class OpenAIBackend:
             ],
             "max_tokens": max_tokens,
         }
+        if response_schema is not None:
+            # JSON mode (GA on Chat Completions since 2023): guarantees the
+            # ENTIRE `content` string is one valid JSON value -- no trailing
+            # prose, which is exactly issue #35's defect. It does NOT
+            # enforce `response_schema.schema`'s shape (that is still
+            # `advisor._validate_and_build_plan`'s job, unchanged).
+            #
+            # Full per-field Structured Outputs (`response_format:
+            # {"type": "json_schema", "strict": true, ...}`, GA since
+            # 2024-08-06) is NOT implemented here: strict mode requires
+            # every object in the schema -- including `params`, whose shape
+            # is a 10-way union across the stage types in
+            # `advisor.ALLOWED_STAGES` -- to set `additionalProperties:
+            # false` and list every field as `required` (optional fields
+            # only via `anyOf` null-unions). That is a real, buildable
+            # schema, but building it correctly needs a live OpenAI test
+            # this pass did not budget for (see AGENTS.md SS3b -- an
+            # unverified schema is exactly the kind of untested assumption
+            # this repo does not ship). json_object mode already removes
+            # the specific defect this issue reports; checked against
+            # OpenAI's chat/completions API docs, 2026-09-28.
+            body["response_format"] = {"type": "json_object"}
         headers = {"Authorization": f"Bearer {self._api_key}", "content-type": "application/json"}
         data = _post_json("https://api.openai.com/v1/chat/completions", headers, body, provider=self.provider)
         try:
@@ -172,18 +289,55 @@ class GoogleBackend:
     def __init__(self, api_key: str) -> None:
         self._api_key = api_key
 
-    def complete(self, system: str, user: str, *, model: str, max_tokens: int = 2000) -> str:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: str,
+        max_tokens: int = 2000,
+        response_schema: ResponseSchema | None = None,
+    ) -> str:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self._api_key}"
+        generation_config: dict[str, object] = {"maxOutputTokens": max_tokens}
+        if response_schema is not None:
+            # Guarantees the ENTIRE response is one valid JSON value -- no
+            # trailing content, which is exactly issue #35's defect (see
+            # ResponseSchema's docstring). Does NOT itself enforce
+            # `response_schema.schema`'s shape (`responseSchema` would, but
+            # is not set here for the same reason noted in OpenAIBackend:
+            # a full per-stage-params union schema is buildable but was not
+            # live-verified this pass). Checked against
+            # https://ai.google.dev/api/generate-content, 2026-09-28.
+            generation_config["responseMimeType"] = "application/json"
         body = {
             "system_instruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": user}]}],
-            "generationConfig": {"maxOutputTokens": max_tokens},
+            "generationConfig": generation_config,
         }
         data = _post_json(url, {"content-type": "application/json"}, body, provider=self.provider)
+        # `parts` is a LIST, and with "thinking" enabled a part carries
+        # `"thought": true` and precedes the actual answer part -- the SAME
+        # hazard class as AnthropicBackend's `content[0]["text"]` bug
+        # above, confirmed via Gemini's own docs (thought summaries are
+        # returned as parts with `thought: true`, e.g.
+        # https://ai.google.dev/gemini-api/docs/generate-content/thinking)
+        # rather than assumed. `gemini-3.5-flash-lite` (this provider's
+        # documented default -- see DEFAULT_MODELS) is minimal-thinking by
+        # design, but a caller passing `--model`/`AUD_MODEL` can select a
+        # model that thinks by default, so this is guarded unconditionally
+        # rather than only for models known to think. Skip any thought
+        # part; take the first non-thought text part.
         try:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
+            parts = data["candidates"][0]["content"]["parts"]
+            for part in parts:
+                if part.get("thought"):
+                    continue
+                if isinstance(part.get("text"), str):
+                    return part["text"]
         except (KeyError, IndexError, TypeError) as exc:
             raise _bad_shape(self.provider, data) from exc
+        raise _bad_shape(self.provider, data)
 
 
 class AzureOpenAIBackend:
@@ -213,16 +367,44 @@ class AzureOpenAIBackend:
         self._endpoint = endpoint.rstrip("/")
         self._api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-06-01")
 
-    def complete(self, system: str, user: str, *, model: str, max_tokens: int = 2000) -> str:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: str,
+        max_tokens: int = 2000,
+        response_schema: ResponseSchema | None = None,
+    ) -> str:
         deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT", model)
         url = f"{self._endpoint}/openai/deployments/{deployment}/chat/completions?api-version={self._api_version}"
-        body = {
+        body: dict[str, object] = {
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
             "max_tokens": max_tokens,
         }
+        if response_schema is not None:
+            # Same JSON-mode guarantee as OpenAIBackend (this deployment
+            # shares the Chat Completions surface): the ENTIRE `content`
+            # string becomes one valid JSON value, eliminating issue #35's
+            # trailing-content defect, though not enforcing
+            # `response_schema.schema`'s shape.
+            #
+            # Full Structured Outputs (`json_schema`, strict) needs API
+            # version 2024-08-01-preview or later; this backend's default
+            # (`self._api_version`, from AZURE_OPENAI_API_VERSION or the
+            # "2024-06-01" fallback set in __init__) predates that and
+            # returns HTTP 400 ("response_format value as json_schema is
+            # enabled only for api versions 2024-08-01-preview and later")
+            # if requested. json_object mode is supported since
+            # 2023-12-01-preview, well before either version, so it is
+            # safe against the default. Checked against
+            # https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs,
+            # 2026-09-28 -- not verified against a live Azure deployment
+            # (no AZURE_OPENAI_* credential available in this pass).
+            body["response_format"] = {"type": "json_object"}
         headers = {"api-key": self._api_key, "content-type": "application/json"}
         data = _post_json(url, headers, body, provider=self.provider)
         try:

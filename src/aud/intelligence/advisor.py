@@ -18,7 +18,7 @@ from typing import Any
 
 from aud import lib
 from aud.intelligence import prompts
-from aud.intelligence.interface import IntelligenceBackend
+from aud.intelligence.interface import IntelligenceBackend, ResponseSchema
 from aud.plan import Plan, new_plan
 from aud.schemas import AudError
 
@@ -50,6 +50,47 @@ _BUILDERS: dict[str, Callable[..., Plan]] = {name: getattr(lib, name) for name i
 
 _DEFAULT_MAX_TOKENS = 2000
 
+# The schema advise's proposal must match -- handed to `backend.complete` as
+# `response_schema` so a backend that supports schema-constrained decoding
+# (see `aud.intelligence.interface.ResponseSchema`) makes trailing content
+# structurally impossible, rather than something caught and repaired below
+# after the fact (issue #35). `params` is deliberately left as a generic
+# object here: `_validate_and_build_plan` below already validates each
+# stage's params fully (against `aud.lib`'s own builder signatures) --
+# duplicating that as a 10-way discriminated-union JSON Schema would be a
+# second, harder-to-keep-in-sync copy of the same rule for no additional
+# safety. `additionalProperties: False` at both levels mirrors
+# `_validate_and_build_plan`'s own exact-key checks below (`set(proposal) !=
+# {"stages"}`, `set(entry) != {"stage", "params", "reason"}`) so a backend
+# that enforces this schema server-side (Anthropic) rejects the same shapes
+# this module already rejects itself.
+_ADVISE_TOOL_NAME = "propose_mastering_plan"
+_ADVISE_RESPONSE_SCHEMA = ResponseSchema(
+    name=_ADVISE_TOOL_NAME,
+    description="Propose the mastering chain: which stages to apply, with what parameters, and why.",
+    schema={
+        "type": "object",
+        "properties": {
+            "stages": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "stage": {"type": "string", "enum": list(ALLOWED_STAGES)},
+                        "params": {"type": "object"},
+                        "reason": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["stage", "params", "reason"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["stages"],
+        "additionalProperties": False,
+    },
+)
+
 
 def _strip_code_fence(text: str) -> str:
     """Tolerate a model wrapping its JSON in ```json ... ``` anyway."""
@@ -65,15 +106,56 @@ def _strip_code_fence(text: str) -> str:
 
 
 def _parse_model_json(raw: str) -> Any:
+    """Parse the model's response as JSON -- bounded repair for trailing
+    content, never for a malformed value (issue #35).
+
+    A model sometimes answers correctly and then keeps writing: a
+    "**Rationale:**" bullet list after its own closing code fence, even
+    though the system prompt says "nothing else -- no ... prose before or
+    after it". Measured against 40 real Anthropic calls (20 on a clean
+    control, 20 on a defective fixture; see the PR this fixed): ~30-40% of
+    BOTH failed this exact way, every single failure trailing PROSE, never
+    a second JSON object. `json.loads` rejects the whole response for that
+    trailing content (`JSONDecodeError: Extra data`) even though the
+    first, complete JSON value is exactly the answer that was asked for --
+    discarding a correct answer instead of a malformed one.
+
+    This decodes only the FIRST complete JSON value (`json.JSONDecoder.
+    raw_decode`) and accepts it if what remains is empty or does not
+    itself parse as JSON (prose, a stray leftover code-fence marker,
+    anything non-JSON). If what remains DOES parse as JSON -- of any
+    kind, not only another object -- that is treated as genuine ambiguity
+    and refused exactly as before: guessing which of two values the model
+    "really meant" would silently discard one it actually produced. No
+    real call observed during this fix ever produced two JSON values; the
+    refusal path exists for the case the reported bug's fix must not
+    remove, not one this fix has evidence of triggering.
+    """
     text = _strip_code_fence(raw)
+    decoder = json.JSONDecoder()
     try:
-        return json.loads(text)
+        value, end_index = decoder.raw_decode(text)
     except json.JSONDecodeError as exc:
         raise AudError(
             code="bad_model_output",
             message=f"Model response was not valid JSON: {exc}",
             remedy="Retry advise/master, or build the chain by hand with the deterministic stage verbs.",
         ) from exc
+    remainder = text[end_index:].strip()
+    if not remainder:
+        return value
+    try:
+        decoder.raw_decode(remainder)
+    except json.JSONDecodeError:
+        return value  # trailing content is not JSON -- prose the model kept writing; safe to accept
+    raise AudError(
+        code="bad_model_output",
+        message=(
+            "Model response contained a second, distinct JSON value after the first complete one "
+            f"(trailing content starts: {remainder[:200]!r})"
+        ),
+        remedy="Retry advise/master -- the model proposed two different plans and aud cannot pick between them.",
+    )
 
 
 # --- Deterministic guard: an EQ move must not contradict its own signed
@@ -380,6 +462,6 @@ def advise(
         ceiling_dbtp=ceiling_dbtp,
         reference_measurements=reference_measurements,
     )
-    raw = backend.complete(system, user, model=model, max_tokens=max_tokens)
+    raw = backend.complete(system, user, model=model, max_tokens=max_tokens, response_schema=_ADVISE_RESPONSE_SCHEMA)
     proposal = _parse_model_json(raw)
     return _validate_and_build_plan(proposal, measurements)

@@ -178,6 +178,83 @@ def test_well_formed_proposal_is_accepted_and_carries_reasoning() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Bounded repair for trailing content (issue #35): _parse_model_json accepts
+# valid JSON followed by non-JSON trailing content (a model that answers
+# correctly and then keeps writing), but still refuses two distinct JSON
+# values. The trailing-prose case below replays a REAL recorded response
+# (tests/fixtures/recorded/anthropic/advise-clean-haiku-trailing-prose.json)
+# -- captured while reproducing this issue: 20 trials each against a clean
+# control and a defective ("boxy") fixture, same model
+# (claude-haiku-4-5-20251001) as the original report, using
+# `expertise-probe`'s own audio_defects fixtures. 6/20 (30%) and 8/20 (40%)
+# failed this exact way -- ALL 14 failures were trailing prose after a
+# closing code fence, NONE were two distinct JSON objects. The two-object
+# refusal case is the one exception in this file to "never hand-author a
+# mock" (AGENTS.md SS3b): no real call in either 40-trial run produced it, so
+# there is no recording to replay for it, and it is labelled SYNTHETIC below.
+# ---------------------------------------------------------------------------
+
+
+def test_trailing_prose_after_valid_json_is_accepted() -> None:
+    """Replays advise-clean-haiku-trailing-prose.json: a valid ```json
+    plan followed by the model's own closing fence and then unrequested
+    "**Rationale:**" bullets. Before this fix, `json.loads` rejected the
+    WHOLE response with `JSONDecodeError: Extra data: line 15 column 1` --
+    issue #35's exact reported error, on this exact recorded text.
+    """
+    recording = replay.load_recording("anthropic", "advise-clean-haiku-trailing-prose")
+    raw_text = replay.recorded_text_block(recording)
+    assert "Rationale" in raw_text  # confirms this fixture really does trail prose after the fence
+    proposal = advisor._parse_model_json(raw_text)
+    plan, reasoning = advisor._validate_and_build_plan(proposal)
+    assert [s.stage for s in plan.stages] == ["loudness", "limit"]
+    assert len(reasoning) == 2
+
+
+def test_advise_wiring_accepts_the_same_real_trailing_prose_response() -> None:
+    """The same real recording as above, this time through the full
+    `advise()` wiring (ReplayAdviceBackend), proving the fix holds at the
+    level a real caller actually uses, not only at the isolated parser.
+    """
+    backend = replay.ReplayAdviceBackend("advise-clean-haiku-trailing-prose")
+    plan, reasoning = advisor.advise(
+        {"integrated_lufs": -20.0, "true_peak_dbtp": -7.99, "noise_floor_dbfs": -23.08},
+        target_lufs=-14.0,
+        ceiling_dbtp=-1.0,
+        reference_measurements=None,
+        backend=backend,
+        model=backend.recorded_model,
+    )
+    assert [s.stage for s in plan.stages] == ["loudness", "limit"]
+    assert len(reasoning) == 2
+
+
+def test_trailing_whitespace_only_is_accepted() -> None:
+    """Degenerate case of the same bug: a valid plan followed by nothing
+    but whitespace (no remainder at all) must still parse."""
+    good = '{"stages": [{"stage": "limit", "params": {"ceiling_dbtp": -1.0}, "reason": "x"}]}\n\n   \n'
+    proposal = advisor._parse_model_json(good)
+    assert proposal["stages"][0]["stage"] == "limit"
+
+
+def test_two_different_json_objects_is_refused() -> None:
+    """SYNTHETIC -- hand-built, not a real recording (see the section
+    docstring above: no real call in 40 trials ever produced this shape).
+    The tool's existing refusal for genuine ambiguity must survive this
+    fix: two DIFFERENT proposed plans is not something aud may silently
+    pick between, regardless of how the first one is spelled.
+    """
+    two_json_values = (
+        '{"stages": [{"stage": "limit", "params": {"ceiling_dbtp": -1.0}, "reason": "first plan"}]}\n'
+        '{"stages": [{"stage": "loudness", "params": {"target_lufs": -14.0}, "reason": "second plan"}]}'
+    )
+    with pytest.raises(AudError) as excinfo:
+        advisor._parse_model_json(two_json_values)
+    assert excinfo.value.code == "bad_model_output"
+    assert "second" in excinfo.value.message.lower() or "distinct" in excinfo.value.message.lower()
+
+
+# ---------------------------------------------------------------------------
 # advise(): wiring, using a REAL recorded response replayed through a
 # recording-backed IntelligenceBackend (tests/replay.py). Never a
 # hand-authored plan -- these are the model's actual real answers.
@@ -289,6 +366,57 @@ def test_anthropic_backend_replay_fails_loudly_for_a_missing_recording(monkeypat
 
 
 # ---------------------------------------------------------------------------
+# Strict structured output (issue #35): a forced tool call makes trailing
+# content structurally impossible rather than something to detect and
+# repair. Replays a REAL captured response (advise-clean-haiku-tool-use.json)
+# from a REAL call made with `response_schema` set -- proves both that the
+# REQUEST our code sends actually carries `tools`/`tool_choice` (the
+# constraint was really requested) and that the returned text is the real
+# parsed `input`, never raw free text with room for prose to trail.
+# ---------------------------------------------------------------------------
+
+
+def test_anthropic_backend_uses_a_forced_tool_call_when_response_schema_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recording = replay.load_recording("anthropic", "advise-clean-haiku-tool-use")
+    assert [b["type"] for b in recording["response"]["content"]] == ["tool_use"]  # confirms the real shape
+
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(request: object, timeout: float | None = None) -> _FakeHTTPResponse:
+        del timeout
+        captured["body"] = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+        return _FakeHTTPResponse(json.dumps(recording["response"]).encode("utf-8"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    backend = AnthropicBackend(api_key="test-key")
+    schema = advisor._ADVISE_RESPONSE_SCHEMA
+    text = backend.complete("system prompt", "user prompt", model=recording["request"]["model"], response_schema=schema)
+
+    sent = captured["body"]
+    assert sent["tool_choice"] == {"type": "tool", "name": schema.name}  # type: ignore[index]
+    assert sent["tools"][0]["name"] == schema.name  # type: ignore[index]
+    assert sent["tools"][0]["input_schema"] == schema.schema  # type: ignore[index]
+
+    real_input = recording["response"]["content"][0]["input"]
+    assert json.loads(text) == real_input  # a fresh json.dumps of the API's own already-parsed input
+
+
+def test_anthropic_backend_ignores_response_schema_argument_absence_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No `response_schema` -> the request must NOT carry tools/tool_choice
+    -- the free-text path (still bounded-repaired by advisor._parse_model_json)
+    is unchanged for a caller that does not opt in."""
+    recording = replay.install_anthropic_urlopen_replay(monkeypatch, "advise-clean-haiku")
+    backend = AnthropicBackend(api_key="test-key")
+    text = backend.complete("system prompt", "user prompt", model=recording["request"]["model"])
+    assert text == replay.recorded_text_block(recording)
+
+
+# ---------------------------------------------------------------------------
 # OpenAI / Google / Azure OpenAI response-shape parsing -- docs-shaped, not
 # recorded live (see the module docstring's honest caveat above). Each pair
 # proves the same two things the Anthropic replay tests prove for the real
@@ -321,6 +449,22 @@ def _install_docs_shaped_response(monkeypatch: pytest.MonkeyPatch, body: dict) -
     monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
 
 
+def _install_docs_shaped_response_capturing_request(
+    monkeypatch: pytest.MonkeyPatch, body: dict, captured: dict[str, object]
+) -> None:
+    """Like `_install_docs_shaped_response`, but also records the request
+    body our code actually sent in `captured["body"]`, so a test can
+    assert the schema-constraint field was really requested, not just
+    that our code claims to send it."""
+
+    def _fake_urlopen(request: object, timeout: float | None = None) -> _FakeHTTPResponse:
+        del timeout
+        captured["body"] = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+        return _FakeHTTPResponse(json.dumps(body).encode("utf-8"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+
 def test_openai_backend_parses_the_documented_chat_completions_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     """https://platform.openai.com/docs/api-reference/chat -- documented
     shape, not a recorded live call (see module docstring)."""
@@ -341,6 +485,32 @@ def test_openai_backend_malformed_response_is_a_named_error_not_a_keyerror(
     assert excinfo.value.code == "provider_request_failed"
 
 
+def test_openai_backend_requests_json_object_mode_when_response_schema_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """response_format: json_object (GA on Chat Completions) guarantees
+    the whole response is one valid JSON value -- eliminates issue #35's
+    trailing-content defect. Full per-field json_schema strict mode is not
+    implemented (see OpenAIBackend.complete's comment)."""
+    captured: dict[str, object] = {}
+    _install_docs_shaped_response_capturing_request(
+        monkeypatch, {"choices": [{"message": {"role": "assistant", "content": "{}"}}]}, captured
+    )
+    backend = OpenAIBackend(api_key="fake-key")
+    backend.complete("system", "user", model="gpt-4o-mini", response_schema=advisor._ADVISE_RESPONSE_SCHEMA)
+    assert captured["body"]["response_format"] == {"type": "json_object"}  # type: ignore[index]
+
+
+def test_openai_backend_omits_response_format_with_no_response_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    _install_docs_shaped_response_capturing_request(
+        monkeypatch, {"choices": [{"message": {"role": "assistant", "content": "hi"}}]}, captured
+    )
+    backend = OpenAIBackend(api_key="fake-key")
+    backend.complete("system", "user", model="gpt-4o-mini")
+    assert "response_format" not in captured["body"]  # type: ignore[operator]
+
+
 def test_google_backend_parses_the_documented_generate_content_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     """https://ai.google.dev/api/generate-content -- documented shape, not
     a recorded live call (see module docstring)."""
@@ -359,6 +529,57 @@ def test_google_backend_malformed_response_is_a_named_error_not_a_keyerror(
     with pytest.raises(AudError) as excinfo:
         backend.complete("system", "user", model="gemini-2.0-flash")
     assert excinfo.value.code == "provider_request_failed"
+
+
+def test_google_backend_skips_a_leading_thought_part(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With thinking enabled, Gemini returns a part carrying `"thought":
+    true` ahead of the actual answer part -- the SAME hazard class as
+    AnthropicBackend's `content[0]["text"]` bug (see interface.py). Docs-
+    shaped (Google has never been called live -- see module docstring),
+    grounded in Gemini's own docs:
+    https://ai.google.dev/gemini-api/docs/generate-content/thinking.
+    """
+    _install_docs_shaped_response(
+        monkeypatch,
+        {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"thought": True, "text": "internal reasoning, not the answer"},
+                            {"text": "hello from google"},
+                        ]
+                    }
+                }
+            ]
+        },
+    )
+    backend = GoogleBackend(api_key="fake-key")
+    assert backend.complete("system", "user", model="gemini-2.0-flash") == "hello from google"
+
+
+def test_google_backend_all_thought_parts_is_a_named_error_not_the_thought_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_docs_shaped_response(
+        monkeypatch, {"candidates": [{"content": {"parts": [{"thought": True, "text": "only thinking"}]}}]}
+    )
+    backend = GoogleBackend(api_key="fake-key")
+    with pytest.raises(AudError) as excinfo:
+        backend.complete("system", "user", model="gemini-2.0-flash")
+    assert excinfo.value.code == "provider_request_failed"
+
+
+def test_google_backend_requests_json_mime_type_when_response_schema_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _install_docs_shaped_response_capturing_request(
+        monkeypatch, {"candidates": [{"content": {"parts": [{"text": "{}"}]}}]}, captured
+    )
+    backend = GoogleBackend(api_key="fake-key")
+    backend.complete("system", "user", model="gemini-2.0-flash", response_schema=advisor._ADVISE_RESPONSE_SCHEMA)
+    assert captured["body"]["generationConfig"]["responseMimeType"] == "application/json"  # type: ignore[index]
 
 
 def test_azure_openai_backend_parses_the_documented_chat_completions_shape(
@@ -383,6 +604,24 @@ def test_azure_openai_backend_malformed_response_is_a_named_error_not_a_keyerror
     with pytest.raises(AudError) as excinfo:
         backend.complete("system", "user", model="gpt-4o-mini")
     assert excinfo.value.code == "provider_request_failed"
+
+
+def test_azure_openai_backend_requests_json_object_mode_when_response_schema_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """json_object mode is supported since API version 2023-12-01-preview
+    -- well before this backend's default (2024-06-01, or whatever
+    AZURE_OPENAI_API_VERSION overrides it to). Full json_schema strict
+    mode needs 2024-08-01-preview+ and is NOT implemented here -- see
+    AzureOpenAIBackend.complete's comment."""
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://fake-resource.openai.azure.com")
+    captured: dict[str, object] = {}
+    _install_docs_shaped_response_capturing_request(
+        monkeypatch, {"choices": [{"message": {"role": "assistant", "content": "{}"}}]}, captured
+    )
+    backend = AzureOpenAIBackend(api_key="fake-key")
+    backend.complete("system", "user", model="gpt-4o-mini", response_schema=advisor._ADVISE_RESPONSE_SCHEMA)
+    assert captured["body"]["response_format"] == {"type": "json_object"}  # type: ignore[index]
 
 
 # --- Provider selection -------------------------------------------------------
