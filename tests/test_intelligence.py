@@ -255,6 +255,153 @@ def test_two_different_json_objects_is_refused() -> None:
 
 
 # ---------------------------------------------------------------------------
+# PR #41 review round 2, Fix #1 + Fix #2: a second plan ANYWHERE in the
+# remainder (fenced, unfenced, or after prose) must refuse; ordinary trailing
+# prose that merely OPENS like a JSON scalar must not. All SYNTHETIC --
+# hand-built adversarial/regression inputs, not real recordings (see the
+# section docstring above for why the one real recording this PR has,
+# advise-clean-haiku-trailing-prose.json, is exercised separately below and
+# is unaffected by this rule -- it carries no second value of any kind).
+# ---------------------------------------------------------------------------
+
+_FIRST_PLAN = '{"stages": [{"stage": "limit", "params": {"ceiling_dbtp": -1.0}, "reason": "first plan"}]}'
+_SECOND_PLAN = '{"stages": [{"stage": "loudness", "params": {"target_lufs": -14.0}, "reason": "second plan"}]}'
+
+
+def test_second_plan_after_prose_is_refused() -> None:
+    """Fix #1: 'prose, then {B}' -- round 1 accepted this (remainder does not
+    BEGIN with JSON), silently discarding the model's second proposed plan."""
+    text = f"{_FIRST_PLAN}\nAlternatively, you could instead try: {_SECOND_PLAN}"
+    with pytest.raises(AudError) as excinfo:
+        advisor._parse_model_json(text)
+    assert excinfo.value.code == "bad_model_output"
+
+
+def test_second_plan_in_a_second_fenced_block_is_refused() -> None:
+    """Fix #1: a second fenced ```json block containing a full plan, after
+    the first plan, must refuse -- round 1 accepted it."""
+    text = f"{_FIRST_PLAN}\n\nOr, alternatively:\n```json\n{_SECOND_PLAN}\n```\n"
+    with pytest.raises(AudError) as excinfo:
+        advisor._parse_model_json(text)
+    assert excinfo.value.code == "bad_model_output"
+
+
+def test_second_plan_unfenced_after_an_unfenced_first_plan_is_refused() -> None:
+    """Fix #1: 'unfenced A, then fenced B' -- the first plan is unfenced (no
+    code fence at all), and a second, fenced plan follows it. Round 1
+    accepted this because raw_decode of the first plan consumes the whole
+    JSON object, leaving the fence+B as unexamined remainder."""
+    text = f"{_FIRST_PLAN}\nHere is a second option:\n```\n{_SECOND_PLAN}\n```"
+    with pytest.raises(AudError) as excinfo:
+        advisor._parse_model_json(text)
+    assert excinfo.value.code == "bad_model_output"
+
+
+def test_bare_array_immediately_trailing_is_still_refused() -> None:
+    """Baseline preserved: '[1,2]' immediately after the first plan, with
+    nothing else, was already correctly refused before this fix and must
+    stay refused -- the whole-remainder check still catches an exact
+    compound (object/array) value with nothing surrounding it."""
+    text = f"{_FIRST_PLAN}\n[1, 2]"
+    with pytest.raises(AudError) as excinfo:
+        advisor._parse_model_json(text)
+    assert excinfo.value.code == "bad_model_output"
+
+
+def test_duplicate_plan_immediately_trailing_is_still_refused() -> None:
+    """Baseline preserved: an exact duplicate of the first plan immediately
+    following, with nothing else -- already correctly refused before this
+    fix (see also test_two_different_json_objects_is_refused for two
+    DIFFERENT plans; this is the exact-duplicate variant)."""
+    text = f"{_FIRST_PLAN}\n{_FIRST_PLAN}"
+    with pytest.raises(AudError) as excinfo:
+        advisor._parse_model_json(text)
+    assert excinfo.value.code == "bad_model_output"
+
+
+@pytest.mark.parametrize(
+    "trailing",
+    [
+        pytest.param("1. The low end could use a touch more warmth, but that's a matter of taste.", id="leading-digit"),
+        pytest.param("true to the source material, this file needed very little intervention.", id="leading-true"),
+        pytest.param(
+            '"Less is more" applies here -- a light touch was all this file needed.', id="leading-quoted-string"
+        ),
+    ],
+)
+def test_trailing_prose_opening_like_a_json_scalar_is_accepted(trailing: str) -> None:
+    """Fix #2: trailing prose that merely OPENS with a character JSON also
+    uses for a bare scalar (digit, `true`, a quote) must NOT be treated as a
+    second value -- round 1's `raw_decode(remainder)` parsed each of these
+    as a bare JSON number/boolean/string and wrongly refused them."""
+    text = f"{_FIRST_PLAN}\n{trailing}"
+    proposal = advisor._parse_model_json(text)
+    assert proposal["stages"][0]["stage"] == "limit"
+
+
+def test_trailing_prose_with_a_footnote_style_citation_is_accepted() -> None:
+    """Adversarial, hand-written (SYNTHETIC): '[1]' is valid JSON (a
+    one-element array) but this is an ordinary footnote citation, not a
+    second plan -- an unfenced array is deliberately never scanned for
+    inside prose, only whole-remainder or fenced (see
+    _contains_second_json_value's docstring)."""
+    text = f"{_FIRST_PLAN}\nThis follows the loudness convention described in [1] and [2]."
+    proposal = advisor._parse_model_json(text)
+    assert proposal["stages"][0]["stage"] == "limit"
+
+
+def test_trailing_prose_with_sic_braces_is_accepted() -> None:
+    """Adversarial, hand-written (SYNTHETIC): '{sic}' uses curly braces but
+    is not valid JSON (bareword, no quotes, no value) -- must not be
+    mistaken for a second JSON object."""
+    text = f"{_FIRST_PLAN}\nThe measurement report says 'compressor' {{sic}} throughout."
+    proposal = advisor._parse_model_json(text)
+    assert proposal["stages"][0]["stage"] == "limit"
+
+
+def test_trailing_fenced_non_json_code_is_accepted() -> None:
+    """Adversarial, hand-written (SYNTHETIC): a fenced code block whose
+    content is not JSON at all (here, Python) must not be treated as a
+    second value merely because it is fenced."""
+    text = f'{_FIRST_PLAN}\nFor reference, here is how you would call it:\n```python\nprint("hello")\n```\n'
+    proposal = advisor._parse_model_json(text)
+    assert proposal["stages"][0]["stage"] == "limit"
+
+
+@pytest.mark.parametrize(
+    ("case_id", "trailing", "expect_refused"),
+    [
+        ("immediately-second-object", _SECOND_PLAN, True),
+        ("duplicate-object", _FIRST_PLAN, True),
+        ("bare-array", "[1, 2]", True),
+        ("prose-then-object", f"Alternatively: {_SECOND_PLAN}", True),
+        ("second-fenced-block", f"Or:\n```json\n{_SECOND_PLAN}\n```", True),
+        ("unfenced-then-fenced", f"A second option:\n```\n{_SECOND_PLAN}\n```", True),
+        ("leading-digit-prose", "1. The low end could use more warmth.", False),
+        ("leading-true-prose", "true to the source, minimal intervention.", False),
+        ("leading-quoted-string-prose", '"Less is more" applied here.', False),
+        ("footnote-citation", "See [1] and [2] for background.", False),
+        ("sic-braces", "the report says 'compressor' {sic} throughout.", False),
+        ("fenced-non-json", '```python\nprint("hi")\n```', False),
+        ("empty-trailing-whitespace", "\n\n   \n", False),
+    ],
+)
+def test_second_value_detection_full_verdict_table(case_id: str, trailing: str, expect_refused: bool) -> None:
+    """One parametrized table covering every case named in PR #41 review
+    round 2's two tables plus this pass's own adversarial inputs, so the
+    verdict for each is pinned individually and reportable as one table
+    (see the PR description for the rendered version)."""
+    text = f"{_FIRST_PLAN}\n{trailing}"
+    if expect_refused:
+        with pytest.raises(AudError) as excinfo:
+            advisor._parse_model_json(text)
+        assert excinfo.value.code == "bad_model_output", case_id
+    else:
+        proposal = advisor._parse_model_json(text)
+        assert proposal["stages"][0]["stage"] == "limit", case_id
+
+
+# ---------------------------------------------------------------------------
 # advise(): wiring, using a REAL recorded response replayed through a
 # recording-backed IntelligenceBackend (tests/replay.py). Never a
 # hand-authored plan -- these are the model's actual real answers.
@@ -346,6 +493,71 @@ def test_anthropic_backend_parses_a_plain_text_content_block(monkeypatch: pytest
     assert text == replay.recorded_text_block(recording)
 
 
+def test_anthropic_backend_real_call_confirms_disable_parallel_tool_use_was_sent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replays advise-clean-haiku-tool-use-disable-parallel.json -- a REAL
+    captured call (PR #41 review round 2, Fix #1) proving the ACTUAL request
+    sent to Anthropic carries `tool_choice.disable_parallel_tool_use: true`,
+    and the API accepted it and returned exactly one tool_use block that
+    parses into a valid plan. Not just that our code claims to send the
+    field -- that a live call with it present succeeded."""
+    recording = replay.load_recording("anthropic", "advise-clean-haiku-tool-use-disable-parallel")
+    assert recording["request"]["tool_choice"]["disable_parallel_tool_use"] is True
+    assert [b["type"] for b in recording["response"]["content"]] == ["tool_use"]
+
+    def _fake_urlopen(request: object, timeout: float | None = None) -> _FakeHTTPResponse:
+        del timeout
+        sent = json.loads(request.data.decode("utf-8"))  # type: ignore[attr-defined]
+        assert sent["tool_choice"]["disable_parallel_tool_use"] is True
+        return _FakeHTTPResponse(json.dumps(recording["response"]).encode("utf-8"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    backend = AnthropicBackend(api_key="fake")
+    text = backend.complete(
+        "system prompt",
+        "user prompt",
+        model=recording["request"]["model"],
+        response_schema=advisor._ADVISE_RESPONSE_SCHEMA,
+    )
+    real_input = recording["response"]["content"][0]["input"]
+    assert json.loads(text) == real_input
+
+
+def test_anthropic_backend_refuses_more_than_one_matching_tool_use_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SYNTHETIC -- hand-built, not a real recording. PR #41 review round 2,
+    Fix #1: two matching tool_use blocks in one response is the same
+    ambiguity `advisor._parse_model_json` already refuses for two distinct
+    JSON values -- round 1 silently returned only the first. This should
+    never happen for real once `disable_parallel_tool_use` is honoured (see
+    the request-shape assertion in
+    test_anthropic_backend_uses_a_forced_tool_call_when_response_schema_is_given),
+    but the refusal is defence in depth against a future API version or
+    tool_choice mode that returns more than one anyway."""
+    recording = replay.load_recording("anthropic", "advise-clean-haiku-tool-use")
+    real_input = recording["response"]["content"][0]["input"]
+    schema = advisor._ADVISE_RESPONSE_SCHEMA
+    two_tool_use_response = {
+        **recording["response"],
+        "content": [
+            {"type": "tool_use", "id": "toolu_1", "name": schema.name, "input": real_input},
+            {"type": "tool_use", "id": "toolu_2", "name": schema.name, "input": real_input},
+        ],
+    }
+
+    def _fake_urlopen(request: object, timeout: float | None = None) -> _FakeHTTPResponse:
+        del request, timeout
+        return _FakeHTTPResponse(json.dumps(two_tool_use_response).encode("utf-8"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    backend = AnthropicBackend(api_key="fake")
+    with pytest.raises(AudError) as excinfo:
+        backend.complete("system prompt", "user prompt", model=recording["request"]["model"], response_schema=schema)
+    assert excinfo.value.code == "bad_model_output"
+
+
 def test_anthropic_backend_skips_a_leading_thinking_block(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replays anthropic/advise-clean-sonnet-thinking.json -- content:
     ["thinking", "text"], the exact shape that raised KeyError on
@@ -396,7 +608,14 @@ def test_anthropic_backend_uses_a_forced_tool_call_when_response_schema_is_given
     text = backend.complete("system prompt", "user prompt", model=recording["request"]["model"], response_schema=schema)
 
     sent = captured["body"]
-    assert sent["tool_choice"] == {"type": "tool", "name": schema.name}  # type: ignore[index]
+    # disable_parallel_tool_use is Fix #1's prevention half (PR #41 review
+    # round 2): asks the API for at most one tool_use block, belt-and-
+    # suspenders with the multi-block refusal tested separately below.
+    assert sent["tool_choice"] == {  # type: ignore[index]
+        "type": "tool",
+        "name": schema.name,
+        "disable_parallel_tool_use": True,
+    }
     assert sent["tools"][0]["name"] == schema.name  # type: ignore[index]
     assert sent["tools"][0]["input_schema"] == schema.schema  # type: ignore[index]
 
@@ -568,6 +787,80 @@ def test_google_backend_all_thought_parts_is_a_named_error_not_the_thought_text(
     with pytest.raises(AudError) as excinfo:
         backend.complete("system", "user", model="gemini-2.0-flash")
     assert excinfo.value.code == "provider_request_failed"
+
+
+def test_google_backend_joins_two_non_thought_text_parts_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SYNTHETIC, docs-shaped (Google has never been called live -- see
+    module docstring). PR #41 review round 2, Fix #3: Gemini can split one
+    JSON response across multiple non-thought parts (e.g. '{\"stages\": ['
+    as one part, the rest as a second) -- round 1 took only the FIRST
+    non-thought part and returned a truncated fragment that failed to
+    parse downstream. The fix joins ALL non-thought parts, in order."""
+    _install_docs_shaped_response(
+        monkeypatch,
+        {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"text": '{"stages": ['},
+                            {"text": '{"stage": "limit", "params": {"ceiling_dbtp": -1.0}, "reason": "x"}]}'},
+                        ]
+                    }
+                }
+            ]
+        },
+    )
+    backend = GoogleBackend(api_key="fake")
+    text = backend.complete("system", "user", model="gemini-2.0-flash")
+    proposal = advisor._parse_model_json(text)
+    assert proposal["stages"][0]["stage"] == "limit"
+
+
+def test_google_backend_joins_text_parts_skipping_a_leading_thought_part(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SYNTHETIC, docs-shaped. The thought-skip (existing, pre-this-fix
+    behaviour) and the multi-part join (Fix #3) must compose: a thought
+    part ahead of TWO non-thought parts must still join only the latter."""
+    _install_docs_shaped_response(
+        monkeypatch,
+        {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"thought": True, "text": "internal reasoning, not the answer"},
+                            {"text": '{"stages": ['},
+                            {"text": '{"stage": "loudness", "params": {"target_lufs": -14.0}, "reason": "y"}]}'},
+                        ]
+                    }
+                }
+            ]
+        },
+    )
+    backend = GoogleBackend(api_key="fake")
+    text = backend.complete("system", "user", model="gemini-2.0-flash")
+    proposal = advisor._parse_model_json(text)
+    assert proposal["stages"][0]["stage"] == "loudness"
+
+
+def test_google_backend_joined_parts_containing_two_complete_plans_is_refused_downstream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SYNTHETIC. If joining non-thought parts happens to concatenate TWO
+    complete plans, that is exactly the ambiguity
+    `advisor._parse_model_json` already refuses -- GoogleBackend's job is
+    only to reassemble the text faithfully, never to judge its content."""
+    first = '{"stages": [{"stage": "limit", "params": {"ceiling_dbtp": -1.0}, "reason": "first plan"}]}'
+    second = '{"stages": [{"stage": "loudness", "params": {"target_lufs": -14.0}, "reason": "second plan"}]}'
+    _install_docs_shaped_response(
+        monkeypatch,
+        {"candidates": [{"content": {"parts": [{"text": first}, {"text": "\n"}, {"text": second}]}}]},
+    )
+    backend = GoogleBackend(api_key="fake")
+    text = backend.complete("system", "user", model="gemini-2.0-flash")
+    with pytest.raises(AudError) as excinfo:
+        advisor._parse_model_json(text)
+    assert excinfo.value.code == "bad_model_output"
 
 
 def test_google_backend_requests_json_mime_type_when_response_schema_is_given(

@@ -1,0 +1,131 @@
+{
+  "provenance": {
+    "anthropic_version": "2023-06-01",
+    "aud_version": "0.12.0",
+    "captured_at": "2026-09-28T23:13:30.021819+00:00",
+    "endpoint": "https://api.anthropic.com/v1/messages",
+    "model_requested": "claude-haiku-4-5-20251001",
+    "note": "PR #41 review round 2, Fix #1: real call proving tool_choice now carries disable_parallel_tool_use: true (checked against Anthropic's current parallel-tool-use docs, 2026-09-28), and the API still returns exactly one tool_use block that parses and builds a valid plan. Captured live; ANTHROPIC_API_KEY was present.",
+    "request_sha256": "fe94fe57ca5111c4a99ed3c0da2be659159780feed065faacbeedd437a51dfaa",
+    "issue": "https://github.com/colombod/amplifier-smart-tools-audio/issues/35"
+  },
+  "request": {
+    "model": "claude-haiku-4-5-20251001",
+    "max_tokens": 2000,
+    "system": "You are the mastering advisor inside `aud`, an audio mastering tool. You are given honest numeric measurements of a finished recording -- never the audio itself -- and you choose a mastering chain: which stages to apply, with what parameters, and why.\n\nAvailable stages and their exact JSON parameter shapes -- only these eight;\nno others exist for this decision:\n\n  gate      {\"threshold_above_floor_db\": float >= 0, \"range_db\": float >= 0,\n             \"hold_ms\": float >= 0}\n  expand    {\"threshold_above_floor_db\": float >= 0, \"ratio\": float >= 1.0,\n             \"knee_db\": float >= 0}\n  deess     {\"amount_db\": float >= 0, \"freq_hz\": float > 0}\n  dereverb  {\"amount_db\": float >= 0}\n  eq        {\"hpf\": float > 0 or null, \"lpf\": float > 0 or null,\n             \"peaks\": [[freq_hz, gain_db, q], ...] or null,\n             \"shelves\": [[type, freq_hz, gain_db, q], ...] or null}\n             -- type is \"low\" or \"high\"\n  compress  {\"bands\": [ascending crossover Hz, at least one],\n             \"ratio\": float >= 1.0}\n  saturate  {\"drive\": float >= 0, \"mix\": float in [0, 1]}\n  reverb    {\"amount\": float in [0, 1], \"decay\": float > 0,\n             \"predelay_ms\": float >= 0}\n  loudness  {\"target_lufs\": float < 0}\n  limit     {\"ceiling_dbtp\": float <= 0.0}\n\n`gate` and `expand` work on the QUIET end and are the right answer to an\naudible noise floor between phrases. `expand` is gentler and usually correct\nfor a voice; `gate` is for harder cases. Both take their threshold RELATIVE\nto the measured noise floor, so read `noise_floor_dbfs` from the report --\na larger `threshold_above_floor_db` gates more aggressively. Neither belongs\nin a chain whose noise floor is already low; say so rather than adding one.\n\nChoosing between a `peak` and a `shelf` in `eq`: a `peak` returns to baseline\non both sides and is the right tool for a defect confined to roughly one\noctave band (a narrow bump or dip, surrounded by bands that are back to\nnormal). A `shelf` continues flat out to the edge of the spectrum and is the\nright tool for a broad tilt at the top or bottom of the range -- several\nconsecutive high bands all elevated or depressed together (top end: high\nshelf), or several consecutive low bands all elevated or depressed together\n(bottom end: low shelf). Reaching for a narrow peak to fix a broad tilt\nunder-corrects the far edge of the tilt; reaching for a shelf to fix one\nisolated band affects neighbours that were never wrong. Judge \"narrow\" vs\n\"broad\" from how many consecutive bands in `octave_band_analysis` deviate\ntogether, not from habit.\n\nRespond with EXACTLY one JSON object and nothing else -- no markdown fences, no prose before or after it. The shape is:\n\n{\"stages\": [{\"stage\": \"<name>\", \"params\": {...}, \"reason\": \"<short, grounded reason>\"}, ...]}\n\nRules:\n- Only use stage names from the list above. Do not invent one, and do not propose editing (cutting/trimming) -- this decision is measurement-based only, with no information about where anything is in time.\n- Include each stage at most once.\n- 'reason' must cite a specific number from the measurements you were given (e.g. 'crest factor is 18.2 dB, so...'), not a generic remark. A stage with no stated, measurement-grounded reason is not useful.\n- Order the stages however you like; aud reorders them into its own canonical mastering order before rendering, regardless of the order you list them in.\n- Usually include 'loudness' and 'limit' so the render actually reaches the requested target and ceiling, unless the measurements say it is already there.\n- If a stage would do nothing useful for this file, leave it out entirely rather than including it with a null-ish/no-op parameter.\n- CHECK THE NOISE FLOOR BEFORE ANYTHING ELSE, because every later stage makes it worse: compression and loudness both LIFT a noise floor, so hiss or room tone that was tolerable in the source is audible in the master. Compare 'noise_floor_dbfs' against 'integrated_lufs'. Roughly 40 dB or more of separation is a clean recording -- do not gate it. Under about 25 dB is an audible floor that the chain is about to amplify: reach for 'expand' (gentler, usually right for a voice) or 'gate' (harder cases), and cite the two numbers and their difference in your reason.\n- DIAGNOSE TONAL DEFECTS FROM 'octave_band_analysis', NOT from the raw 'octave_band_energy_db' absolutes: an absolute dB value tells you nothing on its own -- a quiet band is not automatically a defect. When a reference file was supplied, each entry ALSO carries 'rel_reference_db' -- that band's energy relative to the REFERENCE file's energy in the same band, with the overall level difference between the two files already removed. USE 'rel_reference_db' AS YOUR PRIMARY SIGNAL WHENEVER IT IS PRESENT: it is anchored to material believed to be tonally correct, not to this file's own median, so it is not fooled by a spectrum whose natural shape is uneven -- a file that is naturally weak at 31.5 Hz is not thereby defective there. A positive 'rel_reference_db' means this file carries more energy than the reference in that band (a candidate for a cut); negative means less (a candidate for a boost). Fall back to 'rel_median_db' -- that band's energy relative to THIS FILE'S OWN overall median -- only when 'rel_reference_db' is absent (no reference was supplied). Use 'neighbour_contrast_db' only as a secondary check regardless of which of the two is your primary signal, and remember its blind spot -- a defect spanning two adjacent bands cancels out in that number, because each depressed band's neighbour is the other depressed band. Do not let a near-zero 'neighbour_contrast_db' overrule a clear primary signal.\n- DO NOT ADD A HIGH-PASS FILTER, OR ANY EQ MOVE, REFLEXIVELY. An 'hpf', a 'peak', or a 'shelf' is only justified when 'octave_band_analysis' shows genuine, clearly elevated (or depressed) energy in that region via your primary signal ('rel_reference_db' when present, else 'rel_median_db') -- never as a routine 'clean up the low end' move, and never merely because a band happens to be the quietest one (quiet is not excess). If every band's primary signal is small (roughly within +/-2 dB), the spectrum is essentially flat relative to what it is being judged against: propose NO 'eq' stage at all. An empty, absent 'eq' is the correct, honest answer for a file with nothing tonally wrong with it -- do not invent a defect to justify having something to say.\n- Ground every 'eq' reason in the SIGNED value of your primary signal for the band you are acting on (e.g. \"500 Hz is +3.4 dB above the reference in that band, so...\" when a reference was supplied, or \"500 Hz is +3.4 dB above the file's own median, so...\" when it was not), never in that band's raw absolute dB level alone.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Measurements for the file to master:\n{\n  \"channels\": 2,\n  \"duration_seconds\": 10.0,\n  \"integrated_lufs\": -20.00000000282714,\n  \"noise_floor_dbfs\": -23.075573366041922,\n  \"octave_band_analysis\": [\n    {\n      \"energy_db\": -33.79,\n      \"hz\": 1000.0,\n      \"neighbour_contrast_db\": 0.03,\n      \"rel_median_db\": 0.03\n    }\n  ],\n  \"sample_rate\": 48000,\n  \"true_peak_dbtp\": -7.9909205048193055\n}\n\nTarget integrated loudness: -14.0 LUFS.\nTarget true-peak ceiling: -1.0 dBTP.\n\nPropose the mastering chain now, as one JSON object."
+      }
+    ],
+    "tools": [
+      {
+        "name": "propose_mastering_plan",
+        "description": "Propose the mastering chain: which stages to apply, with what parameters, and why.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "stages": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "stage": {
+                    "type": "string",
+                    "enum": [
+                      "gate",
+                      "expand",
+                      "deess",
+                      "dereverb",
+                      "eq",
+                      "compress",
+                      "saturate",
+                      "reverb",
+                      "loudness",
+                      "limit"
+                    ]
+                  },
+                  "params": {
+                    "type": "object"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "stage",
+                  "params",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "stages"
+          ],
+          "additionalProperties": false
+        }
+      }
+    ],
+    "tool_choice": {
+      "type": "tool",
+      "name": "propose_mastering_plan",
+      "disable_parallel_tool_use": true
+    }
+  },
+  "response": {
+    "model": "claude-haiku-4-5-20251001",
+    "id": "msg_011CfWgiUZMzwUqaedyA8SEG",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_01UE1u4ub8fDbd8HKNTU2eEQ",
+        "name": "propose_mastering_plan",
+        "input": {
+          "stages": [
+            {
+              "stage": "loudness",
+              "params": {
+                "target_lufs": -14.0
+              },
+              "reason": "File is currently -20.0 LUFS and target is -14.0 LUFS; need +6.0 dB loudness lift to reach target."
+            },
+            {
+              "stage": "limit",
+              "params": {
+                "ceiling_dbtp": -1.0
+              },
+              "reason": "True peak is currently -7.99 dBTP; limiting to -1.0 dBTP ceiling ensures the +6.0 dB loudness boost does not exceed the requested peak ceiling."
+            }
+          ]
+        },
+        "caller": {
+          "type": "direct"
+        }
+      }
+    ],
+    "container": null,
+    "stop_reason": "tool_use",
+    "stop_sequence": null,
+    "stop_details": null,
+    "usage": {
+      "input_tokens": 2832,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+      },
+      "output_tokens": 181,
+      "service_tier": "standard",
+      "inference_geo": "not_available"
+    },
+    "diagnostics": null
+  }
+}

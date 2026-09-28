@@ -50,11 +50,38 @@ class ResponseSchema:
     Each backend uses whatever subset of this it can act on; `complete`'s
     return type is unchanged (still `str`) either way:
 
-    - `AnthropicBackend` forces a tool call named `name` with `input_schema
-      = schema`, and returns `json.dumps(tool_use_block["input"])` -- the
-      full schema is enforced by the API itself, and the returned string is
-      a fresh serialisation of a value the API already parsed, never raw
-      model text, so there is nothing left for prose to trail.
+    - `AnthropicBackend` forces a `tool_choice`-pinned tool call named
+      `name` with `input_schema = schema`, and sets
+      `disable_parallel_tool_use: true` so the API returns at most one such
+      call (checked against Anthropic's current tool-use docs, 2026-09-28:
+      https://docs.claude.com/en/docs/agents-and-tools/tool-use/parallel-tool-use
+      -- the field lives inside `tool_choice`, not top-level). Because the
+      call is forced and pinned to exactly one tool, there is no free-text
+      channel left for prose to trail at all -- that structural guarantee is
+      what issue #35 needed, and it holds independently of `strict`.
+
+      **`strict: true` is deliberately NOT set** (PR #41 review round 2):
+      Anthropic's strict tool use requires `additionalProperties: false` on
+      EVERY object in the schema -- "there is no supported value other than
+      false" (https://docs.claude.com/en/docs/agents-and-tools/tool-use/strict-tool-use,
+      checked 2026-09-28) -- including `params`. `params` is deliberately
+      left as a generic, propertyless object (see
+      `advisor._ADVISE_RESPONSE_SCHEMA`'s comment: a full 10-way
+      discriminated union over `advisor.ALLOWED_STAGES` would duplicate
+      `_validate_and_build_plan`'s own checks and was explicitly deferred,
+      unverified, in the original PR). Forcing `additionalProperties: false`
+      onto `params` with no declared properties would make `params: {}` the
+      ONLY value the API accepts for every stage -- silently making it
+      impossible for the model to supply ANY stage's parameters. That is a
+      real weakening of what a plan can express, not a metadata change, so
+      it is refused here rather than shipped unverified. `input_schema` is
+      therefore GUIDANCE the model sees, not a shape the API enforces; the
+      returned string is still a fresh serialisation of the tool call's
+      already-parsed `input` (never raw free text with room for prose to
+      trail), and all shape/range enforcement remains
+      `_validate_and_build_plan`'s job downstream, unchanged. Revisit if a
+      later pass builds and live-verifies a real per-stage discriminated
+      union.
     - `OpenAIBackend`/`AzureOpenAIBackend` set `response_format: {"type":
       "json_object"}` -- guarantees the ENTIRE response is one valid JSON
       value (no trailing content), but does not itself enforce `schema`'s
@@ -192,7 +219,12 @@ class AnthropicBackend:
             # for trailing prose to occupy -- see issue #35 and
             # ResponseSchema's docstring above. `tool_choice` pins the
             # model to exactly this one tool, so it cannot choose to
-            # answer in plain text instead.
+            # answer in plain text instead. `disable_parallel_tool_use`
+            # additionally asks the API for AT MOST ONE tool_use block
+            # (PR #41 review round 2, Fix #1) -- belt-and-suspenders with
+            # the refusal below, which still catches more than one block
+            # if a future API version or tool_choice mode ever returns
+            # several regardless.
             body["tools"] = [
                 {
                     "name": response_schema.name,
@@ -200,17 +232,42 @@ class AnthropicBackend:
                     "input_schema": response_schema.schema,
                 }
             ]
-            body["tool_choice"] = {"type": "tool", "name": response_schema.name}
+            body["tool_choice"] = {
+                "type": "tool",
+                "name": response_schema.name,
+                "disable_parallel_tool_use": True,
+            }
         data = _post_json("https://api.anthropic.com/v1/messages", headers, body, provider=self.provider)
         if response_schema is not None:
             try:
                 blocks = data["content"]
-                for block in blocks:
-                    if block.get("type") == "tool_use" and block.get("name") == response_schema.name:
-                        return json.dumps(block["input"])
+                matches = [
+                    block
+                    for block in blocks
+                    if block.get("type") == "tool_use" and block.get("name") == response_schema.name
+                ]
             except (KeyError, TypeError) as exc:
                 raise _bad_shape(self.provider, data) from exc
-            raise _bad_shape(self.provider, data)
+            if not matches:
+                raise _bad_shape(self.provider, data)
+            if len(matches) > 1:
+                # More than one matching tool_use block is the same
+                # ambiguity `advisor._parse_model_json` refuses for two
+                # distinct JSON values -- aud cannot pick between them
+                # (PR #41 review round 2, Fix #1).
+                raise AudError(
+                    code="bad_model_output",
+                    message=(
+                        f"{self.provider} returned {len(matches)} '{response_schema.name}' tool_use blocks in "
+                        "one response -- aud cannot pick between multiple proposed plans."
+                    ),
+                    remedy="Retry advise/master -- the model proposed more than one plan and aud cannot pick "
+                    "between them.",
+                )
+            try:
+                return json.dumps(matches[0]["input"])
+            except (KeyError, TypeError) as exc:
+                raise _bad_shape(self.provider, data) from exc
         # `content` is a LIST OF BLOCKS and the text is not always first. A
         # reasoning-capable model returns a `thinking` block ahead of it, so
         # `content[0]["text"]` raises KeyError and every such model looks like
@@ -326,17 +383,25 @@ class GoogleBackend:
         # documented default -- see DEFAULT_MODELS) is minimal-thinking by
         # design, but a caller passing `--model`/`AUD_MODEL` can select a
         # model that thinks by default, so this is guarded unconditionally
-        # rather than only for models known to think. Skip any thought
-        # part; take the first non-thought text part.
+        # rather than only for models known to think. Skip every thought
+        # part; JOIN every remaining (non-thought) text part IN ORDER
+        # (PR #41 review round 2, Fix #3) -- Google can split one JSON
+        # response across multiple parts (e.g. '{"stages": [' as one part,
+        # the rest as a second), and taking only the first non-thought part
+        # returned a truncated fragment that failed to parse. If the join
+        # happens to concatenate two complete plans, that is exactly the
+        # ambiguity `advisor._parse_model_json` already refuses -- this
+        # backend's job is only to reassemble the text faithfully, never to
+        # judge its content.
         try:
             parts = data["candidates"][0]["content"]["parts"]
-            for part in parts:
-                if part.get("thought"):
-                    continue
-                if isinstance(part.get("text"), str):
-                    return part["text"]
+            texts = [part["text"] for part in parts if not part.get("thought") and isinstance(part.get("text"), str)]
         except (KeyError, IndexError, TypeError) as exc:
             raise _bad_shape(self.provider, data) from exc
+        if texts:
+            return "".join(texts)
+        # Every part was a thought (or there were no parts at all) -- the
+        # SAME named error as before this fix, never the thought text.
         raise _bad_shape(self.provider, data)
 
 

@@ -450,6 +450,61 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
     `aud`'s intelligence seam only -- `aud-mix`'s planned routing through this same backend layer
     (smart_tools-9h0) inherits the fix, and every existing Protocol implementer (two test fakes)
     was updated to accept-and-ignore the new kwarg.
+  - **PR #41 review round 2 (independent review of the above fix):**
+    - **Strict mode assessed, NOT added.** Checked Anthropic's current tool-use docs (2026-09-28:
+      `docs.claude.com/.../tool-use/strict-tool-use`, `.../parallel-tool-use`): `strict: true`
+      requires `additionalProperties: false` on EVERY object in the schema, no other value
+      accepted. `_ADVISE_RESPONSE_SCHEMA.params` is a deliberately generic, propertyless object
+      (avoiding a 10-way discriminated union over `advisor.ALLOWED_STAGES` duplicating
+      `_validate_and_build_plan`'s own checks); forcing `additionalProperties: false` there with no
+      declared properties would make `params: {}` the ONLY value the API accepts for every stage,
+      silently eliminating every stage's ability to carry parameters -- a real weakening, not a
+      metadata change. `ResponseSchema`'s docstring, which previously overclaimed "the full schema
+      is enforced by the API itself", is corrected to say what is actually true: the forced,
+      pinned tool call structurally removes the free-text channel (fixing #35 regardless of
+      `strict`), but shape/range enforcement remains `_validate_and_build_plan`'s job, unchanged.
+      Instead added `tool_choice.disable_parallel_tool_use: true` (current docs confirm the field
+      lives inside `tool_choice`, not top-level) -- verified with 3 real Anthropic calls
+      (claude-haiku-4-5-20251001 via `ANTHROPIC_API_KEY`); all 3 succeeded, each returning exactly
+      one `tool_use` block that parsed into a valid plan. One captured as
+      `tests/fixtures/recorded/anthropic/advise-clean-haiku-tool-use-disable-parallel.json`.
+    - **Fix #1 -- a second plan anywhere in the response now refuses, not just when it immediately
+      follows the first.** Round 1 refused only when the leftover text BEGAN with valid JSON.
+      Measured to silently ACCEPT (as if only the first plan existed): prose then a second plan
+      ("Alternatively: {B}"), a second fenced ` ```json ` block containing a second plan, and an
+      unfenced first plan followed by a fenced second plan. Also fixed at the Anthropic
+      `tool_use`-block layer: more than one matching `tool_use` block in one response silently
+      returned the first (now raises `bad_model_output`) -- belt-and-suspenders with
+      `disable_parallel_tool_use` above, which should make this unreachable in practice but is
+      guarded regardless of API-version drift.
+    - **Fix #2 -- ordinary trailing prose that merely opens like a JSON scalar no longer refuses.**
+      Round 1's whole-remainder `raw_decode` treated a leading digit ("1. The low end..."), the
+      literal `true` ("true to the source..."), or a leading quoted string ('"Less is more"...')
+      as a second JSON value and wrongly refused all three -- the exact false-refusal class this
+      PR exists to fix, one layer deeper.
+    - **The combined rule** (`advisor._contains_second_json_value`): a second value counts only
+      when it is (a) the ENTIRE remainder parsing as one complete JSON object/array (preserves the
+      original correct refusals: an exact duplicate plan, or a bare array like `[1,2]` with
+      nothing else), (b) a fenced code block anywhere whose full content parses as one complete
+      JSON object/array, or (c) a JSON OBJECT (curly braces only, never an array) found anywhere
+      unfenced that parses completely. A bare scalar never counts on its own at any position; an
+      unfenced array is deliberately never scanned for inside prose, so "[1]"/"see [1]"-style
+      footnote citations are not mistaken for a second plan. Checked against every real pre-fix
+      failure response this PR has (the recorded trailing-prose fixture, still accepted, no
+      change), every case in both tables above, and hand-written adversarial prose (`[1]`
+      citations, `{sic}`, a fenced non-JSON code block) -- all verdicts pinned in
+      `test_second_value_detection_full_verdict_table` plus named tests per case.
+    - **Fix #3 -- Google no longer returns a truncated fragment when the JSON is split across
+      parts.** Gemini can return one JSON response as two or more non-thought parts (e.g.
+      `'{"stages": ['` as one part, the rest as a second); taking only the first non-thought part
+      (the existing thought-skip logic) returned a fragment that failed to parse.
+      `GoogleBackend.complete` now joins ALL non-thought text parts, in order. An all-thought
+      response still refuses with the existing named error, unchanged. If the join happens to
+      concatenate two complete plans, Fix #1 above now correctly refuses it downstream --
+      `GoogleBackend`'s job is only to reassemble the text faithfully, never to judge its content.
+    - 28 new tests in `tests/test_intelligence.py` (labelled SYNTHETIC where hand-built, per
+      AGENTS.md SS3b); `1008 passed` (980 + 28), zero warnings, licence check green. Each fix
+      mutation-proved (mutate -> run -> revert, sha256-verified byte-identical restore).
 
 - **`aud.dsp.stft`'s minimum-input-length test was self-referential and hid a real odd-`n_fft`
   bug** (issue #28, fifth instance of the same defect class as #25/#26): `tests/test_dsp_stft.py`'s

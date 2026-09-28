@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -105,9 +106,90 @@ def _strip_code_fence(text: str) -> str:
     return stripped
 
 
+_FENCED_BLOCK_RE = re.compile(r"```(?:[a-zA-Z0-9_+-]*\n)?(.*?)```", re.DOTALL)
+
+
+def _contains_second_json_value(remainder: str) -> bool:
+    """True if `remainder` (the text after the first complete JSON value)
+    carries a second, genuinely ambiguous JSON value -- PR #41 review round 2,
+    fixes #1 and #2.
+
+    Round 1 refused only when `remainder` itself BEGAN with valid JSON, which
+    created two opposite defects measured by the reviewer:
+
+    - Fix #1 -- UNDER-refusal: a second plan anywhere else in the remainder
+      (after prose, in a second fenced block, or unfenced after an already-
+      unfenced first plan) was silently accepted as though only the first
+      existed.
+    - Fix #2 -- OVER-refusal: ordinary trailing prose that happens to OPEN
+      with a character JSON also uses for a scalar -- "1. The low end..."
+      (a leading digit), "true to the source..." (the literal `true`),
+      '"Less is more"...' (a quoted string) -- parsed as a bare JSON number,
+      boolean or string and was refused as if it were a second plan.
+
+    The rule that resolves both, in the order checked:
+
+    1. The ENTIRE remainder (whitespace-stripped) parses as one complete JSON
+       document that is an OBJECT or ARRAY. This is round 1's original check,
+       kept verbatim for the cases it already got right: an exact duplicate
+       plan, or a bare array like "[1,2]" with nothing else following.
+    2. A fenced code block (``` ... ```) ANYWHERE in the remainder whose full
+       content parses as one complete JSON object or array -- catches "a
+       second fenced block containing {B}".
+    3. A JSON OBJECT (curly braces only -- never an array) found ANYWHERE,
+       fenced or not, in the remainder, that parses completely to its
+       matching closing brace -- catches "prose, then {B}" and "unfenced A,
+       then fenced B".
+
+    A bare SCALAR (number, string, boolean, null) never counts on its own,
+    at any position -- that is exactly the false-refusal class in Fix #2.
+    An unfenced ARRAY is deliberately never scanned for anywhere inside
+    prose (only checked whole-remainder or fenced): "[1] citations" and
+    footnote markers like "see [1]" are ordinary prose that happens to be
+    valid JSON, not a second plan, and scanning for arrays the same way as
+    objects would refuse every one of them.
+    """
+    decoder = json.JSONDecoder()
+
+    try:
+        whole_value, end = decoder.raw_decode(remainder)
+    except json.JSONDecodeError:
+        pass
+    else:
+        if isinstance(whole_value, (dict, list)) and not remainder[end:].strip():
+            return True
+
+    for match in _FENCED_BLOCK_RE.finditer(remainder):
+        block = match.group(1).strip()
+        if not block:
+            continue
+        try:
+            fenced_value = json.loads(block)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(fenced_value, (dict, list)):
+            return True
+
+    search_from = 0
+    while True:
+        brace_index = remainder.find("{", search_from)
+        if brace_index == -1:
+            return False
+        try:
+            candidate, _end = decoder.raw_decode(remainder, brace_index)
+        except json.JSONDecodeError:
+            search_from = brace_index + 1
+            continue
+        if isinstance(candidate, dict):
+            return True
+        search_from = brace_index + 1
+
+
 def _parse_model_json(raw: str) -> Any:
     """Parse the model's response as JSON -- bounded repair for trailing
-    content, never for a malformed value (issue #35).
+    content, never for a malformed value (issue #35; see
+    `_contains_second_json_value` for the round-2 refinement of exactly what
+    counts as a second value).
 
     A model sometimes answers correctly and then keeps writing: a
     "**Rationale:**" bullet list after its own closing code fence, even
@@ -121,15 +203,10 @@ def _parse_model_json(raw: str) -> Any:
     discarding a correct answer instead of a malformed one.
 
     This decodes only the FIRST complete JSON value (`json.JSONDecoder.
-    raw_decode`) and accepts it if what remains is empty or does not
-    itself parse as JSON (prose, a stray leftover code-fence marker,
-    anything non-JSON). If what remains DOES parse as JSON -- of any
-    kind, not only another object -- that is treated as genuine ambiguity
-    and refused exactly as before: guessing which of two values the model
-    "really meant" would silently discard one it actually produced. No
-    real call observed during this fix ever produced two JSON values; the
-    refusal path exists for the case the reported bug's fix must not
-    remove, not one this fix has evidence of triggering.
+    raw_decode`) and accepts it unless `_contains_second_json_value` finds a
+    second, genuinely ambiguous JSON value in what remains: guessing which of
+    two values the model "really meant" would silently discard one it
+    actually produced.
     """
     text = _strip_code_fence(raw)
     decoder = json.JSONDecoder()
@@ -144,10 +221,8 @@ def _parse_model_json(raw: str) -> Any:
     remainder = text[end_index:].strip()
     if not remainder:
         return value
-    try:
-        decoder.raw_decode(remainder)
-    except json.JSONDecodeError:
-        return value  # trailing content is not JSON -- prose the model kept writing; safe to accept
+    if not _contains_second_json_value(remainder):
+        return value  # trailing content is not a second value -- prose the model kept writing; safe to accept
     raise AudError(
         code="bad_model_output",
         message=(
