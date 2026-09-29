@@ -505,6 +505,52 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
     - 28 new tests in `tests/test_intelligence.py` (labelled SYNTHETIC where hand-built, per
       AGENTS.md SS3b); `1008 passed` (980 + 28), zero warnings, licence check green. Each fix
       mutation-proved (mutate -> run -> revert, sha256-verified byte-identical restore).
+  - **PR #41 review round 3 (independent review of round 2, "plan-shaped" refinement):**
+    - **Finding #1 -- OVER-refusal, fixed by requiring the trailing value to be PLAN-SHAPED.**
+      Round 2 refused on ANY trailing JSON object, fenced or not -- which wrongly refused a
+      quoted parameter echo (`uses {"freq_hz": 120, "gain_db": -3}`), an empty defaults object
+      (`keeps its defaults ({})`), an unrelated fenced `{"note": 1}`, and even a bare `[1]`
+      citation when it happened to be the WHOLE remainder (contradicting round 2's own stated
+      rule that `[1]`-style footnotes survive when embedded in prose). `advisor._is_plan_shaped`
+      now requires the trailing object to carry the exact top-level key
+      `_validate_and_build_plan` requires -- `stages` -- before it counts as a second plan;
+      everything else (any other object, any array, any scalar) is prose. **INTENTIONAL VERDICT
+      CHANGE, stated explicitly, not hidden:** `[1,2]` immediately trailing the plan, refused
+      through round 2, is now ACCEPTED -- a plan is never an array, so an array can never be
+      plan-shaped, at any position.
+    - **Finding #2 -- the dedicated fenced-code-block branch was a no-op and was DELETED, not
+      merely simplified.** Disabling it first (before touching anything else) left all 1009
+      round-2 tests passing -- proof, not assertion, that it caught nothing the brace-scan
+      branch didn't already catch. Root cause: the brace scan finds a plan-shaped object's `{`
+      directly in the raw text regardless of surrounding backticks, so a fenced plan is found
+      the same way an unfenced one is; the only case unique to the fenced branch (an ARRAY
+      inside a fence) can never be plan-shaped anyway, since a plan is always an object. Kept
+      `re` import removed as dead weight from the deletion.
+    - **Finding #3 -- untested branch, now covered.** Every prior scalar test
+      (`test_trailing_prose_opening_like_a_json_scalar_is_accepted`) always had prose trailing
+      AFTER the scalar; a remainder that is a bare scalar with NOTHING else was never actually
+      exercised. `test_whole_remainder_bare_scalar_only_is_accepted` closes the gap.
+    - **Full before/after verdict table**, every case from both review rounds plus this pass's
+      adversarial cases plus all 8 real recorded `advise` responses carrying a text block: the 8
+      real responses are ACCEPTED unchanged before and after; every genuine-ambiguity case
+      (`immediately-second-object`, `duplicate-object`, `prose-then-object`, `second-fenced-block`,
+      `unfenced-then-fenced`) stays REFUSED; exactly 5 verdicts flip from REFUSED to ACCEPTED
+      (`bare-array`, `bare-array-single-citation`, `empty-defaults-object`, `fenced-non-plan-object`,
+      `param-echo-object`) -- precisely the over-refusal cases finding #1 named, nothing else.
+    - **10 new tests** (5 named + 5 new rows in `test_second_value_detection_full_verdict_table`;
+      `test_bare_array_immediately_trailing_is_still_refused` renamed to
+      `..._is_now_accepted` and its assertion flipped, net test count unchanged for that rename):
+      `1019 passed` (1009 + 10), zero warnings, licence check green (no new dependency).
+    - **Four mutations, each killing exactly the tests named, each mutate -> run -> revert with
+      sha256-verified byte-identical restore:** dropping the plan-shape check (any object counts
+      again) fails the param-echo/empty-defaults/fenced-non-plan-object tests; making the check
+      unconditionally `False` fails all 11 genuine-ambiguity tests (including the Google
+      joined-parts case); counting a whole-remainder bare scalar fails the new
+      bare-scalar-only test; counting a whole-remainder bare array fails the new
+      bare-array/bare-array-single-citation tests. The reviewer's two round-2 surviving mutants
+      re-run against this code: "whole-remainder scalars counted" is now killed (same mutation as
+      above); "fenced-check off" no longer applies -- there is no fenced branch left to disable,
+      the strongest form of killing that survivor.
 
 - **`aud.dsp.stft`'s minimum-input-length test was self-referential and hid a real odd-`n_fft`
   bug** (issue #28, fifth instance of the same defect class as #25/#26): `tests/test_dsp_stft.py`'s

@@ -297,15 +297,21 @@ def test_second_plan_unfenced_after_an_unfenced_first_plan_is_refused() -> None:
     assert excinfo.value.code == "bad_model_output"
 
 
-def test_bare_array_immediately_trailing_is_still_refused() -> None:
-    """Baseline preserved: '[1,2]' immediately after the first plan, with
-    nothing else, was already correctly refused before this fix and must
-    stay refused -- the whole-remainder check still catches an exact
-    compound (object/array) value with nothing surrounding it."""
+def test_bare_array_immediately_trailing_is_now_accepted() -> None:
+    """INTENTIONAL VERDICT CHANGE (PR #41 review round 3, finding #1):
+    through review round 2, '[1,2]' immediately after the first plan, with
+    nothing else, was refused -- the whole-remainder check treated ANY
+    compound (object OR array) value filling the remainder as ambiguous.
+    A plan is never an array (`_validate_and_build_plan` requires a JSON
+    OBJECT carrying `stages`), so an array can never be plan-shaped,
+    whatever position it appears in or however much of the remainder it
+    fills. This was also inconsistent with round 2's OWN stated rule that
+    '[1] citations' survive -- a bare array should not flip to a refusal
+    just because it happens to be the whole remainder instead of embedded
+    in prose. See CHANGELOG for the explicit call-out of this change."""
     text = f"{_FIRST_PLAN}\n[1, 2]"
-    with pytest.raises(AudError) as excinfo:
-        advisor._parse_model_json(text)
-    assert excinfo.value.code == "bad_model_output"
+    proposal = advisor._parse_model_json(text)
+    assert proposal["stages"][0]["stage"] == "limit"
 
 
 def test_duplicate_plan_immediately_trailing_is_still_refused() -> None:
@@ -368,12 +374,76 @@ def test_trailing_fenced_non_json_code_is_accepted() -> None:
     assert proposal["stages"][0]["stage"] == "limit"
 
 
+# ---------------------------------------------------------------------------
+# PR #41 review round 3, finding #1: OVER-refusal. Round 2 refused on ANY
+# trailing JSON object (fenced or not) -- but a parameter echo, an empty
+# defaults object, or an unrelated note object are not plans. Only a
+# PLAN-SHAPED object (carrying the `stages` key `_validate_and_build_plan`
+# requires) is genuinely ambiguous with the first plan. All SYNTHETIC.
+# ---------------------------------------------------------------------------
+
+_PARAM_ECHO = '{"freq_hz": 120, "gain_db": -3}'
+
+
+def test_trailing_prose_quoting_an_unrelated_param_object_is_accepted() -> None:
+    """Finding #1: a JSON object quoted in prose that is NOT plan-shaped (no
+    `stages` key) -- here, an eq param echo -- was wrongly refused through
+    review round 2's "any object anywhere" rule."""
+    text = f"{_FIRST_PLAN}\nThe eq stage uses {_PARAM_ECHO} for the low shelf."
+    proposal = advisor._parse_model_json(text)
+    assert proposal["stages"][0]["stage"] == "limit"
+
+
+def test_trailing_prose_with_empty_defaults_object_is_accepted() -> None:
+    """Finding #1: an empty `{}` ("keeps its defaults") is a JSON object but
+    carries no `stages` key -- not plan-shaped, must be accepted."""
+    text = _FIRST_PLAN + "\nThe reverb stage keeps its defaults ({})."
+    proposal = advisor._parse_model_json(text)
+    assert proposal["stages"][0]["stage"] == "limit"
+
+
+def test_trailing_fenced_non_plan_object_is_accepted() -> None:
+    """Finding #1: a FENCED JSON object that is not plan-shaped (no `stages`
+    key) must be accepted -- round 2's fenced-block branch refused any
+    fenced object/array regardless of shape. Also doubles as evidence for
+    finding #2: the fenced-block branch was removed and this case is still
+    correctly accepted by the brace scan alone, which sees the object's
+    braces the same way whether or not backticks surround them."""
+    text = _FIRST_PLAN + '\nFor reference:\n```json\n{"note": 1}\n```\n'
+    proposal = advisor._parse_model_json(text)
+    assert proposal["stages"][0]["stage"] == "limit"
+
+
+def test_whole_remainder_bare_array_citation_is_accepted() -> None:
+    """Finding #1: round 2 accepted '[1]' EMBEDDED in prose (a footnote
+    citation, see test_trailing_prose_with_a_footnote_style_citation_is_accepted)
+    but still refused it when it was the ENTIRE remainder with nothing
+    else -- contradicting its own stated footnote-citation exception. A
+    plan is never an array, so the whole-remainder check must never treat
+    ANY array as plan-shaped, matching the embedded case exactly."""
+    text = f"{_FIRST_PLAN}\n[1]"
+    proposal = advisor._parse_model_json(text)
+    assert proposal["stages"][0]["stage"] == "limit"
+
+
+def test_whole_remainder_bare_scalar_only_is_accepted() -> None:
+    """Finding #3 (untested branch): every round-1/round-2 scalar test
+    (test_trailing_prose_opening_like_a_json_scalar_is_accepted) always had
+    prose trailing AFTER the scalar, so a remainder that is a bare scalar
+    with NOTHING else was never actually exercised. `_is_plan_shaped`
+    requires a `dict`, so a scalar is rejected outright regardless of
+    position -- but that was, until now, a claim, not a measurement."""
+    text = f"{_FIRST_PLAN}\n42"
+    proposal = advisor._parse_model_json(text)
+    assert proposal["stages"][0]["stage"] == "limit"
+
+
 @pytest.mark.parametrize(
     ("case_id", "trailing", "expect_refused"),
     [
         ("immediately-second-object", _SECOND_PLAN, True),
         ("duplicate-object", _FIRST_PLAN, True),
-        ("bare-array", "[1, 2]", True),
+        ("bare-array", "[1, 2]", False),  # round 3: INTENTIONAL verdict change, was True -- see CHANGELOG
         ("prose-then-object", f"Alternatively: {_SECOND_PLAN}", True),
         ("second-fenced-block", f"Or:\n```json\n{_SECOND_PLAN}\n```", True),
         ("unfenced-then-fenced", f"A second option:\n```\n{_SECOND_PLAN}\n```", True),
@@ -384,11 +454,16 @@ def test_trailing_fenced_non_json_code_is_accepted() -> None:
         ("sic-braces", "the report says 'compressor' {sic} throughout.", False),
         ("fenced-non-json", '```python\nprint("hi")\n```', False),
         ("empty-trailing-whitespace", "\n\n   \n", False),
+        ("param-echo-object", f"uses {_PARAM_ECHO} for the low shelf.", False),  # round 3, finding #1
+        ("empty-defaults-object", "keeps its defaults ({}).", False),  # round 3, finding #1
+        ("fenced-non-plan-object", '```json\n{"note": 1}\n```', False),  # round 3, findings #1 + #2
+        ("bare-array-single-citation", "[1]", False),  # round 3, finding #1
+        ("bare-scalar-only", "42", False),  # round 3, finding #3
     ],
 )
 def test_second_value_detection_full_verdict_table(case_id: str, trailing: str, expect_refused: bool) -> None:
     """One parametrized table covering every case named in PR #41 review
-    round 2's two tables plus this pass's own adversarial inputs, so the
+    rounds 2 and 3's tables plus this pass's own adversarial inputs, so the
     verdict for each is pinned individually and reportable as one table
     (see the PR description for the rendered version)."""
     text = f"{_FIRST_PLAN}\n{trailing}"
