@@ -37,6 +37,17 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   grid across `hz_to_erb_rate`, `erb_rate_to_hz`, and `erb_bandwidth_hz`, before vs. after.
   Three mutations (21.4->21.3, 4.37->4.4, 24.7->24.6) each reproduced RED against named
   tests and were restored byte-identical (sha256-verified). No shipped constant changed.
+- **Review round 1 (test-only): eq. (3)'s 24.7 now has its own literal anchor.** The eq. (4)
+  literal anchor above did not cover eq. (3): a measured 24.7->24.69 mutation survived the
+  whole pre-existing suite, and 24.7->24.6 was caught only incidentally, by two Jesteadt-table
+  tests at their own +/-1 Hz-scale tolerance. `test_printed_equation_anchor_eq3_literal_constants_not_imported_from_module`
+  (paired by name with the renamed `..._eq4_...` anchor) evaluates `24.7*(4.37*f/1000+1)` with
+  constants typed literally at seven frequencies (50 Hz-16 kHz) at `abs=1e-12`, catching both
+  mutations by name; the fixture header wording was also corrected (all 14 interior edges in
+  Jesteadt 2019 Table I differ by exactly 1 Hz, confirmed against the table on PMC -- not "up
+  to 1 Hz" independent rounding -- since they are contiguous integer bins; fixture values
+  unchanged). No shipped constant changed; `git diff --stat` against the round-1 head touches
+  tests, this fixture comment, and this file only.
 - **PR #40 review round 3 (test-only): a single continuous engagement changing DEPTH is now
   covered in both directions, closing the gap a mutation found in `_duck_hold_attack_release_db`.**
   Review mutated that function to latch only the FIRST engaged depth instead of the most recently

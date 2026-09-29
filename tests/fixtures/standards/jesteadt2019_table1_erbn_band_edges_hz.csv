@@ -4,14 +4,17 @@
 # (also https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6584171/). Accessed 2026-09-29.
 #
 # Table I lists 15 bands, each 2-ERB wide, whose lower/upper edges are the paper's own stated
-# ERBN values of 3, 5, ..., 31, 33 Cams (their term for ERB-rate). Because each interior edge is
-# shared between two adjacent bands (band k's "Highest Frequency" and band k+1's "Lowest
-# Frequency"), and the paper printed each one independently rounded to the nearest Hz, the two
-# printed values at a shared edge differ by up to 1 Hz (e.g. band 1's highest=163 Hz vs band 2's
-# lowest=164 Hz, both nominally 5 Cams). f_hz below is the mean of the two printed values at each
-# interior edge, and the single printed value at the two open ends (3 Cams = band 1's lowest =
-# 87 Hz exactly; 33 Cams = band 15's highest = 7795 Hz exactly). This is a transcription/averaging
-# choice recorded here, not a computed or re-derived value -- see
+# ERBN values of 3, 5, ..., 31, 33 Cams (their term for ERB-rate). Each interior edge is shared
+# between two adjacent bands (band k's "Highest Frequency" and band k+1's "Lowest Frequency"),
+# and the table's own printed integers show contiguous integer bins, not independent rounding:
+# at every one of the 14 interior edges, band k's "Highest Frequency" is exactly N and band k+1's
+# "Lowest Frequency" is exactly N+1 (e.g. band 1's highest=163 Hz, band 2's lowest=164 Hz, both
+# nominally 5 Cams) -- checked against all 14 shared edges in the published table (band 1/2
+# through band 14/15), every one differs by exactly 1 Hz, never 0 or 2. f_hz below is the mean of
+# the two printed values at each interior edge (163.5 for the 5-Cams edge above), and the single
+# printed value at the two open ends (3 Cams = band 1's lowest = 87 Hz exactly; 33 Cams = band
+# 15's highest = 7795 Hz exactly). This is a transcription/averaging choice recorded here, not a
+# computed or re-derived value -- see
 # tests/test_dsp_bands_erb_glasberg_moore_anchor.py for how it is used and why exact agreement is
 # NOT expected (issue #31: this codebase deliberately keeps Glasberg & Moore 1990's PRINTED
 # constants 21.4/4.37, which drift from this table; the paper's own Fortran-appendix constants

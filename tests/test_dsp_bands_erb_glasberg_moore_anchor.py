@@ -58,7 +58,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from aud.dsp.bands import erb_rate_to_hz, hz_to_erb_rate
+from aud.dsp.bands import erb_bandwidth_hz, erb_rate_to_hz, hz_to_erb_rate
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures" / "standards"
 _FIXTURE_FILENAME = "jesteadt2019_table1_erbn_band_edges_hz.csv"
@@ -166,7 +166,7 @@ def test_hz_to_erb_rate_matches_jesteadt2019_edges_within_the_same_gap():
     assert computed_cams[-1] == pytest.approx(33.0, abs=0.1)
 
 
-def test_printed_equation_anchor_literal_constants_not_imported_from_module():
+def test_printed_equation_anchor_eq4_literal_constants_not_imported_from_module():
     """Anchor `hz_to_erb_rate` against Glasberg & Moore (1990) eq. (4)'s
     PRINTED text (p.114), evaluated here with LITERAL constants -- 21.4
     and 4.37 written directly in this test, never imported from
@@ -176,8 +176,38 @@ def test_printed_equation_anchor_literal_constants_not_imported_from_module():
     particular frequencies.
 
         ERBrate(f) = 21.4 * log10(4.37*f/1000 + 1)      -- eq. (4), p.114
+
+    Pairs with
+    `test_printed_equation_anchor_eq3_literal_constants_not_imported_from_module`
+    below (eq. (3)) -- same literal-constant discipline, the other printed
+    equation this module ships.
     """
     for f in (0.0, 100.0, 1000.0, 4000.0, 10000.0, 20000.0):
         literal = 21.4 * math.log10(4.37 * f / 1000.0 + 1.0)
         module_value = float(np.asarray(hz_to_erb_rate(f)))
+        assert module_value == pytest.approx(literal, abs=1e-12), f"diverges from the printed equation at f={f}"
+
+
+def test_printed_equation_anchor_eq3_literal_constants_not_imported_from_module():
+    """Anchor `erb_bandwidth_hz` against Glasberg & Moore (1990) eq. (3)'s
+    PRINTED text (p.114), evaluated here with LITERAL constants -- 24.7
+    and 4.37 written directly in this test, never imported from
+    `aud.dsp.bands` -- pairs with
+    `test_printed_equation_anchor_eq4_literal_constants_not_imported_from_module`
+    above (eq. (4)): same literal-constant discipline for the other
+    printed equation this module ships.
+
+        ERB(f) = 24.7 * (4.37*f/1000 + 1)      -- eq. (3), p.114
+
+    Before this test existed, eq. (3)'s 24.7 was guarded only by the
+    Jesteadt-table tests above -- measured: mutating 24.7 -> 24.69 in
+    `erb_bandwidth_hz` survived the entire pre-existing suite (1023
+    tests), and only 24.7 -> 24.6 was caught, by two of the Jesteadt-table
+    tests. This test uses an `abs=1e-12` tolerance -- tight enough that
+    even the smaller 24.7 -> 24.69 mutation fails it by name, with no
+    external table needed at these frequencies.
+    """
+    for f in (50.0, 100.0, 500.0, 1000.0, 4000.0, 10000.0, 16000.0):
+        literal = 24.7 * (4.37 * f / 1000.0 + 1.0)
+        module_value = float(np.asarray(erb_bandwidth_hz(f)))
         assert module_value == pytest.approx(literal, abs=1e-12), f"diverges from the printed equation at f={f}"
