@@ -49,19 +49,24 @@ PEP 735 `[dependency-groups]` group such as `dev`) so a denylisted package hidde
 in an extra or a dev-only group is caught even when that group is not currently
 installed and so never shows up in (1).
 
-A fifth -- `scan_bundled_runtime_binaries` -- walks `numpy.libs/`/`scipy.libs/`
-(the auditwheel-bundled shared-library directories that sit alongside the
-`numpy`/`scipy` packages themselves) and checks every file there against
+A fifth -- `scan_bundled_runtime_binaries` -- discovers every `*.libs/` directory
+present under any site-packages root actually contributing an installed
+distribution in this environment (the auditwheel/delvewheel convention for a
+wheel's bundled shared libraries, e.g. `numpy.libs/`, `scipy.libs/`,
+`python_stretch.libs/`) and checks every file there against
 `BUNDLED_RUNTIME_ACKNOWLEDGEMENTS`, a separate, explicitly-enumerated, reviewed
 list -- see docs/DESIGN-ENVELOPE.md's "Dependency licences" section for the
 per-binary licence and MIT-compatibility argument for each entry on that list.
 These binaries never appear in `importlib.metadata` at all (they are not
 themselves installed distributions), so signal (1) cannot see them; this is a
-sixth, independent signal for exactly that gap. A binary found in either
-directory that matches none of the acknowledged patterns is a **new, unreviewed
-bundled runtime** and fails the check unconditionally -- the acknowledgement
-list is an enumerated decision, never a blanket exemption for those two
-directories.
+sixth, independent signal for exactly that gap. A binary found in any
+discovered directory that matches none of the acknowledged patterns is a **new,
+unreviewed bundled runtime** and fails the check unconditionally -- the
+acknowledgement list is an enumerated decision, never a blanket exemption for
+any directory it scans. Discovery is by directory SHAPE, not by an enumerated
+package-name tuple -- see `discover_bundled_runtime_libs_dirs`'s docstring for
+why that distinction is itself the fix for a real, previously-silent gap
+(`python_stretch.libs/` was invisible to the old name-keyed scan).
 
 ## The sixth evasion this cannot catch
 
@@ -473,17 +478,52 @@ def scan_source_tree(root: Path) -> list[ImportViolation]:
 
 
 # ---------------------------------------------------------------------------
-# Bundled copyleft runtime binaries -- present on disk in numpy.libs/ and
-# scipy.libs/, never visible in any importlib.metadata field (they are not
-# themselves installed distributions). This is a SEPARATE, explicitly-enumerated,
-# reviewed acknowledgement list -- not a blanket exemption for those directories.
+# Bundled copyleft runtime binaries -- present on disk in a wheel's sibling
+# `<name>.libs/` directory (the auditwheel/delvewheel convention), never
+# visible in any importlib.metadata field (they are not themselves installed
+# distributions). This is a SEPARATE, explicitly-enumerated, reviewed
+# acknowledgement list -- not a blanket exemption for any directory it scans.
 # See docs/DESIGN-ENVELOPE.md's "Dependency licences" section for the licence and
 # MIT-compatibility argument recorded for each entry below; do not add an entry
 # here without adding the matching argument there.
-# ---------------------------------------------------------------------------
-
-#: Packages whose sibling `<name>.libs/` directory (the auditwheel/delvewheel
-#: convention for a wheel's bundled shared libraries) is scanned.
+#
+# DISCOVERY, not enumeration (closes the python_stretch.libs/ scope gap).
+# This used to be `BUNDLED_RUNTIME_PACKAGE_NAMES: tuple[str, ...] = ("numpy",
+# "scipy")` -- a fixed tuple of package names whose `.libs/` sibling was
+# scanned. That silently stopped covering the OTHER two extras this project
+# ships the moment either shipped a bundled binary: `python-stretch` (the
+# `stretch` extra) turned out to carry an (empty, in the version resolved at
+# audit time) `python_stretch.libs/` directory the old tuple never looked at,
+# and would have missed a real one there just as completely as it missed a
+# real one anywhere else not named "numpy" or "scipy". Adding
+# `"python_stretch"` to the tuple would only have moved the same gap to the
+# NEXT extra. `discover_bundled_runtime_libs_dirs()` below instead walks every
+# `*.libs/` directory that actually exists under every site-packages root
+# contributing an installed distribution in THIS resolved environment --
+# keyed off the directory SHAPE auditwheel/delvewheel always uses, not off a
+# name anyone has to remember to add. `_libs_dirs_for` (name-keyed) and this
+# constant are kept below only because `test_bundled_runtime_scan_finds_the_
+# real_libgfortran_and_libquadmath` exercises the name-keyed helper directly
+# as a regression guard on the two filenames the acknowledgement patterns
+# were written against; `scan_bundled_runtime_binaries()` itself no longer
+# uses either.
+#
+# Audited 2026-09-29 with EVERY optional extra installed (`stretch` AND
+# `speech`): the widening also made `av.libs/` and `ctranslate2.libs/` visible
+# (arriving transitively via the `speech` extra's `faster-whisper` ->
+# `av` -> bundled FFmpeg, and `faster-whisper` -> `ctranslate2`). That
+# environment contains at least three GPL-family binaries with no LGPL/
+# GCC-exception escape hatch (`libx264`, `libx265`, and the `mpglib` GPL
+# decoder compiled into this build's `libmp3lame` -- see
+# https://github.com/colombod/amplifier-smart-tools-audio/issues/44 for the
+# full evidence). None of the ~20 binaries newly visible under `av.libs/` or
+# `ctranslate2.libs/` are acknowledged here, on purpose: blessing the
+# permissive-looking majority while a real, unresolved GPL entanglement sits
+# alongside them in the same extra is exactly the "paper over it" this
+# acknowledgement list exists to refuse. `speech` is not installed by CI's
+# `uv sync` (no `--all-extras`), so the default tree stays clean; anyone who
+# installs `speech` locally and runs this suite gets a loud, correct failure
+# naming every one of those binaries until issue #44 is resolved.
 BUNDLED_RUNTIME_PACKAGE_NAMES: tuple[str, ...] = ("numpy", "scipy")
 
 
@@ -560,6 +600,12 @@ def _scan_libs_dir(libs_dir: Path) -> list[UnacknowledgedBundledBinary]:
 
 
 def _libs_dirs_for(names: tuple[str, ...]) -> list[Path]:
+    """Name-keyed lookup, kept for `test_bundled_runtime_scan_finds_the_real_
+    libgfortran_and_libquadmath`'s direct regression guard on the numpy/scipy
+    filenames the acknowledgement patterns were written against.
+    `scan_bundled_runtime_binaries()` itself uses the discovery-based
+    `discover_bundled_runtime_libs_dirs()` below instead -- see this module's
+    "Bundled copyleft runtime binaries" section for why."""
     dirs = []
     for name in names:
         try:
@@ -573,15 +619,56 @@ def _libs_dirs_for(names: tuple[str, ...]) -> list[Path]:
     return dirs
 
 
+def _all_site_packages_roots() -> list[Path]:
+    """Every distinct base directory backing at least one installed
+    distribution in THIS environment, deduplicated. Ordinarily a single
+    site-packages directory (confirmed for this project's own `.venv`), but
+    nothing here assumes exactly one -- multiple roots (e.g. a `--system-site-
+    packages` venv) are each examined."""
+    roots: set[Path] = set()
+    for dist in distributions():
+        try:
+            root = Path(str(dist.locate_file("")))
+        except Exception:
+            continue
+        if root.is_dir():
+            roots.add(root)
+    return sorted(roots)
+
+
+def discover_bundled_runtime_libs_dirs(roots: list[Path] | None = None) -> list[Path]:
+    """Every `<name>.libs/` directory found directly under any site-packages
+    root actually contributing an installed distribution in this environment
+    -- the auditwheel/delvewheel convention for a wheel's bundled shared
+    libraries, discovered by directory SHAPE rather than tied to an
+    enumerated set of package names. This is what makes a bundled binary
+    arriving with ANY optional extra -- not just numpy/scipy -- visible to
+    the scan with no code change needed to add its package name to a tuple
+    first. `roots` is exposed for tests; production callers omit it and get
+    `_all_site_packages_roots()`."""
+    if roots is None:
+        roots = _all_site_packages_roots()
+    dirs: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        for entry in sorted(root.glob("*.libs")):
+            if entry.is_dir() and entry not in seen:
+                seen.add(entry)
+                dirs.append(entry)
+    return dirs
+
+
 def scan_bundled_runtime_binaries(
-    names: tuple[str, ...] = BUNDLED_RUNTIME_PACKAGE_NAMES,
+    libs_dirs: list[Path] | None = None,
 ) -> list[UnacknowledgedBundledBinary]:
-    """Every file under `<name>.libs/` for each package in `names`, checked
-    against `BUNDLED_RUNTIME_ACKNOWLEDGEMENTS`. A package with no `.libs/`
-    directory (not installed, or a build with no bundled binaries) contributes
-    nothing -- that is not a failure."""
+    """Every file under every `*.libs/` directory discovered in this resolved
+    environment (see `discover_bundled_runtime_libs_dirs`), checked against
+    `BUNDLED_RUNTIME_ACKNOWLEDGEMENTS`. An environment with no such
+    directories at all contributes nothing -- that is not a failure.
+    `libs_dirs` is exposed for tests that want to scan a specific, known set
+    of directories directly; production callers omit it."""
     violations: list[UnacknowledgedBundledBinary] = []
-    for libs_dir in _libs_dirs_for(names):
+    for libs_dir in libs_dirs if libs_dirs is not None else discover_bundled_runtime_libs_dirs():
         violations.extend(_scan_libs_dir(libs_dir))
     return violations
 
@@ -619,7 +706,7 @@ def main() -> int:
     else:
         print("  none")
 
-    print("\n== Bundled runtime binaries (numpy.libs/, scipy.libs/) vs. acknowledgement list ==")
+    print("\n== Bundled runtime binaries (every discovered *.libs/ dir) vs. acknowledgement list ==")
     bundled_violations = scan_bundled_runtime_binaries()
     if bundled_violations:
         for v in bundled_violations:

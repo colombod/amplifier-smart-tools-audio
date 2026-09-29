@@ -11,6 +11,40 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ### Added
 
+- **Issue #43: the licence-policy bundled-runtime scan no longer misses a bundled binary
+  just because its package name was never added to a tuple.** `tests/license_policy.py`'s
+  `scan_bundled_runtime_binaries()` used to walk only `numpy.libs/`/`scipy.libs/` (a
+  hardcoded `BUNDLED_RUNTIME_PACKAGE_NAMES = ("numpy", "scipy")`), so `python_stretch.libs/`
+  (shipped by the optional `stretch` extra) was structurally invisible to the acknowledgement-
+  list tripwire that is the only signal in this file catching drift. Replaced with
+  `discover_bundled_runtime_libs_dirs()`: discovers every `*.libs/` directory present under
+  every site-packages root actually contributing an installed distribution in the resolved
+  environment, keyed off the auditwheel/delvewheel directory SHAPE rather than an enumerated
+  package name -- so the next optional extra that ships a bundled binary is examined
+  automatically. Measured with every optional extra installed: `python_stretch.libs/` exists
+  in python-stretch 0.3.1 but ships zero binaries today (scope gap, not a live violation --
+  `test_python_stretch_libs_dir_itself_is_empty_of_binaries_today` guards the premise). Real
+  plant/remove proof against the actual directory (`test_planting_an_unacknowledged_binary_
+  in_python_stretch_libs_is_caught`, skipped with a stated reason when the `stretch` extra
+  isn't installed -- CI's `uv sync` installs no optional extra) plus three discovery-mechanism
+  tests (finds the real numpy/scipy dirs by shape, finds a synthetic dir under a name that
+  appears nowhere in this module, deduplicates repeated roots). Mutation (revert to the old
+  enumeration) reproduced the exact scope gap RED -- the same plant is silently missed -- then
+  was restored byte-identical, sha256-verified. Default tree (no extras) still passes every
+  signal, 1024 -> 1029 collected (+5 net: 3 always-run, 2 stretch-conditional), 1027 passed /
+  2 skipped, 0 warnings.
+- **Issue #44 filed, not fixed here: the `speech` extra bundles at least three GPL-family
+  binaries.** Widening the bundled-runtime scan to discovery (above) also made `av.libs/` and
+  `ctranslate2.libs/` visible when the `speech` extra (`faster-whisper` -> `av`/`ctranslate2`)
+  is installed. `libx264`/`libx265` (GPL-2.0-or-later, no LGPL option) are genuinely
+  dynamically linked into this build's `libavcodec` (confirmed via `ldd` and
+  `avcodec_configuration()`'s `--enable-libx264 --enable-libx265`, corroborated by a third
+  party who forked FFmpeg specifically over this exact PyAV wheel defect); this build's
+  `libmp3lame` additionally has the GPL-only `mpglib` decoder compiled in per LAME's own
+  `license.txt`. None of the ~20 binaries under those two directories are acknowledged --
+  deliberately, pending issue #44 -- so installing `speech` and running this suite now fails
+  loud and names every one of them. CI's `uv sync` does not install `speech`, so the default
+  tree is unaffected.
 - **Issue #31: `erb_glasberg_moore`'s 21.4/4.37/24.7 documented and anchored -- no behaviour
   change.** Glasberg & Moore 1990 (Hearing Research 47:103-138) disagrees with itself: its
   printed text (eq. (3)/(4), p.114) gives 24.7/21.4/4.37, but its own Fortran appendix

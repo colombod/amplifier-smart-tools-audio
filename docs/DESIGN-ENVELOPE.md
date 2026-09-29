@@ -196,6 +196,27 @@ Both copyleft-family entries are MIT-compatible **as used**. That is the whole r
 criterion is stated as MIT-compatibility: the honest answer here is "GPL-3.0-or-later is
 present on disk and is fine," which a string match cannot reach.
 
+**The scan is discovery-based, not an enumerated `("numpy", "scipy")` tuple** (issue #43).
+`tests/license_policy.py`'s `discover_bundled_runtime_libs_dirs()` walks every `*.libs/`
+directory that actually exists under every site-packages root in the resolved environment,
+so a bundled binary arriving with a *different* optional extra is examined without a prior
+code change enumerating its package name first. Audited 2026-09-29 with **every** optional
+extra installed:
+
+- **`python_stretch.libs/`** (the `stretch` extra, Signalsmith Stretch) exists but currently
+  ships **zero** bundled binaries in python-stretch 0.3.1 -- a scope gap in the old scan, not
+  a live licence problem. `test_python_stretch_libs_dir_itself_is_empty_of_binaries_today`
+  guards this premise and will fail loudly the day that changes.
+- **`av.libs/` and `ctranslate2.libs/`** (the `speech` extra, transitively via
+  `faster-whisper` -> `av`/`ctranslate2`) are a different story: at least three GPL-family
+  binaries with no LGPL/GCC-exception escape hatch (`libx264`, `libx265`, and a GPL `mpglib`
+  decoder compiled into this build's `libmp3lame`) -- see **issue #44** for the full evidence.
+  None of the ~20 binaries under those two directories are acknowledged in
+  `BUNDLED_RUNTIME_ACKNOWLEDGEMENTS`, on purpose, pending that issue's resolution. CI's
+  `uv sync` installs no optional extra, so the default tree this table otherwise describes
+  stays clean; anyone who installs `speech` locally and runs the licence suite gets a loud,
+  correct failure naming every one of those binaries.
+
 **The method trap, recorded because it nearly produced a false clean result.** A first audit
 truncated licence strings to 45 characters and reported a clean tree, **missing the bundled
 runtimes entirely** -- because scipy's `License` field is **47,559 characters**: the BSD text
