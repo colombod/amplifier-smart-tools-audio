@@ -11,6 +11,32 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ### Added
 
+- **Issue #31: `erb_glasberg_moore`'s 21.4/4.37/24.7 documented and anchored -- no behaviour
+  change.** Glasberg & Moore 1990 (Hearing Research 47:103-138) disagrees with itself: its
+  printed text (eq. (3)/(4), p.114) gives 24.7/21.4/4.37, but its own Fortran appendix
+  (pp.132/135/138) gives 24.673/21.366/4.368, and Jesteadt, Wroblewski & High 2019 (JASA
+  145(6):3586, Table I, PMC6584171) tabulates band edges that agree with the Fortran
+  constants to within ~1 Hz up to ~5 kHz while our printed-text constants drift to about
+  -52 Hz at 33 Cams (7795 Hz). USER RULING: keep 21.4/4.37/24.7 -- follow the paper's
+  PRINTED equation, which is what a reader checking the docstring against the paper
+  actually sees. `src/aud/dsp/bands.py` gained a DECISION RECORD directly above the ERB
+  functions naming the chosen authority and every rejected alternative (the Fortran
+  constants, and ~21.33 re-derived from eq. (4)'s own rounded constants) with why each was
+  rejected, plus a SOURCE CAVEAT: the audres.org PDF mirror's OCR layer misreads "21.4" as
+  "22.4" (two independent vision reads of the same mirror both read 21.4); the publisher's
+  copy is not open access (confirmed via the Unpaywall API); an independent secondary
+  source (Simpson, Terrell & Reiss, AES Convention Paper 8873, 2013, hosted on Queen Mary
+  University of London's own site, unrelated to audres.org) restates both equations
+  verbatim with the same constants. `tests/test_dsp_bands_erb_glasberg_moore_anchor.py`
+  adds an EXTERNAL anchor -- Jesteadt 2019 Table I, transcribed into
+  `tests/fixtures/standards/jesteadt2019_table1_erbn_band_edges_hz.csv` with full
+  provenance -- pinning the measured (not self-referential) deviation profile: agrees
+  within 3 Hz below ~1 kHz, reaching the known ~-52 Hz gap at 33 Cams, plus a literal
+  printed-equation anchor whose constants are written directly in the test, never imported
+  from the module. Verified bit-identical: `max|diff| = 0.0` over a dense 20 Hz-20 kHz
+  grid across `hz_to_erb_rate`, `erb_rate_to_hz`, and `erb_bandwidth_hz`, before vs. after.
+  Three mutations (21.4->21.3, 4.37->4.4, 24.7->24.6) each reproduced RED against named
+  tests and were restored byte-identical (sha256-verified). No shipped constant changed.
 - **PR #40 review round 3 (test-only): a single continuous engagement changing DEPTH is now
   covered in both directions, closing the gap a mutation found in `_duck_hold_attack_release_db`.**
   Review mutated that function to latch only the FIRST engaged depth instead of the most recently

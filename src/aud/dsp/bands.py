@@ -504,6 +504,26 @@ def bark_zwicker_terhardt_to_hz(z: np.ndarray) -> np.ndarray:
 # it is a bug. See tests/test_dsp_bands_erb_glasberg_moore_anchor.py for
 # the external anchor (Jesteadt 2019 Table I) and the literal printed-
 # equation anchor (independent of this module's own constants).
+#
+# SOURCE CAVEAT: the G&M 1990 PDF this issue was originally raised against
+# is a third-party mirror (audres.org), whose OCR text layer misreads
+# eq. (4)'s "21.4" as "22.4". Two independent vision reads of 300-600 dpi
+# crops of that same mirror both read 21.4, not 22.4. The publisher's copy
+# (Elsevier/ScienceDirect, doi:10.1016/0378-5955(90)90170-T) is NOT open
+# access -- confirmed via the Unpaywall API (`is_oa: false`, no repository
+# copy, checked 2026-09-29) -- so it could not be read directly. As
+# independent corroboration from a DIFFERENT, non-audres.org source:
+# Simpson, Terrell & Reiss, "A Practical Step-by-Step Guide to the
+# Time-Varying Loudness Model of Moore, Glasberg and Baer", AES Convention
+# Paper 8873 (2013), hosted on the last author's own Queen Mary University
+# of London page (joshreiss.github.io), restates both equations verbatim,
+# citing Moore: eq. (4) `ERB = 24.7*(0.00437*f + 1)`, eq. (5)
+# `n = 21.4*log10(0.00437*fc + 1)` -- 21.4, 4.37 (as 0.00437), and 24.7,
+# matching what this module ships. This is a secondary restatement, not a
+# first-hand read of the original 1990 paper's own typeset page -- no
+# constant was changed on the strength of either the OCR layer or this
+# secondary source; both point the same way, and this reads as
+# corroboration of the two vision reads, not a replacement for them.
 
 
 def hz_to_erb_rate(f: np.ndarray) -> np.ndarray:
