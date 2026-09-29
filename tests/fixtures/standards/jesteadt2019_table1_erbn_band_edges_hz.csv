@@ -1,0 +1,38 @@
+# Source: Jesteadt, Wroblewski & High, "Contribution of frequency bands to the loudness of
+# broadband sounds: Tonal and noise stimuli", J. Acoust. Soc. Am. 145(6):3586-3594 (2019),
+# doi:10.1121/1.5111751, Table I. Open access via PMC: https://pmc.ncbi.nlm.nih.gov/articles/PMC6584171/
+# (also https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6584171/). Accessed 2026-09-29.
+#
+# Table I lists 15 bands, each 2-ERB wide, whose lower/upper edges are the paper's own stated
+# ERBN values of 3, 5, ..., 31, 33 Cams (their term for ERB-rate). Each interior edge is shared
+# between two adjacent bands (band k's "Highest Frequency" and band k+1's "Lowest Frequency"),
+# and the table's own printed integers show contiguous integer bins, not independent rounding:
+# at every one of the 14 interior edges, band k's "Highest Frequency" is exactly N and band k+1's
+# "Lowest Frequency" is exactly N+1 (e.g. band 1's highest=163 Hz, band 2's lowest=164 Hz, both
+# nominally 5 Cams) -- checked against all 14 shared edges in the published table (band 1/2
+# through band 14/15), every one differs by exactly 1 Hz, never 0 or 2. f_hz below is the mean of
+# the two printed values at each interior edge (163.5 for the 5-Cams edge above), and the single
+# printed value at the two open ends (3 Cams = band 1's lowest = 87 Hz exactly; 33 Cams = band
+# 15's highest = 7795 Hz exactly). This is a transcription/averaging choice recorded here, not a
+# computed or re-derived value -- see
+# tests/test_dsp_bands_erb_glasberg_moore_anchor.py for how it is used and why exact agreement is
+# NOT expected (issue #31: this codebase deliberately keeps Glasberg & Moore 1990's PRINTED
+# constants 21.4/4.37, which drift from this table; the paper's own Fortran-appendix constants
+# 21.366/4.368 would agree far more closely).
+cams,f_hz
+3,87
+5,163.5
+7,258.5
+9,375.5
+11,520.5
+13,700.5
+15,924.5
+17,1201.5
+19,1545.5
+21,1972.5
+23,2502.5
+25,3158.5
+27,3973.5
+29,4984.5
+31,6239.5
+33,7795

@@ -460,9 +460,78 @@ def bark_zwicker_terhardt_to_hz(z: np.ndarray) -> np.ndarray:
 
 # --- ERB, Glasberg & Moore 1990 (Hearing Research 47:103) ---
 
+# DECISION RECORD (issue #31) -- which constant "21.4" means, and why
+# ---------------------------------------------------------------------
+# Glasberg & Moore, "Derivation of auditory filter shapes from notched-noise
+# data", Hearing Research 47:103-138 (1990), p.114, disagrees with itself
+# about this constant. Four candidate values appear, and only one is
+# shipped here:
+#
+#   CHOSEN:  21.4 / 4.37 / 24.7  -- eq. (4) and eq. (3), PRINTED TEXT, p.114:
+#            ERBrate(f) = 21.4*log10(4.37*f/1000 + 1)      -- eq. (4)
+#            ERB(f)     = 24.7*(4.37*f/1000 + 1)            -- eq. (3)
+#            This is what a reader checking this module's docstring against
+#            the actual printed paper will see. No shipped behaviour
+#            changed when this was decided -- keeping the printed equation
+#            was always what this module implemented.
+#
+#   REJECTED: 21.366 / 4.368 / 24.673 -- the paper's OWN Fortran appendix
+#            (pp. 132, 135, 138): `c1 = 24.673`, `c2 = 4.368`,
+#            `c3 = 2302.6/(c1*c2) ~= 21.366`. Rejected because we follow
+#            the paper's printed equation, not its reference
+#            implementation -- but recorded here because it is the
+#            better-anchored choice: Jesteadt, Wroblewski & High, JASA
+#            145(6):3586 (2019), Table I (doi:10.1121/1.5111751, open on
+#            PMC as PMC6584171) tabulates ERBN band edges at 3, 5, ..., 33
+#            Cams in integer Hz, and 21.366/4.368 agrees with that table to
+#            within about 1 Hz up to ~5 kHz (see
+#            tests/test_dsp_bands_erb_glasberg_moore_anchor.py for the
+#            measured comparison against BOTH constant choices). This
+#            module's shipped 21.4/4.37 drifts steadily against the same
+#            table, reaching about -52 Hz at 33 Cams (7795 Hz) -- a known,
+#            measured, and deliberately accepted gap, not drift or a bug.
+#
+#   REJECTED: ~21.33 -- eq. (4) evaluated from ITS OWN rounded printed
+#            constants (2302.6/(24.7*4.37)). This is an intermediate
+#            quantity that appears in neither the paper's printed text nor
+#            its Fortran appendix; nobody publishes it. Rejected as not a
+#            real candidate, only an artifact of composing two already-
+#            rounded numbers.
+#
+# A future reader who notices 21.4 doesn't reproduce Jesteadt 2019's table,
+# or doesn't match the paper's own Fortran code, should read this as the
+# recorded, chosen gap above -- not rediscover the disagreement and assume
+# it is a bug. See tests/test_dsp_bands_erb_glasberg_moore_anchor.py for
+# the external anchor (Jesteadt 2019 Table I) and the literal printed-
+# equation anchor (independent of this module's own constants).
+#
+# SOURCE CAVEAT: the G&M 1990 PDF this issue was originally raised against
+# is a third-party mirror (audres.org), whose OCR text layer misreads
+# eq. (4)'s "21.4" as "22.4". Two independent vision reads of 300-600 dpi
+# crops of that same mirror both read 21.4, not 22.4. The publisher's copy
+# (Elsevier/ScienceDirect, doi:10.1016/0378-5955(90)90170-T) is NOT open
+# access -- confirmed via the Unpaywall API (`is_oa: false`, no repository
+# copy, checked 2026-09-29) -- so it could not be read directly. As
+# independent corroboration from a DIFFERENT, non-audres.org source:
+# Simpson, Terrell & Reiss, "A Practical Step-by-Step Guide to the
+# Time-Varying Loudness Model of Moore, Glasberg and Baer", AES Convention
+# Paper 8873 (2013), hosted on the last author's own Queen Mary University
+# of London page (joshreiss.github.io), restates both equations verbatim,
+# citing Moore: eq. (4) `ERB = 24.7*(0.00437*f + 1)`, eq. (5)
+# `n = 21.4*log10(0.00437*fc + 1)` -- 21.4, 4.37 (as 0.00437), and 24.7,
+# matching what this module ships. This is a secondary restatement, not a
+# first-hand read of the original 1990 paper's own typeset page -- no
+# constant was changed on the strength of either the OCR layer or this
+# secondary source; both point the same way, and this reads as
+# corroboration of the two vision reads, not a replacement for them.
+
 
 def hz_to_erb_rate(f: np.ndarray) -> np.ndarray:
-    """Hz -> ERB-rate ("Cams"), Glasberg & Moore 1990 (Hearing Research 47:103):
+    """Hz -> ERB-rate ("Cams"), Glasberg & Moore 1990 (Hearing Research
+    47:103), eq. (4), PRINTED TEXT, p.114 -- see the DECISION RECORD
+    immediately above this function for why 21.4/4.37 (not the paper's
+    own Fortran-appendix 21.366/4.368, and not the ~21.33 re-derived from
+    eq. (4)'s own rounded constants) is what this module ships:
 
     ERBrate(f) = 21.4*log10(4.37*f/1000 + 1)
 
@@ -482,7 +551,10 @@ def hz_to_erb_rate(f: np.ndarray) -> np.ndarray:
 
 
 def erb_rate_to_hz(erb_rate: np.ndarray) -> np.ndarray:
-    """ERB-rate -> Hz: exact algebraic inverse of `hz_to_erb_rate`.
+    """ERB-rate -> Hz: exact algebraic inverse of `hz_to_erb_rate`. See the
+    DECISION RECORD above `hz_to_erb_rate` for why 21.4/4.37 is shipped
+    (the paper's printed equation) rather than its own Fortran-appendix
+    21.366/4.368 or the ~21.33 re-derivation.
 
     f = (10**(E/21.4) - 1)/0.00437
 
@@ -502,7 +574,10 @@ def erb_rate_to_hz(erb_rate: np.ndarray) -> np.ndarray:
 
 
 def erb_bandwidth_hz(f: np.ndarray) -> np.ndarray:
-    """Equivalent rectangular bandwidth ERB(f) in Hz, Glasberg & Moore 1990:
+    """Equivalent rectangular bandwidth ERB(f) in Hz, Glasberg & Moore 1990,
+    eq. (3), PRINTED TEXT, p.114 -- see the DECISION RECORD above
+    `hz_to_erb_rate` for why 24.7/4.37 (not the paper's own Fortran-
+    appendix 24.673/4.368) is what this module ships:
 
         ERB(f) = 24.7*(4.37*f/1000 + 1)
 
