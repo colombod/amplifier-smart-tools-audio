@@ -391,6 +391,167 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
 
 ### Fixed
 
+- **`aud advise` returned `bad_model_output` ("Extra data") for a real, correct plan the model had
+  already produced** (issue #35), reported by a real Expertise Probe run (Anthropic
+  claude-haiku-4-5-20251001, one trial each on a clean control and a "boxy" defect fixture; the
+  clean control failed, the boxy fixture succeeded). **Reproduced and measured before changing
+  any code**: 20 trials each on the SAME two fixtures (regenerated via `expertise-probe fixtures
+  generate` from its own `audio_defects.yaml`), same model. **6/20 (30%) control, 8/20 (40%)
+  boxy failed** -- all 14 failures were the model answering correctly in a ```json fence and then
+  continuing with an unrequested "**Rationale:**"/"**Reasoning:**" bullet list after its own
+  closing fence, never a second JSON object. **The reported asymmetry (clean fails, defect
+  succeeds) did NOT replicate** at this sample size -- if anything the defect fixture failed
+  *more* often; the real pattern is a flat ~30-40% trailing-content rate independent of whether
+  there is anything to recommend, refuting the "nothing to fix -> keeps talking" hypothesis as
+  stated (still plausibly A cause, just not the dominant or exclusive one at n=20/n=20).
+  - **Primary fix -- strict structured output**, preferred over parsing repair because it makes
+    trailing content structurally impossible rather than cleaning it up after the fact:
+    `aud.intelligence.interface.IntelligenceBackend.complete` gained an optional `response_schema`
+    parameter (`ResponseSchema`, additive -- `None` default, no behaviour change for an
+    implementer that ignores it). `AnthropicBackend` forces a `tool_choice`-pinned tool call with
+    an `input_schema` matching `advisor`'s exact `{"stages": [...]}` shape and returns
+    `json.dumps` of the API's own already-parsed `tool_use` input -- proved against a REAL
+    captured tool_use response (`tests/fixtures/recorded/anthropic/advise-clean-haiku-tool-use.json`),
+    not just asserted. `OpenAIBackend`/`AzureOpenAIBackend` set `response_format:
+    {"type": "json_object"}` (GA on Chat Completions; guarantees one valid JSON value, not
+    schema-conformance); `GoogleBackend` sets `generationConfig.responseMimeType:
+    "application/json"` for the same guarantee. Full per-field `json_schema` strict mode
+    (OpenAI/Azure) and `responseSchema` (Google) were assessed and deliberately NOT implemented
+    this pass -- see each backend's `complete()` comment for the provider/API-version reasoning --
+    because they need a 10-way discriminated-union schema (one per `advisor.ALLOWED_STAGES` stage)
+    that was not live-verified.
+  - **Fallback -- bounded repair for whatever text a backend without schema support returns**:
+    `advisor._parse_model_json` now decodes only the FIRST complete JSON value
+    (`json.JSONDecoder.raw_decode`) and accepts it when the remainder is empty or does not itself
+    parse as JSON (prose). If the remainder DOES parse as JSON -- two distinct proposed plans --
+    it still refuses exactly as before (`bad_model_output`): the tool must never silently pick
+    between two answers the model actually gave. No real call in either 40-trial run ever produced
+    two JSON values; that refusal test is the one hand-built (SYNTHETIC, labelled as such) case in
+    `tests/test_intelligence.py`, kept because the behaviour it guards must survive this fix even
+    though this fix's own evidence never exercised it.
+  - **Related content-block hazard, checked for all four backends (not assumed)**: Anthropic's
+    existing `content[0]["text"]` guard (skips a leading `thinking` block) was already correct.
+    **Google was not** -- Gemini's own docs confirm a thinking-enabled response returns a part
+    carrying `"thought": true` ahead of the answer part
+    (https://ai.google.dev/gemini-api/docs/generate-content/thinking), the same hazard class,
+    unguarded. `GoogleBackend.complete` now skips any `thought` part and takes the first real text
+    part. OpenAI/Azure OpenAI's Chat Completions `message.content` is a plain string in both
+    shapes, not a list of blocks -- no hazard there.
+  - New real recorded fixtures (`tests/fixtures/recorded/anthropic/`):
+    `advise-clean-haiku-trailing-prose.json` (the exact issue #35 failure, captured live) and
+    `advise-clean-haiku-tool-use.json` (the new forced-tool-call response, captured live).
+  - **Re-ran end-to-end against both real fixtures after the fix, same model, same trial counts
+    (20 control + 20 boxy)**: **0/20 (0%) control, 0/20 (0%) boxy failed** -- down from 6/20 (30%)
+    and 8/20 (40%) before the fix. Every one of the 40 post-fix calls used the forced-tool-call
+    structured-output path and returned a valid plan; the parsing fallback was not exercised by
+    this run (expected, since the schema-constrained path removes the trailing-content case it
+    exists for).
+  - `IntelligenceBackend.complete`'s signature change (additive `response_schema` kwarg) is inside
+    `aud`'s intelligence seam only -- `aud-mix`'s planned routing through this same backend layer
+    (smart_tools-9h0) inherits the fix, and every existing Protocol implementer (two test fakes)
+    was updated to accept-and-ignore the new kwarg.
+  - **PR #41 review round 2 (independent review of the above fix):**
+    - **Strict mode assessed, NOT added.** Checked Anthropic's current tool-use docs (2026-09-28:
+      `docs.claude.com/.../tool-use/strict-tool-use`, `.../parallel-tool-use`): `strict: true`
+      requires `additionalProperties: false` on EVERY object in the schema, no other value
+      accepted. `_ADVISE_RESPONSE_SCHEMA.params` is a deliberately generic, propertyless object
+      (avoiding a 10-way discriminated union over `advisor.ALLOWED_STAGES` duplicating
+      `_validate_and_build_plan`'s own checks); forcing `additionalProperties: false` there with no
+      declared properties would make `params: {}` the ONLY value the API accepts for every stage,
+      silently eliminating every stage's ability to carry parameters -- a real weakening, not a
+      metadata change. `ResponseSchema`'s docstring, which previously overclaimed "the full schema
+      is enforced by the API itself", is corrected to say what is actually true: the forced,
+      pinned tool call structurally removes the free-text channel (fixing #35 regardless of
+      `strict`), but shape/range enforcement remains `_validate_and_build_plan`'s job, unchanged.
+      Instead added `tool_choice.disable_parallel_tool_use: true` (current docs confirm the field
+      lives inside `tool_choice`, not top-level) -- verified with 3 real Anthropic calls
+      (claude-haiku-4-5-20251001 via `ANTHROPIC_API_KEY`); all 3 succeeded, each returning exactly
+      one `tool_use` block that parsed into a valid plan. One captured as
+      `tests/fixtures/recorded/anthropic/advise-clean-haiku-tool-use-disable-parallel.json`.
+    - **Fix #1 -- a second plan anywhere in the response now refuses, not just when it immediately
+      follows the first.** Round 1 refused only when the leftover text BEGAN with valid JSON.
+      Measured to silently ACCEPT (as if only the first plan existed): prose then a second plan
+      ("Alternatively: {B}"), a second fenced ` ```json ` block containing a second plan, and an
+      unfenced first plan followed by a fenced second plan. Also fixed at the Anthropic
+      `tool_use`-block layer: more than one matching `tool_use` block in one response silently
+      returned the first (now raises `bad_model_output`) -- belt-and-suspenders with
+      `disable_parallel_tool_use` above, which should make this unreachable in practice but is
+      guarded regardless of API-version drift.
+    - **Fix #2 -- ordinary trailing prose that merely opens like a JSON scalar no longer refuses.**
+      Round 1's whole-remainder `raw_decode` treated a leading digit ("1. The low end..."), the
+      literal `true` ("true to the source..."), or a leading quoted string ('"Less is more"...')
+      as a second JSON value and wrongly refused all three -- the exact false-refusal class this
+      PR exists to fix, one layer deeper.
+    - **The combined rule** (`advisor._contains_second_json_value`): a second value counts only
+      when it is (a) the ENTIRE remainder parsing as one complete JSON object/array (preserves the
+      original correct refusals: an exact duplicate plan, or a bare array like `[1,2]` with
+      nothing else), (b) a fenced code block anywhere whose full content parses as one complete
+      JSON object/array, or (c) a JSON OBJECT (curly braces only, never an array) found anywhere
+      unfenced that parses completely. A bare scalar never counts on its own at any position; an
+      unfenced array is deliberately never scanned for inside prose, so "[1]"/"see [1]"-style
+      footnote citations are not mistaken for a second plan. Checked against every real pre-fix
+      failure response this PR has (the recorded trailing-prose fixture, still accepted, no
+      change), every case in both tables above, and hand-written adversarial prose (`[1]`
+      citations, `{sic}`, a fenced non-JSON code block) -- all verdicts pinned in
+      `test_second_value_detection_full_verdict_table` plus named tests per case.
+    - **Fix #3 -- Google no longer returns a truncated fragment when the JSON is split across
+      parts.** Gemini can return one JSON response as two or more non-thought parts (e.g.
+      `'{"stages": ['` as one part, the rest as a second); taking only the first non-thought part
+      (the existing thought-skip logic) returned a fragment that failed to parse.
+      `GoogleBackend.complete` now joins ALL non-thought text parts, in order. An all-thought
+      response still refuses with the existing named error, unchanged. If the join happens to
+      concatenate two complete plans, Fix #1 above now correctly refuses it downstream --
+      `GoogleBackend`'s job is only to reassemble the text faithfully, never to judge its content.
+    - 28 new tests in `tests/test_intelligence.py` (labelled SYNTHETIC where hand-built, per
+      AGENTS.md SS3b); `1008 passed` (980 + 28), zero warnings, licence check green. Each fix
+      mutation-proved (mutate -> run -> revert, sha256-verified byte-identical restore).
+  - **PR #41 review round 3 (independent review of round 2, "plan-shaped" refinement):**
+    - **Finding #1 -- OVER-refusal, fixed by requiring the trailing value to be PLAN-SHAPED.**
+      Round 2 refused on ANY trailing JSON object, fenced or not -- which wrongly refused a
+      quoted parameter echo (`uses {"freq_hz": 120, "gain_db": -3}`), an empty defaults object
+      (`keeps its defaults ({})`), an unrelated fenced `{"note": 1}`, and even a bare `[1]`
+      citation when it happened to be the WHOLE remainder (contradicting round 2's own stated
+      rule that `[1]`-style footnotes survive when embedded in prose). `advisor._is_plan_shaped`
+      now requires the trailing object to carry the exact top-level key
+      `_validate_and_build_plan` requires -- `stages` -- before it counts as a second plan;
+      everything else (any other object, any array, any scalar) is prose. **INTENTIONAL VERDICT
+      CHANGE, stated explicitly, not hidden:** `[1,2]` immediately trailing the plan, refused
+      through round 2, is now ACCEPTED -- a plan is never an array, so an array can never be
+      plan-shaped, at any position.
+    - **Finding #2 -- the dedicated fenced-code-block branch was a no-op and was DELETED, not
+      merely simplified.** Disabling it first (before touching anything else) left all 1009
+      round-2 tests passing -- proof, not assertion, that it caught nothing the brace-scan
+      branch didn't already catch. Root cause: the brace scan finds a plan-shaped object's `{`
+      directly in the raw text regardless of surrounding backticks, so a fenced plan is found
+      the same way an unfenced one is; the only case unique to the fenced branch (an ARRAY
+      inside a fence) can never be plan-shaped anyway, since a plan is always an object. Kept
+      `re` import removed as dead weight from the deletion.
+    - **Finding #3 -- untested branch, now covered.** Every prior scalar test
+      (`test_trailing_prose_opening_like_a_json_scalar_is_accepted`) always had prose trailing
+      AFTER the scalar; a remainder that is a bare scalar with NOTHING else was never actually
+      exercised. `test_whole_remainder_bare_scalar_only_is_accepted` closes the gap.
+    - **Full before/after verdict table**, every case from both review rounds plus this pass's
+      adversarial cases plus all 8 real recorded `advise` responses carrying a text block: the 8
+      real responses are ACCEPTED unchanged before and after; every genuine-ambiguity case
+      (`immediately-second-object`, `duplicate-object`, `prose-then-object`, `second-fenced-block`,
+      `unfenced-then-fenced`) stays REFUSED; exactly 5 verdicts flip from REFUSED to ACCEPTED
+      (`bare-array`, `bare-array-single-citation`, `empty-defaults-object`, `fenced-non-plan-object`,
+      `param-echo-object`) -- precisely the over-refusal cases finding #1 named, nothing else.
+    - **10 new tests** (5 named + 5 new rows in `test_second_value_detection_full_verdict_table`;
+      `test_bare_array_immediately_trailing_is_still_refused` renamed to
+      `..._is_now_accepted` and its assertion flipped, net test count unchanged for that rename):
+      `1019 passed` (1009 + 10), zero warnings, licence check green (no new dependency).
+    - **Four mutations, each killing exactly the tests named, each mutate -> run -> revert with
+      sha256-verified byte-identical restore:** dropping the plan-shape check (any object counts
+      again) fails the param-echo/empty-defaults/fenced-non-plan-object tests; making the check
+      unconditionally `False` fails all 11 genuine-ambiguity tests (including the Google
+      joined-parts case); counting a whole-remainder bare scalar fails the new
+      bare-scalar-only test; counting a whole-remainder bare array fails the new
+      bare-array/bare-array-single-citation tests. The reviewer's two round-2 surviving mutants
+      re-run against this code: "whole-remainder scalars counted" is now killed (same mutation as
+      above); "fenced-check off" no longer applies -- there is no fenced branch left to disable,
+      the strongest form of killing that survivor.
+
 - **`aud.dsp.stft`'s minimum-input-length test was self-referential and hid a real odd-`n_fft`
   bug** (issue #28, fifth instance of the same defect class as #25/#26): `tests/test_dsp_stft.py`'s
   `test_signal_at_exact_minimum_length_round_trips` computed its expected `min_len` via

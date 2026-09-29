@@ -18,7 +18,7 @@ from typing import Any
 
 from aud import lib
 from aud.intelligence import prompts
-from aud.intelligence.interface import IntelligenceBackend
+from aud.intelligence.interface import IntelligenceBackend, ResponseSchema
 from aud.plan import Plan, new_plan
 from aud.schemas import AudError
 
@@ -50,6 +50,47 @@ _BUILDERS: dict[str, Callable[..., Plan]] = {name: getattr(lib, name) for name i
 
 _DEFAULT_MAX_TOKENS = 2000
 
+# The schema advise's proposal must match -- handed to `backend.complete` as
+# `response_schema` so a backend that supports schema-constrained decoding
+# (see `aud.intelligence.interface.ResponseSchema`) makes trailing content
+# structurally impossible, rather than something caught and repaired below
+# after the fact (issue #35). `params` is deliberately left as a generic
+# object here: `_validate_and_build_plan` below already validates each
+# stage's params fully (against `aud.lib`'s own builder signatures) --
+# duplicating that as a 10-way discriminated-union JSON Schema would be a
+# second, harder-to-keep-in-sync copy of the same rule for no additional
+# safety. `additionalProperties: False` at both levels mirrors
+# `_validate_and_build_plan`'s own exact-key checks below (`set(proposal) !=
+# {"stages"}`, `set(entry) != {"stage", "params", "reason"}`) so a backend
+# that enforces this schema server-side (Anthropic) rejects the same shapes
+# this module already rejects itself.
+_ADVISE_TOOL_NAME = "propose_mastering_plan"
+_ADVISE_RESPONSE_SCHEMA = ResponseSchema(
+    name=_ADVISE_TOOL_NAME,
+    description="Propose the mastering chain: which stages to apply, with what parameters, and why.",
+    schema={
+        "type": "object",
+        "properties": {
+            "stages": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "stage": {"type": "string", "enum": list(ALLOWED_STAGES)},
+                        "params": {"type": "object"},
+                        "reason": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["stage", "params", "reason"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["stages"],
+        "additionalProperties": False,
+    },
+)
+
 
 def _strip_code_fence(text: str) -> str:
     """Tolerate a model wrapping its JSON in ```json ... ``` anyway."""
@@ -64,16 +105,146 @@ def _strip_code_fence(text: str) -> str:
     return stripped
 
 
-def _parse_model_json(raw: str) -> Any:
-    text = _strip_code_fence(raw)
+_PLAN_REQUIRED_KEY = "stages"  # the exact top-level key _validate_and_build_plan requires
+
+
+def _is_plan_shaped(value: Any) -> bool:
+    """True if `value` is a JSON OBJECT carrying the top-level key a plan
+    proposal must have (`_validate_and_build_plan`'s own `set(proposal) !=
+    {"stages"}` check) -- i.e. this looks like an attempt at a SECOND PLAN,
+    not merely any JSON object a model happened to echo.
+
+    PR #41 review round 3, finding #1: refusing on ANY trailing `{...}` that
+    merely decodes as an object -- a quoted parameter echo
+    (`uses {"freq_hz": 120, "gain_db": -3}`), an empty `{}` ("keeps its
+    defaults"), an unrelated `{"note": 1}` -- is over-refusal. None of those
+    are plans; only an object carrying `stages` is. A dict is never checked
+    for EXACTLY `{"stages"}` here (that stricter shape check is
+    `_validate_and_build_plan`'s job): a second value that carries `stages`
+    plus other keys is still an ambiguous second plan attempt, not prose.
+    """
+    return isinstance(value, dict) and _PLAN_REQUIRED_KEY in value
+
+
+def _contains_second_json_value(remainder: str) -> bool:
+    """True if `remainder` (the text after the first complete JSON value)
+    carries a second, genuinely ambiguous JSON value -- PR #41 review round 3
+    ("plan-shaped" refinement of review round 2's fixes #1 and #2).
+
+    Round 2 refused on ANY trailing JSON object, fenced or not -- which
+    fixed the under-refusal defects (a second plan after prose, in a second
+    fenced block, or unfenced-then-fenced) but introduced a NEW over-refusal
+    class: ordinary prose that happens to quote or echo an unrelated JSON
+    object (`uses {"freq_hz": 120, "gain_db": -3}`, `keeps its defaults
+    ({})`, a fenced measurement echo, or even a bare `[1]` citation) was
+    refused as if it were a second plan.
+
+    The rule that resolves this: a trailing value counts as a second value
+    only when it is PLAN-SHAPED (`_is_plan_shaped` -- an object carrying the
+    `stages` key `_validate_and_build_plan` requires), checked in two ways:
+
+    1. The ENTIRE remainder (whitespace-stripped) parses as one complete JSON
+       value that is plan-shaped, with nothing else following -- an exact
+       duplicate plan, or a second plan with nothing else trailing it.
+    2. A plan-shaped JSON OBJECT found ANYWHERE in the remainder -- fenced or
+       not, brace-scanned directly on the text, so code-fence markers are
+       irrelevant to detection either way -- that parses completely to its
+       matching closing brace. This single scan is what catches every real
+       ambiguity: "prose, then {B}", "a second fenced block containing {B}",
+       and "unfenced A, then fenced B" alike, because a plan-shaped object's
+       braces are found the same way regardless of whether backticks
+       surround them.
+
+    A dedicated fenced-code-block regex branch existed through review round
+    2 and was REMOVED here: proved redundant, not merely simplified.
+    Disabling it first, before removing it, left all 1009 pre-round-3 tests
+    passing -- the brace scan above already finds a plan-shaped object
+    wherever it sits in the text, fenced or not, because it scans the raw
+    text for `{` and does not care about surrounding backticks. The only
+    thing the fenced branch checked that the brace scan does not was an
+    ARRAY inside a fenced block -- and a plan is never an array, so under
+    the plan-shaped rule that case is correctly never a match either way.
+
+    Neither check ever matches a bare SCALAR (number, string, boolean,
+    null) or a bare ARRAY at any position: `_is_plan_shaped` requires a
+    `dict`, so a scalar is rejected by its `isinstance` check outright and
+    an array can never carry a `stages` key. This is what makes "[1,2]"
+    immediately trailing the plan -- refused through review round 2 -- now
+    ACCEPTED: a plan is never an array, so an array can never be a second
+    plan, whatever position it appears in. Stated explicitly because it is
+    an intentional verdict change, not an oversight -- see CHANGELOG.
+    """
+    decoder = json.JSONDecoder()
+
     try:
-        return json.loads(text)
+        whole_value, end = decoder.raw_decode(remainder)
+    except json.JSONDecodeError:
+        pass
+    else:
+        if _is_plan_shaped(whole_value) and not remainder[end:].strip():
+            return True
+
+    search_from = 0
+    while True:
+        brace_index = remainder.find("{", search_from)
+        if brace_index == -1:
+            return False
+        try:
+            candidate, _end = decoder.raw_decode(remainder, brace_index)
+        except json.JSONDecodeError:
+            search_from = brace_index + 1
+            continue
+        if _is_plan_shaped(candidate):
+            return True
+        search_from = brace_index + 1
+
+
+def _parse_model_json(raw: str) -> Any:
+    """Parse the model's response as JSON -- bounded repair for trailing
+    content, never for a malformed value (issue #35; see
+    `_contains_second_json_value` for the round-2 refinement of exactly what
+    counts as a second value).
+
+    A model sometimes answers correctly and then keeps writing: a
+    "**Rationale:**" bullet list after its own closing code fence, even
+    though the system prompt says "nothing else -- no ... prose before or
+    after it". Measured against 40 real Anthropic calls (20 on a clean
+    control, 20 on a defective fixture; see the PR this fixed): ~30-40% of
+    BOTH failed this exact way, every single failure trailing PROSE, never
+    a second JSON object. `json.loads` rejects the whole response for that
+    trailing content (`JSONDecodeError: Extra data`) even though the
+    first, complete JSON value is exactly the answer that was asked for --
+    discarding a correct answer instead of a malformed one.
+
+    This decodes only the FIRST complete JSON value (`json.JSONDecoder.
+    raw_decode`) and accepts it unless `_contains_second_json_value` finds a
+    second, genuinely ambiguous JSON value in what remains: guessing which of
+    two values the model "really meant" would silently discard one it
+    actually produced.
+    """
+    text = _strip_code_fence(raw)
+    decoder = json.JSONDecoder()
+    try:
+        value, end_index = decoder.raw_decode(text)
     except json.JSONDecodeError as exc:
         raise AudError(
             code="bad_model_output",
             message=f"Model response was not valid JSON: {exc}",
             remedy="Retry advise/master, or build the chain by hand with the deterministic stage verbs.",
         ) from exc
+    remainder = text[end_index:].strip()
+    if not remainder:
+        return value
+    if not _contains_second_json_value(remainder):
+        return value  # trailing content is not a second value -- prose the model kept writing; safe to accept
+    raise AudError(
+        code="bad_model_output",
+        message=(
+            "Model response contained a second, distinct JSON value after the first complete one "
+            f"(trailing content starts: {remainder[:200]!r})"
+        ),
+        remedy="Retry advise/master -- the model proposed two different plans and aud cannot pick between them.",
+    )
 
 
 # --- Deterministic guard: an EQ move must not contradict its own signed
@@ -380,6 +551,6 @@ def advise(
         ceiling_dbtp=ceiling_dbtp,
         reference_measurements=reference_measurements,
     )
-    raw = backend.complete(system, user, model=model, max_tokens=max_tokens)
+    raw = backend.complete(system, user, model=model, max_tokens=max_tokens, response_schema=_ADVISE_RESPONSE_SCHEMA)
     proposal = _parse_model_json(raw)
     return _validate_and_build_plan(proposal, measurements)
