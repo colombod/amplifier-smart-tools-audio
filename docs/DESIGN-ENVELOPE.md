@@ -217,6 +217,13 @@ extra installed:
   stays clean; anyone who installs `speech` locally and runs the licence suite gets a loud,
   correct failure naming every one of those binaries.
 
+**Stated assumption, not yet covered: macOS.** Discovery keys on the
+auditwheel/delvewheel `*.libs/` layout that Linux and Windows wheels use. A
+macOS wheel instead bundles its shared libraries under `<package>/.dylibs/`
+(the delocate convention), which `discover_bundled_runtime_libs_dirs()` does
+not walk. CI runs Ubuntu-only, so this is an undetected gap today, not a
+fixed one -- recorded here rather than left implicit.
+
 **The method trap, recorded because it nearly produced a false clean result.** A first audit
 truncated licence strings to 45 characters and reported a clean tree, **missing the bundled
 runtimes entirely** -- because scipy's `License` field is **47,559 characters**: the BSD text

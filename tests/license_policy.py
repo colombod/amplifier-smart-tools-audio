@@ -645,7 +645,14 @@ def discover_bundled_runtime_libs_dirs(roots: list[Path] | None = None) -> list[
     arriving with ANY optional extra -- not just numpy/scipy -- visible to
     the scan with no code change needed to add its package name to a tuple
     first. `roots` is exposed for tests; production callers omit it and get
-    `_all_site_packages_roots()`."""
+    `_all_site_packages_roots()`.
+
+    Stated assumption, not yet covered: this keys on the auditwheel/delvewheel
+    `*.libs/` layout used on Linux and Windows. A macOS wheel instead bundles
+    its shared libraries under `<package>/.dylibs/` (the delocate convention),
+    which this function does not walk. CI is Ubuntu-only, so that gap is
+    undetected today rather than fixed -- see docs/DESIGN-ENVELOPE.md's
+    "Dependency licences" section for the same note against the scan."""
     if roots is None:
         roots = _all_site_packages_roots()
     dirs: list[Path] = []

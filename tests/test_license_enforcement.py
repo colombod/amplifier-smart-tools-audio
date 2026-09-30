@@ -598,6 +598,59 @@ def test_discovery_deduplicates_across_repeated_roots(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Review round 1 (PR #45, issue #43): the fix itself was untested in CI.
+#
+# Every proof above either calls `discover_bundled_runtime_libs_dirs` directly
+# (bypassing `scan_bundled_runtime_binaries` entirely) or calls
+# `scan_bundled_runtime_binaries()` against the REAL numpy/scipy `.libs/`
+# directories in this environment, which contain nothing unacknowledged
+# either way. A `scan_bundled_runtime_binaries()` silently reverted to the old
+# hardcoded `BUNDLED_RUNTIME_PACKAGE_NAMES = ("numpy", "scipy")` tuple, or one
+# that calls discovery and then discards the result, produces the exact same
+# "1027 passed, 2 skipped" -- the only test that plants an unlisted directory
+# and drives it through the real scan (`test_planting_an_unacknowledged_
+# binary_in_python_stretch_libs_is_caught`) is SKIPPED in CI's default,
+# no-extras environment. Nothing distinguished the fixed scan from the
+# reintroduced bug. Proved directly: see this PR's mutation transcripts.
+# ---------------------------------------------------------------------------
+
+
+def test_scan_bundled_runtime_binaries_default_call_goes_through_real_discovery(monkeypatch, tmp_path):
+    """Runs in the default (no extras) environment CI actually uses -- no
+    skip. Drives the REAL production call, `scan_bundled_runtime_binaries()`
+    with NO arguments, all the way through `discover_bundled_runtime_libs_
+    dirs()`'s `roots=None` branch to `_all_site_packages_roots()` -- the exact
+    path that a hardcoded-tuple regression, or a scan that discovers dirs and
+    then ignores them, would break.
+
+    `_all_site_packages_roots` is monkeypatched to return exactly one
+    synthetic root, so this is hermetic: no real site-packages content can
+    make it pass or fail. That synthetic root carries a `.libs/` directory
+    under a name that is not `numpy`, `scipy`, or anywhere on any enumerated
+    list (`zzz_unlisted.libs/`) holding one unacknowledged binary; the
+    assertion names that exact planted path in the reported violations.
+    """
+    fake_root = tmp_path / "fake_site_packages"
+    fake_root.mkdir()
+    libs_dir = fake_root / "zzz_unlisted.libs"
+    libs_dir.mkdir()
+    planted = libs_dir / "libsneaky.so.1"
+    planted.write_bytes(b"an unreviewed, unacknowledged bundled binary")
+
+    monkeypatch.setattr(license_policy, "_all_site_packages_roots", lambda: [fake_root])
+
+    violations = scan_bundled_runtime_binaries()
+
+    assert any(v.path == str(planted) for v in violations), (
+        "scan_bundled_runtime_binaries() (called with NO arguments -- the real production "
+        f"entry point) did not report {planted}. It did not go through discover_bundled_"
+        "runtime_libs_dirs()'s real _all_site_packages_roots() seam -- either the scan is not "
+        "discovery-based, or discovery's result is being discarded. "
+        f"Violations seen: {violations}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # The acceptance criterion, run for real: with the Signalsmith Stretch extra
 # installed (so `python_stretch.libs/` genuinely exists), plant an
 # unacknowledged binary in it and prove a NAMED test fails; remove it and

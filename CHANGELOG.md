@@ -32,7 +32,17 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   enumeration) reproduced the exact scope gap RED -- the same plant is silently missed -- then
   was restored byte-identical, sha256-verified. Default tree (no extras) still passes every
   signal, 1024 -> 1029 collected (+5 net: 3 always-run, 2 stretch-conditional), 1027 passed /
-  2 skipped, 0 warnings.
+  2 skipped, 0 warnings. **Review round 1**: the only real plant/remove proof above (the
+  `python_stretch.libs/` test) is skipped in CI's default no-extras environment, so nothing
+  there actually distinguished the fixed, discovery-based scan from the original hardcoded-
+  tuple bug -- reverting `scan_bundled_runtime_binaries()` to the old tuple, or discovering
+  directories and then discarding them, both still produced 1027 passed / 2 skipped. Added
+  `test_scan_bundled_runtime_binaries_default_call_goes_through_real_discovery`, which
+  monkeypatches `_all_site_packages_roots()` to a single synthetic root and drives the real,
+  argument-less `scan_bundled_runtime_binaries()` production call through it; both mutations
+  now reproduce RED by that test's name, verified, then restored byte-identical (sha256).
+  Also documented the stated, uncovered macOS `.dylibs/` layout in the discovery function's
+  docstring and in docs/DESIGN-ENVELOPE.md -- not implemented, named.
 - **Issue #44 filed, not fixed here: the `speech` extra bundles at least three GPL-family
   binaries.** Widening the bundled-runtime scan to discovery (above) also made `av.libs/` and
   `ctranslate2.libs/` visible when the `speech` extra (`faster-whisper` -> `av`/`ctranslate2`)
