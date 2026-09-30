@@ -15,6 +15,7 @@ verified directly -- see the PR description for the red-then-green transcripts.
 from __future__ import annotations
 
 from importlib.metadata import distribution
+from pathlib import Path
 
 import pytest
 
@@ -31,6 +32,7 @@ from tests.license_policy import (
     _scan_libs_dir,
     classify,
     denylist_match,
+    discover_bundled_runtime_libs_dirs,
     iter_declared_dependency_specs,
     scan_bundled_runtime_binaries,
     scan_declared_dependencies_against_denylist,
@@ -528,6 +530,203 @@ def test_bundled_runtime_acknowledgement_patterns_match_real_recorded_filenames(
     assert any(ack.pattern.match(filename) for ack in license_policy.BUNDLED_RUNTIME_ACKNOWLEDGEMENTS), (
         f"{filename!r} (a real filename recorded from this environment) does not match any "
         "acknowledged pattern -- the regexes have drifted from what auditwheel actually produces."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Scope-gap fix (issue #43): the bundled-runtime scan used to be driven by a
+# hardcoded `BUNDLED_RUNTIME_PACKAGE_NAMES = ("numpy", "scipy")` tuple, so a
+# bundled binary arriving with any OTHER optional extra (e.g. `python_stretch.
+# libs/`, shipped by the `stretch` extra) was structurally invisible -- not
+# merely unacknowledged, never even looked at. `discover_bundled_runtime_libs_
+# dirs` replaces that with directory-shape discovery. These tests prove the
+# replacement actually works, in both directions: it still finds the real
+# numpy/scipy directories (no coverage lost), AND it finds a directory whose
+# package name was never enumerated anywhere (the actual gap being closed).
+# ---------------------------------------------------------------------------
+
+
+def test_discovery_finds_the_real_numpy_and_scipy_libs_dirs_by_shape_not_name():
+    """No coverage regression: the discovery-based scan must still find the
+    same real directories the old name-keyed `_libs_dirs_for(("numpy",
+    "scipy"))` found -- without being told those two names."""
+    from tests.license_policy import _libs_dirs_for
+
+    discovered = {str(p) for p in discover_bundled_runtime_libs_dirs()}
+    named = {str(p) for p in _libs_dirs_for(("numpy", "scipy"))}
+    assert named, "expected at least one of numpy.libs/, scipy.libs/ to exist in this environment"
+    assert named <= discovered, (
+        f"discovery-based scan lost coverage of directories the old name-keyed scan found: missing {named - discovered}"
+    )
+
+
+def test_discovery_finds_a_libs_dir_under_an_arbitrary_unenumerated_package_name(tmp_path):
+    """The actual gap being closed, proved directly and synthetically: a
+    `<anything>.libs/` directory whose package name appears NOWHERE in this
+    module (not in `BUNDLED_RUNTIME_PACKAGE_NAMES`, not in any enumerated
+    list) is still discovered, because discovery keys off the `*.libs/`
+    directory shape, not a name anyone had to remember to add first. This is
+    exactly the shape `python_stretch.libs/` has, and exactly what a fixed
+    `("numpy", "scipy")` tuple could never have found regardless of what name
+    was added to it later -- the NEXT unenumerated extra would hit the same
+    gap again."""
+    root = tmp_path / "fake_site_packages"
+    root.mkdir()
+    surprise_dir = root / "a_totally_unenumerated_future_extra.libs"
+    surprise_dir.mkdir()
+    (surprise_dir / "libwhatever-deadbeef.so.1.0.0").write_bytes(b"irrelevant to this test")
+
+    discovered = discover_bundled_runtime_libs_dirs(roots=[root])
+
+    assert discovered == [surprise_dir], f"expected discovery to find {surprise_dir} by shape alone; got {discovered}"
+    assert "a_totally_unenumerated_future_extra" not in license_policy.BUNDLED_RUNTIME_PACKAGE_NAMES, (
+        "guards the guard: this test is only meaningful if the name really is unenumerated"
+    )
+
+
+def test_discovery_deduplicates_across_repeated_roots(tmp_path):
+    """Guards the guard: the same root passed twice (as could happen if two
+    distinct distributions resolve to the same site-packages directory) must
+    not double-count its `.libs/` directories."""
+    root = tmp_path / "site_packages"
+    root.mkdir()
+    (root / "onepkg.libs").mkdir()
+
+    discovered = discover_bundled_runtime_libs_dirs(roots=[root, root])
+
+    assert discovered == [root / "onepkg.libs"]
+
+
+# ---------------------------------------------------------------------------
+# Review round 1 (PR #45, issue #43): the fix itself was untested in CI.
+#
+# Every proof above either calls `discover_bundled_runtime_libs_dirs` directly
+# (bypassing `scan_bundled_runtime_binaries` entirely) or calls
+# `scan_bundled_runtime_binaries()` against the REAL numpy/scipy `.libs/`
+# directories in this environment, which contain nothing unacknowledged
+# either way. A `scan_bundled_runtime_binaries()` silently reverted to the old
+# hardcoded `BUNDLED_RUNTIME_PACKAGE_NAMES = ("numpy", "scipy")` tuple, or one
+# that calls discovery and then discards the result, produces the exact same
+# "1027 passed, 2 skipped" -- the only test that plants an unlisted directory
+# and drives it through the real scan (`test_planting_an_unacknowledged_
+# binary_in_python_stretch_libs_is_caught`) is SKIPPED in CI's default,
+# no-extras environment. Nothing distinguished the fixed scan from the
+# reintroduced bug. Proved directly: see this PR's mutation transcripts.
+# ---------------------------------------------------------------------------
+
+
+def test_scan_bundled_runtime_binaries_default_call_goes_through_real_discovery(monkeypatch, tmp_path):
+    """Runs in the default (no extras) environment CI actually uses -- no
+    skip. Drives the REAL production call, `scan_bundled_runtime_binaries()`
+    with NO arguments, all the way through `discover_bundled_runtime_libs_
+    dirs()`'s `roots=None` branch to `_all_site_packages_roots()` -- the exact
+    path that a hardcoded-tuple regression, or a scan that discovers dirs and
+    then ignores them, would break.
+
+    `_all_site_packages_roots` is monkeypatched to return exactly one
+    synthetic root, so this is hermetic: no real site-packages content can
+    make it pass or fail. That synthetic root carries a `.libs/` directory
+    under a name that is not `numpy`, `scipy`, or anywhere on any enumerated
+    list (`zzz_unlisted.libs/`) holding one unacknowledged binary; the
+    assertion names that exact planted path in the reported violations.
+    """
+    fake_root = tmp_path / "fake_site_packages"
+    fake_root.mkdir()
+    libs_dir = fake_root / "zzz_unlisted.libs"
+    libs_dir.mkdir()
+    planted = libs_dir / "libsneaky.so.1"
+    planted.write_bytes(b"an unreviewed, unacknowledged bundled binary")
+
+    monkeypatch.setattr(license_policy, "_all_site_packages_roots", lambda: [fake_root])
+
+    violations = scan_bundled_runtime_binaries()
+
+    assert any(v.path == str(planted) for v in violations), (
+        "scan_bundled_runtime_binaries() (called with NO arguments -- the real production "
+        f"entry point) did not report {planted}. It did not go through discover_bundled_"
+        "runtime_libs_dirs()'s real _all_site_packages_roots() seam -- either the scan is not "
+        "discovery-based, or discovery's result is being discarded. "
+        f"Violations seen: {violations}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The acceptance criterion, run for real: with the Signalsmith Stretch extra
+# installed (so `python_stretch.libs/` genuinely exists), plant an
+# unacknowledged binary in it and prove a NAMED test fails; remove it and
+# prove green again. SKIPPED, with a stated reason, when the extra is not
+# installed -- see this test's skip message for exactly why, and the CI note
+# in docs/DESIGN-ENVELOPE.md for why CI does not install it.
+# ---------------------------------------------------------------------------
+
+
+def _find_python_stretch_libs_dir() -> Path | None:
+    for d in discover_bundled_runtime_libs_dirs():
+        if d.name == "python_stretch.libs":
+            return d
+    return None
+
+
+def test_planting_an_unacknowledged_binary_in_python_stretch_libs_is_caught():
+    """The real-environment half of the acceptance proof (not the synthetic
+    `tmp_path` proof already covered by
+    `test_bundled_runtime_scan_fails_on_a_new_unacknowledged_binary`): plant a
+    real file inside the REAL, discovered `python_stretch.libs/` directory
+    that this exact environment has (requires the `stretch` extra:
+    `uv sync --extra stretch`), and confirm `scan_bundled_runtime_binaries()`
+    -- with NO directories pre-specified, i.e. via discovery -- both fails
+    while the plant is present and passes cleanly once it is removed. The
+    planted file is always removed, even if an assertion above it fails."""
+    libs_dir = _find_python_stretch_libs_dir()
+    if libs_dir is None:
+        pytest.skip(
+            "python_stretch.libs/ does not exist in this environment -- the `stretch` extra "
+            "(`uv sync --extra stretch`) is not installed. CI's `uv sync` does not install any "
+            "optional extra (see .github/workflows/ci.yml), so this coverage does not run there; "
+            "it runs whenever a developer or a future CI job installs the extra locally."
+        )
+        return  # pytest.skip() never returns; this satisfies the type checker's narrowing.
+
+    planted = libs_dir / "libsneaky-deadbeef.so.1.0.0"
+    assert not planted.exists(), f"{planted} already existed before planting -- clean up manually and re-run"
+    try:
+        planted.write_bytes(b"an unreviewed, unacknowledged bundled binary")
+
+        violations = scan_bundled_runtime_binaries()
+
+        assert any(v.path == str(planted) for v in violations), (
+            f"planting {planted} did not produce a violation naming it -- discovery-based "
+            f"scan_bundled_runtime_binaries() did not examine python_stretch.libs/. Violations seen: "
+            f"{violations}"
+        )
+    finally:
+        planted.unlink(missing_ok=True)
+
+    violations_after_removal = scan_bundled_runtime_binaries()
+    assert violations_after_removal == [], (
+        f"expected a clean scan after removing the planted binary; got {violations_after_removal}"
+    )
+
+
+def test_python_stretch_libs_dir_itself_is_empty_of_binaries_today():
+    """Confirms the premise stated in issue #43: `python_stretch.libs/` exists
+    (with the `stretch` extra installed) but currently ships no bundled shared
+    library at all in python-stretch 0.3.1 -- so today this is a SCOPE gap in
+    the scan, not a live licence violation. Skipped, with reason, exactly like
+    the plant/remove test above, when the extra is not installed."""
+    libs_dir = _find_python_stretch_libs_dir()
+    if libs_dir is None:
+        pytest.skip("python_stretch.libs/ does not exist in this environment -- the `stretch` extra is not installed.")
+        return  # pytest.skip() never returns; this satisfies the type checker's narrowing.
+
+    files = [entry.name for entry in libs_dir.iterdir() if entry.is_file()]
+    assert files == [], (
+        f"python_stretch.libs/ now ships {files} -- python-stretch has started bundling a shared "
+        "library. This is no longer just a scope gap: determine its licence from real evidence "
+        "(the package's own licence files, wheel METADATA, or upstream) before assuming it is "
+        "MIT-compatible, and add a reviewed BUNDLED_RUNTIME_ACKNOWLEDGEMENTS entry only once that "
+        "licence is confirmed -- see AGENTS.md section 1 and docs/DESIGN-ENVELOPE.md 'Dependency "
+        "licences'."
     )
 
 
