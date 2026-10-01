@@ -171,7 +171,7 @@ A filler word — "umm", "uh", "ehm" — or a hesitation long enough to be treat
 |---|---|---|
 | `words` | array of string | The filler vocabulary that was searched for. |
 | `min_pause_ms` | float | Pauses at least this long were reported as hesitations. |
-| `engine` | string | The recognition backend, e.g. `"faster-whisper"`. |
+| `engine` | string | The recognition backend, e.g. `"openai-whisper"`. |
 | `model` | string | The model identifier that backend was run with. |
 | `degenerate_words_dropped` | integer, optional | How many recognised words the backend reported with `start == end` (a zero-duration word), and were therefore dropped rather than turned into an invalid `end_s > start_s` region. `0` if none were. **Optional**: a document from a build predating this field will not have it; a reader must not require it. |
 
@@ -243,7 +243,7 @@ All three are **read-only**. They open the file, measure, and print a regions do
 not append to a mastering plan, they do not accept one on stdin, and they write nothing to disk.
 
 `detect fillers` needs word-level timings, which needs speech recognition, which is the `speech`
-extra (`faster-whisper`). With the extra absent it **refuses**, naming the extra and how to
+extra (`openai-whisper`). With the extra absent it **refuses**, naming the extra and how to
 install it:
 
 ```json

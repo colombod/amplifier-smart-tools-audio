@@ -91,7 +91,7 @@ requires:
       deterministic verb.
     optional: true
     install: docs/CONFIGURATION.md
-  - name: faster-whisper
+  - name: openai-whisper
     purpose: >-
       Provides the word-level speech timings that `detect fillers` needs to locate "umm", "uh"
       and "ehm" in a recording. Installed as the `speech` extra of this package, not as a host
@@ -99,8 +99,10 @@ requires:
       extra. Nothing else changes -- `detect silence`, `detect transients`, `cut`,
       `strip-silence` and the whole mastering chain are unaffected, because none of them needs
       to know what was said. It is a LOCAL model: no AI provider, no credential, and no network
-      call once the model is cached. faster-whisper is MIT; a GPL-family recogniser would
-      relicense this tool and is excluded on purpose.
+      call once the model is cached. openai-whisper is MIT (code and model weights); a
+      GPL-family recogniser would relicense this tool and is excluded on purpose -- see
+      docs/CONFIGURATION.md for why the `speech` extra's `torch` dependency must be installed
+      from PyPI's CPU-only wheel index.
     optional: true
     install: docs/CONFIGURATION.md
   - name: ffmpeg

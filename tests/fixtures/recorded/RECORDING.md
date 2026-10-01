@@ -8,12 +8,16 @@ with attributes enumerated via `dir()`/`vars()` rather than assumed.
 
 - **Recorded:** 2026-09-19 (UTC), in a throwaway Incus container (Digital Twin
   Universe), destroyed immediately afterwards. Nothing was installed on the host.
-- **Recorded by:** `scripts/01_gen_speech.sh`, `scripts/02_record_whisper.py`,
-  `scripts/03_record_stretch.py`, `scripts/04_record_end_to_end.sh` — all four are
-  in `scripts/`, byte-identical to what ran.
+  (The `openai_whisper/` fixtures below were recorded differently, on 2026-10-01 — see
+  that section for why.)
+- **Recorded by:** `scripts/01_gen_speech.sh`, `scripts/03_record_stretch.py`,
+  `scripts/04_record_end_to_end.sh`, `scripts/05_record_openai_whisper.py` — all four
+  are in `scripts/`, byte-identical to what ran. (`scripts/02_record_whisper.py`, which
+  recorded the now-deleted `faster_whisper/` fixtures, was deleted alongside them.)
 - **No provider credential was present.** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
   `GOOGLE_API_KEY`, `GEMINI_API_KEY` and `AZURE_OPENAI_API_KEY` were never
-  forwarded into the container. Neither library needs one.
+  forwarded into the container, and were not present when `05_record_openai_whisper.py`
+  ran directly in this repo's `.venv` either. Neither library needs one.
 
 `anthropic/` in this directory was **not** produced by this run and is not covered
 by this file.
@@ -22,15 +26,19 @@ by this file.
 
 | Component | Version |
 |---|---|
-| `aud` | 0.8.0 (`uv tool install "aud[speech,stretch] @ git+https://github.com/colombod/amplifier-smart-tools-audio"`) |
-| `faster-whisper` | 1.2.1 |
-| `ctranslate2` | 4.8.2 |
+| `aud` | 0.8.0 (original run, `faster-whisper`/`python-stretch`); 0.12.0 (the `openai_whisper/` re-recording) |
+| `openai-whisper` | 20250625 |
+| `torch` | 2.14.1+cpu |
 | `python-stretch` | 0.3.1 (`Signalsmith.abi3.so`, nanobind) |
-| `numpy` / `scipy` / `soundfile` | 2.5.3 / 1.18.1 / 0.13.1 |
-| Python | 3.12.3 (Ubuntu 24.04, CPU only, no CUDA) |
-| Whisper model | `base` — the value of `aud.dsp.speech._MODEL_SIZE_DEFAULT` |
-| Compute type | ctranslate2 fell back to **float32** ("target device does not support efficient float16") |
+| `numpy` / `scipy` / `soundfile` | 2.4.6 / 1.17.1 / 0.13.1 (current, re-recording run) |
+| Python | 3.11.15 (the `openai_whisper/` re-recording); 3.12.3, Ubuntu 24.04 (original run) |
+| Whisper model | `base` — the value of `aud.dsp.speech._MODEL_SIZE_DEFAULT`, unchanged |
+| Compute type | CPU-only, float32 (`fp16=False` passed explicitly — see `aud.dsp.speech`'s docstring) |
 | Speech source | `piper-tts`, voice `en_US-lessac-medium` (MIT) |
+
+`faster-whisper` 1.2.1 / `ctranslate2` 4.8.2 recorded the original `faster_whisper/`
+fixtures, since DELETED (issue #44) — kept here only as a historical record of what
+produced the now-superseded data referenced in the old-vs-new comparison below.
 
 ## What is here
 
@@ -63,43 +71,68 @@ done
 Byte-identity of a regenerated file depends on the ffmpeg build; check against
 `SHA256SUMS.txt` before assuming it.
 
-### `faster_whisper/` — 18 transcription recordings
+### `openai_whisper/` — 10 transcription recordings (issue #44, superseded `faster_whisper/`)
 
-Called directly, never through `aud`, in the shape `aud.dsp.speech.detect_fillers`
-uses: `WhisperModel("base").transcribe(audio_float32, word_timestamps=True)`.
+**`faster_whisper/` (18 recordings, `faster-whisper`/`ctranslate2`) was DELETED** when the
+`speech` extra's engine was replaced with `openai-whisper` (issue #44: `faster-whisper`'s `av`
+dependency bundles a GPL-family FFmpeg build — see AGENTS.md section 1 and
+`docs/DESIGN-ENVELOPE.md`'s "Dependency licences"). No test references it any more. This section
+replaces the equivalent one that used to describe it; the "old vs new" table below is the direct
+comparison, kept so the engine swap's behavioural consequences stay visible rather than silently
+overwritten.
 
-Two input paths are recorded for every file, because `aud` has one of each:
+**Recorded differently from the rest of this directory**: not in a throwaway DTU container, but
+directly in this repository's own `.venv` (with the `speech` extra installed per this PR) —
+`tests/fixtures/recorded/scripts/05_record_openai_whisper.py`, byte-identical to what ran. No
+provider credential was present or read either way (openai-whisper needs none). Recorded
+2026-10-01 (UTC): `openai-whisper` 20250625, `torch` 2.14.1+cpu, Python 3.11.15, CPU only
+(no CUDA used; `fp16=False` passed explicitly). Model `base` — the value of
+`aud.dsp.speech._MODEL_SIZE_DEFAULT`, unchanged.
 
-- `__raw` — the array at **its own** sample rate handed straight to `transcribe()`.
-  faster-whisper has no sample-rate parameter and assumes 16 kHz regardless, so this
-  is the mis-timing path (defect D1).
-- `__resampled_16k` — the array put through `scipy.signal.resample_poly` to 16 kHz
-  first, which is what `aud.dsp.speech._resample_to_whisper_rate` does today.
+**Scope, disclosed**: only the SHORT fixture matrix (`speech_short_{16000,22050,44100,48000}`,
+both `raw` and `resampled_16k` paths) plus `nospeech_silence_16000`/`nospeech_tone_16000` were
+re-recorded. The `speech_long_*` recordings (faster-whisper's 64s file) were NOT re-recorded —
+a real attempt on this host did not complete within several minutes of wall-clock CPU time per
+file, which was judged out of budget for this change; every test that used to depend on a
+`speech_long_*` recording was rewritten against the short-fixture matrix instead (see
+`tests/test_dsp_detect.py` and `tests/test_recorded_awkwardness_guard.py` for exactly how). If
+`speech_long_*` fixtures are wanted later, `05_record_openai_whisper.py`'s `jobs` list is the
+place to add them back.
 
-Each file carries `provenance` (versions, model, source wav sha256, ISO timestamp,
-the exact snippet), `input` (duration, rate, channels, samples fed), `type_inventory`
-(the full `dir()` of `TranscriptionInfo`, `Segment` and `Word`), `summary`,
-and then `info`, `segments` and `words_flat` serialised in full.
+Called directly, never through `aud`, in the shape `aud.dsp.speech.detect_fillers` uses:
+`whisper.load_model("base").transcribe(audio_float32, word_timestamps=True, fp16=False)`. The
+same two input paths as before are recorded for every file (`__raw` / `__resampled_16k`).
 
-`_index.json` is the summary table. Key rows:
+`_index.json` is the summary table:
 
 | source | path | segs | words | degenerate | last word end |
 |---|---|---|---|---|---|
 | short 16000 | raw | 2 | 21 | 0 | 7.72 |
-| short 22050 | raw | 1 | 20 | 0 | **10.16** (true 7.72; ×1.378 = 22050/16000) |
-| short 44100 | raw | 1 | 17 | **3** | 20.32 |
-| short 48000 | raw | 3 | 27 | **4** | 23.48 |
-| short {16,22,44,48}k | resampled_16k | 2 | 21 | 0 | 7.72 (all four identical) |
-| long 44100 | raw | 16 | 67 | **5** | 177.54 |
-| long 48000 | resampled_16k | 9 | 106 | **1** | 64.26 |
-| nospeech silence | raw | 1 | **1** | 0 | 4.98 |
+| short 16000 | resampled_16k | 2 | 21 | 0 | 7.72 |
+| short 22050 | raw | 2 | 21 | 0 | **10.66** (true 7.72; ×1.381 ≈ 22050/16000) |
+| short 22050 | resampled_16k | 2 | 21 | 0 | 7.72 |
+| short 44100 | raw | 2 | 11 | **4** | 11.4 (badly mistimed/misrecognized, not just scaled) |
+| short 44100 | resampled_16k | 2 | 21 | 0 | 7.72 |
+| short 48000 | raw | 3 | 26 | **5** | 23.3 (badly mistimed/misrecognized, not just scaled) |
+| short 48000 | resampled_16k | 2 | 21 | 0 | 7.72 |
+| nospeech silence | raw | **0** | **0** | 0 | — |
 | nospeech tone | raw | 0 | 0 | — | — |
 
-What the `Word` object really carries: `start`, `end`, `word`, `probability` — and
-nothing else. It is a **dataclass** (not a NamedTuple): `_fields` is empty,
-`_asdict()` exists but is deprecated, `__dict__` is present. `TranscriptionInfo`
-carries `language`, `language_probability`, `duration`, `duration_after_vad`,
-`all_language_probs` (99 languages), `transcription_options`, `vad_options`.
+**Old (faster-whisper) vs new (openai-whisper) — same fixtures, both real, measured directly:**
+
+| Property | faster-whisper (deleted) | openai-whisper (current) |
+|---|---|---|
+| Resample-path short fixtures (16/22/44/48k → 16k) | 2 segs / 21 words / 7.72s, all four identical | same: 2 segs / 21 words / 7.72s, all four identical |
+| `short_22050` raw (no resample) mistiming | 10.16s (×1.378) | 10.66s (×1.381 ≈ same ratio, small recognition variance) |
+| `short_44100`/`short_48000` raw (no resample) | mistimed but still mostly-correct words, some degenerate | badly mangled recognition (e.g. "Hain, a-sa-sa-la-na-ta-pa-la" gibberish) AND degenerate words — the uncorrected-rate path is unusable with either engine, worse with this one |
+| Degenerate (`start == end`) words | present (13 across all runs, incl. one real degenerate FILLER word on a `speech_long_48000` resampled path) | present (9 across the short-fixture matrix: 4 on `short_44100__raw`, 5 on `short_48000__raw`) — **none of them are filler words** in this round's fixtures; no real degenerate FILLER word was captured (see the scope note above re: `speech_long_*`) |
+| **Silence (`nospeech_silence_16000`)** | **hallucinated ONE word** ("the one most important behavioural quirk" the old fixtures existed to pin) | **returns ZERO segments, ZERO words** — a genuine, measured behavioural improvement; no hallucination on digital silence |
+| Pure tone (`nospeech_tone_16000`) | 0 segments (already correct) | 0 segments (unchanged) |
+| Word object shape | `faster_whisper.Word`, attribute-access dataclass (`.start`/`.end`/`.word`/`.probability`) | plain Python `dict` (`word["start"]`/etc.) — bridged through the new `aud.dsp.speech._WordAdapter` so `_words_to_regions` keeps its attribute-access contract |
+| Word-end offset vs perceptual end | not independently re-measured this round (not practical to measure "perceptual" end without a human listener) | not independently re-measured this round, same reason — disclosed as unverified in both directions, not claimed fixed or unfixed |
+
+What the recognised word really carries: `word`, `start`, `end`, `probability` — and nothing
+else, as a plain dict (confirmed directly against a real installation, not assumed from docs).
 
 ### `python_stretch/` — the timeFactor convention, measured
 
@@ -158,19 +191,17 @@ amplifier-digital-twin launch tests/fixtures/recorded/scripts/aud-record-fixture
   --name aud-record-fixtures
 amplifier-digital-twin check-readiness aud-record-fixtures
 
-# 2. Push the four scripts and run them in order.
+# 2. Push the scripts and run them in order (02_record_whisper.py, which recorded
+# the now-deleted faster_whisper/ fixtures, no longer exists -- see "openai_whisper/"
+# above for how that engine's fixtures are recorded instead).
 amplifier-digital-twin file-push aud-record-fixtures \
   tests/fixtures/recorded/scripts/01_gen_speech.sh /rec/01_gen_speech.sh --mode 0755
-amplifier-digital-twin file-push aud-record-fixtures \
-  tests/fixtures/recorded/scripts/02_record_whisper.py /rec/02_record_whisper.py
 amplifier-digital-twin file-push aud-record-fixtures \
   tests/fixtures/recorded/scripts/03_record_stretch.py /rec/03_record_stretch.py
 amplifier-digital-twin file-push aud-record-fixtures \
   tests/fixtures/recorded/scripts/04_record_end_to_end.sh /rec/04_record_end_to_end.sh --mode 0755
 
 amplifier-digital-twin exec --stream aud-record-fixtures -- bash /rec/01_gen_speech.sh
-amplifier-digital-twin exec --stream --timeout none aud-record-fixtures -- \
-  bash -c '$(uv tool dir)/aud/bin/python /rec/02_record_whisper.py'     # ~6 min
 amplifier-digital-twin exec --stream aud-record-fixtures -- \
   bash -c '$(uv tool dir)/aud/bin/python /rec/03_record_stretch.py'     # seconds
 amplifier-digital-twin exec --stream --timeout 1200 aud-record-fixtures -- \
@@ -178,13 +209,17 @@ amplifier-digital-twin exec --stream --timeout 1200 aud-record-fixtures -- \
 
 # 3. Pull back, then destroy.
 amplifier-digital-twin file-pull -r aud-record-fixtures \
-  /rec/out/faster_whisper /rec/out/python_stretch /rec/out/end_to_end \
+  /rec/out/python_stretch /rec/out/end_to_end \
   tests/fixtures/recorded/
 amplifier-digital-twin destroy aud-record-fixtures
 ```
 
-The whisper `base` model (~142 MiB) is downloaded from HuggingFace on first use and
-is deliberately **not** stored here.
+**`openai_whisper/` is recorded differently** (see that section above for why): with the
+`speech` extra installed (`uv sync --extra speech`), run
+`uv run python tests/fixtures/recorded/scripts/05_record_openai_whisper.py` directly in the
+repo checkout. It writes straight into `tests/fixtures/recorded/openai_whisper/`, no DTU, no
+file-push/file-pull round trip needed. The `base` model (~139 MiB) is downloaded from
+HuggingFace on first use and is deliberately **not** stored here, for either engine.
 
 `anthropic/` has no equivalent script: each of its files is one real,
 successful `POST https://api.anthropic.com/v1/messages` call, captured by hand
@@ -219,7 +254,7 @@ uv run python -c "from tests import replay; print(replay.recorded_versions())"
 
 `tests/test_replay_harness.py::test_recorded_versions_are_pinned_and_visible`
 pins this dict to exact literal values. When a recording is refreshed against
-a newer `faster-whisper`/`python-stretch`/Anthropic API version, that test is
+a newer `openai-whisper`/`torch`/`python-stretch`/Anthropic API version, that test is
 meant to be **edited deliberately** as part of the same change -- a failing
 assertion there means "this replay's version is no longer what the test
 suite claims it is", not a flake to silence.
@@ -228,30 +263,41 @@ suite claims it is", not a flake to silence.
 
 **They do prove**, for the versions in the table above, on CPU/float32:
 
-- The `Word` object carries exactly four fields. A fake with a fifth is inventing;
-  a fake missing `probability` is incomplete.
-- faster-whisper silently mis-times non-16 kHz audio by `sr/16000` — measured, not
-  argued: 7.72 s of speech reported as ending at 10.16 s (22050) and 23.48 s (48000).
-- Degenerate `start == end` words are **real**, not hypothetical. Thirteen of them,
-  across four different runs — including one on the *correct* resampled path
-  (`speech_long_48000__resampled_16k`, word `" um,"` at 24.0 s), which is a filler
-  word that `_words_to_regions` will drop.
-- On silence, faster-whisper does **not** return nothing — it returns one segment
-  with one hallucinated word. Code that treats "no speech" as "empty result" is
-  wrong about this library.
+- The recognised word is a plain dict carrying exactly `word`, `start`, `end`,
+  `probability`. A fake with a fifth key is inventing; a fake missing `probability`
+  is incomplete.
+- openai-whisper silently mis-times non-16 kHz audio the same way faster-whisper did
+  — measured, not argued: 7.72 s of speech reported as ending at 10.66 s (22050, raw,
+  unresampled) on the short fixture.
+- Degenerate `start == end` words are **real**, not hypothetical, with this engine
+  too. Nine of them, across the two badly-mistimed short fixtures (`short_44100__raw`:
+  4, `short_48000__raw`: 5) — though NONE of this round's real degenerate words happen
+  to also be filler words (unlike one of faster-whisper's, which was); see
+  `tests/test_dsp_detect.py`'s synthetic-degenerate-filler-word test for how that
+  specific, still-real risk is covered without a matching real recording.
+- **On silence, openai-whisper DOES return nothing** — zero segments, zero words.
+  This is a genuine, measured behavioural DIFFERENCE from faster-whisper (which
+  returned one segment with one hallucinated word on the identical fixture). Code
+  that assumed "no speech" always means "empty result" was wrong about
+  faster-whisper and is right about openai-whisper — on this one fixture.
 - Signalsmith's `timeFactor` is the reciprocal of the duration ratio, exactly, at
-  six factors, with no latency padding.
+  six factors, with no latency padding (python_stretch, unaffected by this engine
+  swap).
 
 **They do not prove:**
 
-- Anything about other versions. These are `faster-whisper==1.2.1` /
-  `python-stretch==0.3.1`. A replay built on them will keep passing after an upgrade
-  breaks the real thing — the replay is only as current as its last re-record.
-- Anything about GPU or float16. ctranslate2 fell back to float32 here; word
-  timings and hallucinations can differ on other compute types.
-- Determinism of whisper's output. These are single runs. The *same* audio at
-  different rates produced different word counts even on the correct path
-  (long 16000 → 168 words; long 48000 resampled to 16 kHz → 106), so exact-output
+- Anything about other versions. These are `openai-whisper==20250625` /
+  `torch==2.14.1+cpu` / `python-stretch==0.3.1`. A replay built on them will keep
+  passing after an upgrade breaks the real thing — the replay is only as current as
+  its last re-record.
+- Anything about GPU or float16. This was recorded CPU-only with `fp16=False` passed
+  explicitly; word timings and hallucination behaviour can differ on other compute
+  types or with `fp16=True`.
+- Determinism of whisper's output, or anything about the `speech_long_*` fixture
+  family (not re-recorded this round — see the scope note above). The *same* audio at
+  different rates produced materially different recognition on the mistimed raw path
+  even within the short fixtures (e.g. short_16000 → "So, um, ..."; short_44100 raw →
+  "This man, he nourch his emotions...", unrelated gibberish), so exact-output
   assertions on a *different* input than the recorded one are unsafe.
 - That `aud` handles any of it correctly. `end_to_end/` records what `aud` 0.8.0 did,
   not what it should do. If a recording and the product disagree, the recording is

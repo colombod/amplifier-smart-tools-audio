@@ -20,7 +20,7 @@ documented quirks (float32 `timeFactor` read-back, `inputLatency` etc.
 being methods, not attributes) are reproduced deliberately, because a
 replay that is tidier than the real library is a fake again.
 
-`install_faster_whisper_replay`'s `source` parameter is REQUIRED, not
+`install_openai_whisper_replay`'s `source` parameter is REQUIRED, not
 optional: a replay is bound to its exact recorded input bytes (a `Path`,
 sha256-verified against the recording's provenance) or explicitly declared
 `UNBOUND("reason")`. See that function's docstring -- this is the
@@ -134,53 +134,39 @@ def UNBOUND(reason: str) -> UnboundSource:  # noqa: N802 -- reads as a keyword a
 
 
 # ---------------------------------------------------------------------------
-# faster-whisper replay
+# openai-whisper replay (issue #44 -- replaces the former faster-whisper
+# replay below this comment; see git history for the superseded version)
 # ---------------------------------------------------------------------------
 
 
-def _namespace_from_dict(d: dict[str, Any]) -> types.SimpleNamespace:
-    """A plain attribute-access object carrying exactly the recorded fields.
+def _replay_word_dict(d: dict[str, Any]) -> dict[str, Any]:
+    """openai-whisper's real shape: a plain dict, not an attribute-access
+    object -- confirmed directly against a real installation while
+    recording these fixtures (see RECORDING.md). Returned AS a dict, exactly
+    like the real library, so a replay cannot be tidier than reality by
+    accident."""
+    return dict(d)
 
-    No more, no fewer -- `type_inventory` in every faster_whisper recording
-    exists precisely so a replay does not need to guess this shape (see
-    RECORDING.md: `Word` carries exactly `start`, `end`, `word`,
-    `probability`, nothing else; `_fields` is empty because it is a
-    dataclass, not a NamedTuple).
+
+def load_words(recording_name: str) -> list[Any]:
+    """The flat, real, ordered word list from one openai_whisper recording,
+    adapted through `aud.dsp.speech._WordAdapter` -- the same adapter
+    `detect_fillers` itself uses to bridge openai-whisper's dict shape to
+    `_words_to_regions`'s attribute-access `_TimedWord` shape. Real values,
+    real degenerate (`start == end`) words included if present, never
+    filtered.
     """
-    return types.SimpleNamespace(**{k: v for k, v in d.items() if k != "__type__"})
+    from aud.dsp.speech import _WordAdapter
+
+    recording = load_recording("openai_whisper", recording_name)
+    return [_WordAdapter(_replay_word_dict(w)) for w in recording["words_flat"]]
 
 
-def _replay_word(d: dict[str, Any]) -> types.SimpleNamespace:
-    return _namespace_from_dict(d)
-
-
-def _replay_segment(d: dict[str, Any]) -> types.SimpleNamespace:
-    clean = {k: v for k, v in d.items() if k != "__type__"}
-    clean["words"] = [_replay_word(w) for w in clean.get("words", [])]
-    return types.SimpleNamespace(**clean)
-
-
-def _replay_info(d: dict[str, Any]) -> types.SimpleNamespace:
-    return _namespace_from_dict(d)
-
-
-def load_words(recording_name: str) -> list[types.SimpleNamespace]:
-    """The flat, real, ordered word list from one faster_whisper recording.
-
-    Each word exposes exactly `.start`, `.end`, `.word`, `.probability` --
-    real values, real degenerate (`start == end`) words included, never
-    filtered. For feeding straight into `aud.dsp.speech._words_to_regions`
-    without going through a fake `WhisperModel` at all.
-    """
-    recording = load_recording("faster_whisper", recording_name)
-    return [_replay_word(w) for w in recording["words_flat"]]
-
-
-class FasterWhisperReplay:
+class OpenAIWhisperReplay:
     """Records which recording is being replayed and its captured version.
 
-    Exposed so a test (or a future re-record check) can see what version
-    of faster-whisper actually produced the data it is trusting -- see
+    Exposed so a test (or a future re-record check) can see what version of
+    openai-whisper/torch actually produced the data it is trusting -- see
     RECORDING.md's "Versions recorded" table and "What these recordings do
     not prove": a replay is only as current as its last re-record.
     """
@@ -188,34 +174,43 @@ class FasterWhisperReplay:
     def __init__(self, recording: dict[str, Any], recording_name: str, source: Path | UnboundSource) -> None:
         self.recording = recording
         self.name = recording_name
-        self.recorded_version = recording["provenance"]["faster_whisper_version"]
+        self.recorded_version = recording["provenance"]["openai_whisper_version"]
         self.source = source
 
-    def segments(self) -> list[types.SimpleNamespace]:
-        return [_replay_segment(s) for s in self.recording["segments"]]
+    def result(self) -> dict[str, Any]:
+        """The full `model.transcribe(...)` return dict, verbatim."""
+        return {
+            "text": self.recording["summary"]["text"],
+            "segments": [
+                {
+                    "id": seg.get("id"),
+                    "start": seg.get("start"),
+                    "end": seg.get("end"),
+                    "text": seg.get("text"),
+                    "words": [_replay_word_dict(w) for w in seg.get("words", [])],
+                }
+                for seg in self.recording["segments"]
+            ],
+        }
 
-    def info(self) -> types.SimpleNamespace:
-        return _replay_info(self.recording["info"])
 
-
-def install_faster_whisper_replay(
+def install_openai_whisper_replay(
     monkeypatch: Any, recording_name: str, *, source: Path | UnboundSource
-) -> FasterWhisperReplay:
-    """Install a fake `faster_whisper` module that REPLAYS one recorded run.
+) -> OpenAIWhisperReplay:
+    """Install a fake `whisper` module that REPLAYS one recorded run.
 
-    `WhisperModel(model_size).transcribe(audio, word_timestamps=True)`
-    returns `(segments, info)` reproducing `recording_name`'s captured
-    segments/words/info verbatim -- degenerate words, the hallucinated
-    silence word, everything -- regardless of what `audio` it is actually
-    handed. It does not (and structurally cannot) verify that the audio
-    passed in matches what produced the recording: faster-whisper is never
-    actually run.
+    `whisper.load_model(model_size).transcribe(audio, word_timestamps=True,
+    fp16=False)` returns a dict reproducing `recording_name`'s captured
+    segments/words verbatim -- degenerate words (if any), empty-segment
+    silence/tone behaviour, everything -- regardless of what `audio` it is
+    actually handed. It does not (and structurally cannot) verify that the
+    audio passed in matches what produced the recording: openai-whisper is
+    never actually run.
 
     `source` is REQUIRED and is the structural fix for the trap this
     function used to allow: a replay asserting recorded output against
     *similar* (not identical) audio tests nothing (RECORDING.md: the same
-    speech at 16 kHz vs 48-kHz-resampled-to-16-kHz produced 168 vs 106
-    words). Pass either:
+    speech at different rates produced different transcripts). Pass either:
 
     - the `Path` to the exact wav that produced `recording_name` -- its
       sha256 is verified against `recording["provenance"]["source_wav_sha256"]`
@@ -223,35 +218,34 @@ def install_faster_whisper_replay(
       silently drift onto the wrong bytes; or
     - `UNBOUND("reason")` -- an explicit, greppable declaration that this
       particular test drives the call with audio that is NOT the recorded
-      source (e.g. the source wav was never shipped, or the test is
-      deliberately proving something that does not depend on the driving
-      audio), naming why in `reason`.
+      source, naming why in `reason`.
 
     Fails loudly via RecordingNotFoundError if `recording_name` was never
     captured, or if `source` is a `Path` that does not match the recording's
     provenance.
     """
-    recording = load_recording("faster_whisper", recording_name)
+    recording = load_recording("openai_whisper", recording_name)
     if isinstance(source, UnboundSource):
         pass  # explicit exemption already validated (non-empty reason) at construction
     else:
         assert_matches_recorded_source(recording, source)
-    replay = FasterWhisperReplay(recording, recording_name, source)
+    replay = OpenAIWhisperReplay(recording, recording_name, source)
 
-    class _ReplayWhisperModel:
-        def __init__(self, model_size: str) -> None:
-            self.model_size = model_size
+    class _ReplayModel:
+        def transcribe(self, audio: Any, word_timestamps: bool = True, fp16: bool | None = None) -> dict[str, Any]:
+            del audio, word_timestamps, fp16  # replayed output does not depend on the input
+            return replay.result()
 
-        def transcribe(self, audio: Any, word_timestamps: bool = True) -> tuple[list[Any], Any]:
-            del audio, word_timestamps  # replayed output does not depend on the input
-            return replay.segments(), replay.info()
+    def _replay_load_model(model_size: str, *args: Any, **kwargs: Any) -> _ReplayModel:
+        del model_size, args, kwargs
+        return _ReplayModel()
 
-    replay_module = types.ModuleType("faster_whisper")
-    replay_module.WhisperModel = _ReplayWhisperModel  # type: ignore[attr-defined]
+    replay_module = types.ModuleType("whisper")
+    replay_module.load_model = _replay_load_model  # type: ignore[attr-defined]
     replay_module.__replay_recording__ = recording_name  # type: ignore[attr-defined]
     replay_module.__replay_recorded_version__ = replay.recorded_version  # type: ignore[attr-defined]
     replay_module.__replay_source__ = source  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "faster_whisper", replay_module)
+    monkeypatch.setitem(sys.modules, "whisper", replay_module)
     return replay
 
 
@@ -542,12 +536,12 @@ def recorded_versions() -> dict[str, str]:
     library version at once, so a version drift is a visible diff here
     rather than a silent assumption inside a replay.
     """
-    whisper_index = load_recording("faster_whisper", "_index")
+    whisper_index = load_recording("openai_whisper", "_index")
     stretch = load_stretch_recording()
     anthropic_any = load_recording("anthropic", "advise-clean-haiku")
     return {
-        "faster_whisper": whisper_index["faster_whisper_version"],
-        "ctranslate2": whisper_index["ctranslate2_version"],
+        "openai_whisper": whisper_index["openai_whisper_version"],
+        "torch": whisper_index["torch_version"],
         "python_stretch": stretch["provenance"]["python_stretch_version"],
         "anthropic_api_version": anthropic_any["provenance"]["anthropic_version"],
     }

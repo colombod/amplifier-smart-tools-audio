@@ -451,7 +451,7 @@ never raises a user-facing error, and does not know that plans exist.
 | `dsp/detect` | Onset detection (spectral flux / high-frequency content) and noise-floor-relative silence detection. Returns positions; knows nothing about documents. |
 | `core/analysis` | The measurement report: loudness, true peak, crest factor, band energies, sibilance, ambience. What `analyze` returns and what the model reads. |
 | `core/regions` | The regions document: build it, validate it, serialise it. The counterpart of `core/plan`. |
-| `core/speech` | The `speech`-extra boundary. Imports `faster-whisper` **lazily, inside the call**, and raises `speech_extra_missing` when it is absent. |
+| `core/speech` | The `speech`-extra boundary. Imports `whisper` (the `openai-whisper` package) **lazily, inside the call**, and raises `speech_extra_missing` when it is absent. |
 | `core/engine` | Validate the plan, sort into canonical order, build the graph, run it once, emit the report. |
 
 `core/plan`, `core/config` and `core/errors` carry the plan document, settings resolution
@@ -463,7 +463,7 @@ turning those into a regions document — with `source`, `sample_rate` and the m
 this layout exists to draw.
 
 `core/speech` follows the same lazy-import rule as the model backends, for the same reason
-stated in §7: a top-level `import faster_whisper` would make every deterministic path in the
+stated in §7: a top-level `import whisper` would make every deterministic path in the
 tool depend on an *optional* extra being installed, which is precisely the property the tool
 claims not to have.
 

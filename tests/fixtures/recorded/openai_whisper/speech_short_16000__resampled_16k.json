@@ -1,0 +1,315 @@
+{
+  "provenance": {
+    "recorded_at_utc": "2026-10-01T07:13:29.312484+00:00",
+    "openai_whisper_version": "20250625",
+    "torch_version": "2.14.1+cpu",
+    "numpy_version": "2.4.6",
+    "scipy_version": "1.17.1",
+    "soundfile_version": "0.13.1",
+    "python_version": "3.11.15 (main, Jun 11 2026, 04:03:40) [Clang 22.1.3 ]",
+    "model": "base",
+    "model_constructor": "whisper.load_model(\"base\")",
+    "transcribe_call": "model.transcribe(audio, word_timestamps=True, fp16=False)",
+    "source_wav": "speech_short_16000.wav",
+    "source_wav_sha256": "0c322bd7af6d4679bac7ceeb8691080cfe9d962d646fffbcceb3a29a95c013ed",
+    "source_sample_rate": 16000,
+    "input_path": "resampled_16k",
+    "snippet": "import numpy as np, soundfile as sf\nimport whisper\nx, sr = sf.read(WAV, dtype=\"float64\", always_2d=False)\nif x.ndim == 2:\n    x = x.mean(axis=1)\n# path == \"resampled_16k\" only:\n#   from fractions import Fraction; from scipy import signal\n#   frac = Fraction(16000, sr).limit_denominator(2000)\n#   x = signal.resample_poly(x, up=frac.numerator, down=frac.denominator)\naudio = x.astype(\"float32\")\nmodel = whisper.load_model(\"base\")\nresult = model.transcribe(audio, word_timestamps=True, fp16=False)\n",
+    "wall_seconds": 14.001,
+    "recorded_in": "repo's own .venv (not a DTU) -- see RECORDING.md"
+  },
+  "input": {
+    "path_mode": "resampled_16k",
+    "source_sample_rate": 16000,
+    "source_channels": 1,
+    "source_samples": 129128,
+    "source_duration_s": 8.0705,
+    "fed_sample_rate_assumed_by_library": 16000,
+    "fed_samples": 129128,
+    "fed_dtype": "float32",
+    "fed_duration_s_if_16k": 8.0705,
+    "true_duration_s": 8.0705,
+    "resampled_before_transcribe": false,
+    "declared_sample_rate_of_fed_array": 16000
+  },
+  "summary": {
+    "n_segments": 2,
+    "n_words": 21,
+    "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording.",
+    "last_word_end": 7.72,
+    "degenerate_word_count": 0,
+    "degenerate_words": []
+  },
+  "segments": [
+    {
+      "id": 0,
+      "start": 0.0,
+      "end": 4.24,
+      "text": " So, um, the first thing we need to do is, uh, check the levels.",
+      "words": [
+        {
+          "word": " So,",
+          "start": 0.0,
+          "end": 0.22,
+          "probability": 0.9068583250045776
+        },
+        {
+          "word": " um,",
+          "start": 0.56,
+          "end": 0.7,
+          "probability": 0.7633469104766846
+        },
+        {
+          "word": " the",
+          "start": 1.04,
+          "end": 1.16,
+          "probability": 0.9904384016990662
+        },
+        {
+          "word": " first",
+          "start": 1.16,
+          "end": 1.42,
+          "probability": 0.9936968684196472
+        },
+        {
+          "word": " thing",
+          "start": 1.42,
+          "end": 1.64,
+          "probability": 0.9943950176239014
+        },
+        {
+          "word": " we",
+          "start": 1.64,
+          "end": 1.84,
+          "probability": 0.9922486543655396
+        },
+        {
+          "word": " need",
+          "start": 1.84,
+          "end": 2.02,
+          "probability": 0.9951381087303162
+        },
+        {
+          "word": " to",
+          "start": 2.02,
+          "end": 2.2,
+          "probability": 0.9989297986030579
+        },
+        {
+          "word": " do",
+          "start": 2.2,
+          "end": 2.32,
+          "probability": 0.9989826083183289
+        },
+        {
+          "word": " is,",
+          "start": 2.32,
+          "end": 2.68,
+          "probability": 0.9922147393226624
+        },
+        {
+          "word": " uh,",
+          "start": 3.1,
+          "end": 3.22,
+          "probability": 0.6803815364837646
+        },
+        {
+          "word": " check",
+          "start": 3.58,
+          "end": 3.74,
+          "probability": 0.9932466745376587
+        },
+        {
+          "word": " the",
+          "start": 3.74,
+          "end": 3.94,
+          "probability": 0.998325765132904
+        },
+        {
+          "word": " levels.",
+          "start": 3.94,
+          "end": 4.24,
+          "probability": 0.9719669222831726
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "start": 5.300000000000001,
+      "end": 7.72,
+      "text": " And then, erm, we can start recording.",
+      "words": [
+        {
+          "word": " And",
+          "start": 5.300000000000001,
+          "end": 5.74,
+          "probability": 0.9694077372550964
+        },
+        {
+          "word": " then,",
+          "start": 5.74,
+          "end": 5.96,
+          "probability": 0.988520622253418
+        },
+        {
+          "word": " erm,",
+          "start": 6.5,
+          "end": 6.7,
+          "probability": 0.22361566126346588
+        },
+        {
+          "word": " we",
+          "start": 6.92,
+          "end": 7.0,
+          "probability": 0.9962205290794373
+        },
+        {
+          "word": " can",
+          "start": 7.0,
+          "end": 7.12,
+          "probability": 0.9976325035095215
+        },
+        {
+          "word": " start",
+          "start": 7.12,
+          "end": 7.36,
+          "probability": 0.9959108829498291
+        },
+        {
+          "word": " recording.",
+          "start": 7.36,
+          "end": 7.72,
+          "probability": 0.998116135597229
+        }
+      ]
+    }
+  ],
+  "words_flat": [
+    {
+      "word": " So,",
+      "start": 0.0,
+      "end": 0.22,
+      "probability": 0.9068583250045776
+    },
+    {
+      "word": " um,",
+      "start": 0.56,
+      "end": 0.7,
+      "probability": 0.7633469104766846
+    },
+    {
+      "word": " the",
+      "start": 1.04,
+      "end": 1.16,
+      "probability": 0.9904384016990662
+    },
+    {
+      "word": " first",
+      "start": 1.16,
+      "end": 1.42,
+      "probability": 0.9936968684196472
+    },
+    {
+      "word": " thing",
+      "start": 1.42,
+      "end": 1.64,
+      "probability": 0.9943950176239014
+    },
+    {
+      "word": " we",
+      "start": 1.64,
+      "end": 1.84,
+      "probability": 0.9922486543655396
+    },
+    {
+      "word": " need",
+      "start": 1.84,
+      "end": 2.02,
+      "probability": 0.9951381087303162
+    },
+    {
+      "word": " to",
+      "start": 2.02,
+      "end": 2.2,
+      "probability": 0.9989297986030579
+    },
+    {
+      "word": " do",
+      "start": 2.2,
+      "end": 2.32,
+      "probability": 0.9989826083183289
+    },
+    {
+      "word": " is,",
+      "start": 2.32,
+      "end": 2.68,
+      "probability": 0.9922147393226624
+    },
+    {
+      "word": " uh,",
+      "start": 3.1,
+      "end": 3.22,
+      "probability": 0.6803815364837646
+    },
+    {
+      "word": " check",
+      "start": 3.58,
+      "end": 3.74,
+      "probability": 0.9932466745376587
+    },
+    {
+      "word": " the",
+      "start": 3.74,
+      "end": 3.94,
+      "probability": 0.998325765132904
+    },
+    {
+      "word": " levels.",
+      "start": 3.94,
+      "end": 4.24,
+      "probability": 0.9719669222831726
+    },
+    {
+      "word": " And",
+      "start": 5.300000000000001,
+      "end": 5.74,
+      "probability": 0.9694077372550964
+    },
+    {
+      "word": " then,",
+      "start": 5.74,
+      "end": 5.96,
+      "probability": 0.988520622253418
+    },
+    {
+      "word": " erm,",
+      "start": 6.5,
+      "end": 6.7,
+      "probability": 0.22361566126346588
+    },
+    {
+      "word": " we",
+      "start": 6.92,
+      "end": 7.0,
+      "probability": 0.9962205290794373
+    },
+    {
+      "word": " can",
+      "start": 7.0,
+      "end": 7.12,
+      "probability": 0.9976325035095215
+    },
+    {
+      "word": " start",
+      "start": 7.12,
+      "end": 7.36,
+      "probability": 0.9959108829498291
+    },
+    {
+      "word": " recording.",
+      "start": 7.36,
+      "end": 7.72,
+      "probability": 0.998116135597229
+    }
+  ]
+}

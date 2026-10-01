@@ -28,17 +28,38 @@ stretch = [
 ]
 
 # Word-level speech timings, needed only by `aud detect fillers` to locate
-# "umm"/"uh"/"ehm". faster-whisper is MIT, ships as a pure-Python package over
-# CTranslate2 wheels (so `pip install` needs no compiler), runs on CPU without
-# CUDA, and its model download is idempotent and cached -- which together mean
-# an agent can install and first-run it unattended and expect it to succeed.
-# whisper.cpp bindings need a build toolchain; the OpenAI `whisper` package
-# pulls in torch. Neither is a dependency an unattended install should take.
-# Nothing GPL-family, here or anywhere: see docs/VISION.md.
+# "umm"/"uh"/"ehm". Previously faster-whisper (MIT) -- REPLACED, see issue #44:
+# faster-whisper hard-imports `av` (PyAV) at `faster_whisper/audio.py`, and
+# PyAV's PyPI wheel bundles an FFmpeg build with `libx264`/`libx265`
+# (GPL-2.0-or-later, genuinely dynamically linked) and a `libmp3lame` with the
+# GPL-only `mpglib` decoder compiled in -- confirmed against av==19.0.0, not a
+# stale-version fluke. `openai-whisper` is MIT (code AND model weights) and has
+# no such dependency, at the cost of pulling in `torch`. To keep that
+# unattended-installable and small, this project pins `torch` to PyPI's
+# CPU-only wheel index (see `[[tool.uv.index]]`/`[tool.uv.sources]` below) for
+# THIS project's own `uv sync`/`uv run` -- a default PyPI install of `torch`
+# pulls ~8 GB (6.5 GB of it NVIDIA CUDA wheels) on a CPU-only box; the CPU
+# wheel is ~187 MB and carries no GPL-family licence.
 #
-#   uv tool install 'aud[speech] @ git+https://github.com/colombod/amplifier-smart-tools-audio'
+# IMPORTANT: `[tool.uv.sources]` applies ONLY to this project's own workflow
+# (`uv sync`, `uv run`, a local `uv tool install ./tool`). It is NOT consulted
+# when `aud` is installed as a dependency from elsewhere, e.g.
+# `uv tool install 'aud[speech] @ git+https://...'` -- that command resolves
+# against PyPI alone and will pull the default (possibly CUDA) torch build.
+# The caller's install command must carry the index explicitly -- see
+# docs/CONFIGURATION.md's speech section for the exact command.
+#
+#   uv tool install 'aud[speech] @ git+https://github.com/colombod/amplifier-smart-tools-audio' --index https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match
+#
+# `torch` is listed here EXPLICITLY, even though `openai-whisper` already
+# depends on it transitively -- measured directly (see the PR body): uv's
+# `[tool.uv.sources]` package-pinning ONLY takes effect for a package that
+# appears as a DIRECT dependency somewhere in the project; left purely
+# transitive, uv resolves `torch` straight from PyPI (picking up the default,
+# possibly-CUDA build) and never even queries the pinned index.
 speech = [
-    "faster-whisper>=1.0,<2.0",
+    "openai-whisper>=20231117",
+    "torch>=2.0",
 ]
 
 [project.urls]
@@ -56,6 +77,21 @@ module-name = "aud"
 
 [tool.uv]
 add-bounds = "major"
+
+# Route `torch` (pulled in transitively by the `speech` extra's
+# `openai-whisper`) to PyPI's CPU-only wheel index for this project's own
+# `uv sync`/`uv run`/local `uv tool install ./tool` -- see the `speech` extra's
+# comment above for why, and for the caveat that this block does NOT apply
+# when `aud` is installed as a dependency from git.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu" },
+]
 
 [dependency-groups]
 dev = [

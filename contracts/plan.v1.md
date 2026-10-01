@@ -154,7 +154,7 @@ full under [Edit-point resolution](#edit-point-resolution-shared-by-cut-and-stri
 
 #### Why `filler_tail_pad_ms` exists, and why it is not padding
 
-`aud detect fillers` (faster-whisper) reports a filler word's END timestamp systematically
+`aud detect fillers` (openai-whisper) reports a filler word's END timestamp systematically
 175-200 ms **early** — it closes the word before the vowel actually decays. Measured against
 exact ground truth: "um" truth `0.599-0.938s`, returned `0.600-0.740s` (end error -198.4 ms);
 "uh" truth `2.765-3.154s`, returned `2.800-2.980s` (end error -174.2 ms). Start timestamps are

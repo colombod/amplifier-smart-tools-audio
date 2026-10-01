@@ -28,10 +28,13 @@ is the tool for that last mile.
 uv tool install git+https://github.com/colombod/amplifier-smart-tools-audio
 ```
 
-Filler-word detection and the higher-quality stretch engine are optional extras:
+Filler-word detection and the higher-quality stretch engine are optional extras. `speech` pulls
+in `torch`; the `--index`/`--index-strategy` flags pin it to the CPU-only wheel (~187 MB) instead
+of the default build, which on Linux otherwise pulls ~8 GB including NVIDIA CUDA wheels this tool
+never uses:
 
 ```bash
-uv tool install 'aud[speech,stretch] @ git+https://github.com/colombod/amplifier-smart-tools-audio'
+uv tool install 'aud[speech,stretch] @ git+https://github.com/colombod/amplifier-smart-tools-audio' --index https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match
 ```
 
 As a library — the CLI is a thin wrapper and `aud.lib` holds every capability:

@@ -8,7 +8,7 @@ would reintroduce exactly the aliasing `resample_poly` exists to prevent.
 The up/down ratio is reduced to small integers via `Fraction.limit_denominator`
 before it reaches `resample_poly`, the same idiom already used across this
 codebase for rate conversion: `aud.dsp.speech._resample_to_whisper_rate`
-(resampling to faster-whisper's fixed 16 kHz), `aud.dsp.timepitch` (the
+(resampling to whisper's fixed 16 kHz), `aud.dsp.timepitch` (the
 `stretch`/`pitch` stages' resampling step), `aud.dsp.reverb` (matching an
 impulse response's native rate to the render rate), `aud.dsp.limiter` and
 `aud.dsp.saturation` (oversampling for true-peak measurement and anti-alias

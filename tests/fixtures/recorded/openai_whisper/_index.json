@@ -1,0 +1,108 @@
+{
+  "recorded_at_utc": "2026-10-01T07:18:41.358016+00:00",
+  "openai_whisper_version": "20250625",
+  "torch_version": "2.14.1+cpu",
+  "model": "base",
+  "runs": [
+    {
+      "file": "nospeech_silence_16000__raw.json",
+      "source_wav": "nospeech_silence_16000.wav",
+      "path_mode": "raw",
+      "n_segments": 0,
+      "n_words": 0,
+      "degenerate_word_count": 0,
+      "last_word_end": null,
+      "text": ""
+    },
+    {
+      "file": "nospeech_tone_16000__raw.json",
+      "source_wav": "nospeech_tone_16000.wav",
+      "path_mode": "raw",
+      "n_segments": 0,
+      "n_words": 0,
+      "degenerate_word_count": 0,
+      "last_word_end": null,
+      "text": ""
+    },
+    {
+      "file": "speech_short_16000__raw.json",
+      "source_wav": "speech_short_16000.wav",
+      "path_mode": "raw",
+      "n_segments": 2,
+      "n_words": 21,
+      "degenerate_word_count": 0,
+      "last_word_end": 7.72,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    },
+    {
+      "file": "speech_short_16000__resampled_16k.json",
+      "source_wav": "speech_short_16000.wav",
+      "path_mode": "resampled_16k",
+      "n_segments": 2,
+      "n_words": 21,
+      "degenerate_word_count": 0,
+      "last_word_end": 7.72,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    },
+    {
+      "file": "speech_short_22050__raw.json",
+      "source_wav": "speech_short_22050.wav",
+      "path_mode": "raw",
+      "n_segments": 2,
+      "n_words": 21,
+      "degenerate_word_count": 0,
+      "last_word_end": 10.66,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, urn, we can start recording."
+    },
+    {
+      "file": "speech_short_22050__resampled_16k.json",
+      "source_wav": "speech_short_22050.wav",
+      "path_mode": "resampled_16k",
+      "n_segments": 2,
+      "n_words": 21,
+      "degenerate_word_count": 0,
+      "last_word_end": 7.72,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    },
+    {
+      "file": "speech_short_44100__raw.json",
+      "source_wav": "speech_short_44100.wav",
+      "path_mode": "raw",
+      "n_segments": 2,
+      "n_words": 11,
+      "degenerate_word_count": 4,
+      "last_word_end": 11.4,
+      "text": " This man, he nourch his emotions. This is what humans love."
+    },
+    {
+      "file": "speech_short_44100__resampled_16k.json",
+      "source_wav": "speech_short_44100.wav",
+      "path_mode": "resampled_16k",
+      "n_segments": 2,
+      "n_words": 21,
+      "degenerate_word_count": 0,
+      "last_word_end": 7.72,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    },
+    {
+      "file": "speech_short_48000__raw.json",
+      "source_wav": "speech_short_48000.wav",
+      "path_mode": "raw",
+      "n_segments": 3,
+      "n_words": 26,
+      "degenerate_word_count": 5,
+      "last_word_end": 23.3,
+      "text": " Hain, a-sa-sa-la-na-ta-pa-la Hain, a-sa-la-na-ta-pa-la Hain, a-sa-sa-la-na-ta-pa-la"
+    },
+    {
+      "file": "speech_short_48000__resampled_16k.json",
+      "source_wav": "speech_short_48000.wav",
+      "path_mode": "resampled_16k",
+      "n_segments": 2,
+      "n_words": 21,
+      "degenerate_word_count": 0,
+      "last_word_end": 7.72,
+      "text": " So, um, the first thing we need to do is, uh, check the levels. And then, erm, we can start recording."
+    }
+  ]
+}

@@ -1,0 +1,414 @@
+{
+  "provenance": {
+    "recorded_at_utc": "2026-10-01T07:18:13.150488+00:00",
+    "openai_whisper_version": "20250625",
+    "torch_version": "2.14.1+cpu",
+    "numpy_version": "2.4.6",
+    "scipy_version": "1.17.1",
+    "soundfile_version": "0.13.1",
+    "python_version": "3.11.15 (main, Jun 11 2026, 04:03:40) [Clang 22.1.3 ]",
+    "model": "base",
+    "model_constructor": "whisper.load_model(\"base\")",
+    "transcribe_call": "model.transcribe(audio, word_timestamps=True, fp16=False)",
+    "source_wav": "speech_short_48000.wav",
+    "source_wav_sha256": "d6ddaac6d796d44d0549f2367b4e05daf06ef7387f70e9066688684852f88bb8",
+    "source_sample_rate": 48000,
+    "input_path": "raw",
+    "snippet": "import numpy as np, soundfile as sf\nimport whisper\nx, sr = sf.read(WAV, dtype=\"float64\", always_2d=False)\nif x.ndim == 2:\n    x = x.mean(axis=1)\n# path == \"resampled_16k\" only:\n#   from fractions import Fraction; from scipy import signal\n#   frac = Fraction(16000, sr).limit_denominator(2000)\n#   x = signal.resample_poly(x, up=frac.numerator, down=frac.denominator)\naudio = x.astype(\"float32\")\nmodel = whisper.load_model(\"base\")\nresult = model.transcribe(audio, word_timestamps=True, fp16=False)\n",
+    "wall_seconds": 22.383,
+    "recorded_in": "repo's own .venv (not a DTU) -- see RECORDING.md"
+  },
+  "input": {
+    "path_mode": "raw",
+    "source_sample_rate": 48000,
+    "source_channels": 1,
+    "source_samples": 387383,
+    "source_duration_s": 8.070479,
+    "fed_sample_rate_assumed_by_library": 16000,
+    "fed_samples": 387383,
+    "fed_dtype": "float32",
+    "fed_duration_s_if_16k": 24.211437,
+    "true_duration_s": 8.070479,
+    "resampled_before_transcribe": false,
+    "declared_sample_rate_of_fed_array": 48000
+  },
+  "summary": {
+    "n_segments": 3,
+    "n_words": 26,
+    "text": " Hain, a-sa-sa-la-na-ta-pa-la Hain, a-sa-la-na-ta-pa-la Hain, a-sa-sa-la-na-ta-pa-la",
+    "last_word_end": 23.3,
+    "degenerate_word_count": 5,
+    "degenerate_words": [
+      {
+        "index": 15,
+        "word": "-pa",
+        "start": 15.9,
+        "end": 15.9
+      },
+      {
+        "index": 16,
+        "word": "-la",
+        "start": 15.9,
+        "end": 15.9
+      },
+      {
+        "index": 20,
+        "word": "-sa",
+        "start": 21.22,
+        "end": 21.22
+      },
+      {
+        "index": 21,
+        "word": "-la",
+        "start": 21.22,
+        "end": 21.22
+      },
+      {
+        "index": 22,
+        "word": "-na",
+        "start": 21.22,
+        "end": 21.22
+      }
+    ]
+  },
+  "segments": [
+    {
+      "id": 0,
+      "start": 0.0,
+      "end": 7.48,
+      "text": " Hain, a-sa-sa-la-na-ta-pa-la",
+      "words": [
+        {
+          "word": " Hain,",
+          "start": 0.0,
+          "end": 0.8,
+          "probability": 0.03746894188225269
+        },
+        {
+          "word": " a",
+          "start": 1.42,
+          "end": 1.98,
+          "probability": 0.09207639843225479
+        },
+        {
+          "word": "-sa",
+          "start": 1.98,
+          "end": 3.86,
+          "probability": 0.11732874065637589
+        },
+        {
+          "word": "-sa",
+          "start": 3.86,
+          "end": 4.8,
+          "probability": 0.5366988331079483
+        },
+        {
+          "word": "-la",
+          "start": 4.8,
+          "end": 5.46,
+          "probability": 0.3258339986205101
+        },
+        {
+          "word": "-na",
+          "start": 5.46,
+          "end": 5.98,
+          "probability": 0.5711368024349213
+        },
+        {
+          "word": "-ta",
+          "start": 5.98,
+          "end": 6.56,
+          "probability": 0.5030659288167953
+        },
+        {
+          "word": "-pa",
+          "start": 6.56,
+          "end": 6.9,
+          "probability": 0.5039226412773132
+        },
+        {
+          "word": "-la",
+          "start": 6.9,
+          "end": 7.48,
+          "probability": 0.8225852847099304
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "start": 9.0,
+      "end": 15.9,
+      "text": " Hain, a-sa-la-na-ta-pa-la",
+      "words": [
+        {
+          "word": " Hain,",
+          "start": 9.0,
+          "end": 10.06,
+          "probability": 0.5858060270547867
+        },
+        {
+          "word": " a",
+          "start": 10.68,
+          "end": 11.16,
+          "probability": 0.9646313786506653
+        },
+        {
+          "word": "-sa",
+          "start": 11.16,
+          "end": 11.18,
+          "probability": 0.9821934998035431
+        },
+        {
+          "word": "-la",
+          "start": 11.18,
+          "end": 12.16,
+          "probability": 0.8607715666294098
+        },
+        {
+          "word": "-na",
+          "start": 12.16,
+          "end": 13.08,
+          "probability": 0.642819419503212
+        },
+        {
+          "word": "-ta",
+          "start": 13.08,
+          "end": 15.9,
+          "probability": 0.9145399630069733
+        },
+        {
+          "word": "-pa",
+          "start": 15.9,
+          "end": 15.9,
+          "probability": 0.7517554461956024
+        },
+        {
+          "word": "-la",
+          "start": 15.9,
+          "end": 15.9,
+          "probability": 0.9843344688415527
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "start": 17.0,
+      "end": 23.3,
+      "text": " Hain, a-sa-sa-la-na-ta-pa-la",
+      "words": [
+        {
+          "word": " Hain,",
+          "start": 16.46,
+          "end": 17.16,
+          "probability": 0.7582385540008545
+        },
+        {
+          "word": " a",
+          "start": 17.96,
+          "end": 19.94,
+          "probability": 0.9521405696868896
+        },
+        {
+          "word": "-sa",
+          "start": 19.94,
+          "end": 21.22,
+          "probability": 0.9880117774009705
+        },
+        {
+          "word": "-sa",
+          "start": 21.22,
+          "end": 21.22,
+          "probability": 0.5061405058950186
+        },
+        {
+          "word": "-la",
+          "start": 21.22,
+          "end": 21.22,
+          "probability": 0.9679422378540039
+        },
+        {
+          "word": "-na",
+          "start": 21.22,
+          "end": 21.22,
+          "probability": 0.7255813181400299
+        },
+        {
+          "word": "-ta",
+          "start": 21.22,
+          "end": 21.74,
+          "probability": 0.9378630816936493
+        },
+        {
+          "word": "-pa",
+          "start": 21.74,
+          "end": 22.56,
+          "probability": 0.7314123511314392
+        },
+        {
+          "word": "-la",
+          "start": 22.56,
+          "end": 23.3,
+          "probability": 0.9815481603145599
+        }
+      ]
+    }
+  ],
+  "words_flat": [
+    {
+      "word": " Hain,",
+      "start": 0.0,
+      "end": 0.8,
+      "probability": 0.03746894188225269
+    },
+    {
+      "word": " a",
+      "start": 1.42,
+      "end": 1.98,
+      "probability": 0.09207639843225479
+    },
+    {
+      "word": "-sa",
+      "start": 1.98,
+      "end": 3.86,
+      "probability": 0.11732874065637589
+    },
+    {
+      "word": "-sa",
+      "start": 3.86,
+      "end": 4.8,
+      "probability": 0.5366988331079483
+    },
+    {
+      "word": "-la",
+      "start": 4.8,
+      "end": 5.46,
+      "probability": 0.3258339986205101
+    },
+    {
+      "word": "-na",
+      "start": 5.46,
+      "end": 5.98,
+      "probability": 0.5711368024349213
+    },
+    {
+      "word": "-ta",
+      "start": 5.98,
+      "end": 6.56,
+      "probability": 0.5030659288167953
+    },
+    {
+      "word": "-pa",
+      "start": 6.56,
+      "end": 6.9,
+      "probability": 0.5039226412773132
+    },
+    {
+      "word": "-la",
+      "start": 6.9,
+      "end": 7.48,
+      "probability": 0.8225852847099304
+    },
+    {
+      "word": " Hain,",
+      "start": 9.0,
+      "end": 10.06,
+      "probability": 0.5858060270547867
+    },
+    {
+      "word": " a",
+      "start": 10.68,
+      "end": 11.16,
+      "probability": 0.9646313786506653
+    },
+    {
+      "word": "-sa",
+      "start": 11.16,
+      "end": 11.18,
+      "probability": 0.9821934998035431
+    },
+    {
+      "word": "-la",
+      "start": 11.18,
+      "end": 12.16,
+      "probability": 0.8607715666294098
+    },
+    {
+      "word": "-na",
+      "start": 12.16,
+      "end": 13.08,
+      "probability": 0.642819419503212
+    },
+    {
+      "word": "-ta",
+      "start": 13.08,
+      "end": 15.9,
+      "probability": 0.9145399630069733
+    },
+    {
+      "word": "-pa",
+      "start": 15.9,
+      "end": 15.9,
+      "probability": 0.7517554461956024
+    },
+    {
+      "word": "-la",
+      "start": 15.9,
+      "end": 15.9,
+      "probability": 0.9843344688415527
+    },
+    {
+      "word": " Hain,",
+      "start": 16.46,
+      "end": 17.16,
+      "probability": 0.7582385540008545
+    },
+    {
+      "word": " a",
+      "start": 17.96,
+      "end": 19.94,
+      "probability": 0.9521405696868896
+    },
+    {
+      "word": "-sa",
+      "start": 19.94,
+      "end": 21.22,
+      "probability": 0.9880117774009705
+    },
+    {
+      "word": "-sa",
+      "start": 21.22,
+      "end": 21.22,
+      "probability": 0.5061405058950186
+    },
+    {
+      "word": "-la",
+      "start": 21.22,
+      "end": 21.22,
+      "probability": 0.9679422378540039
+    },
+    {
+      "word": "-na",
+      "start": 21.22,
+      "end": 21.22,
+      "probability": 0.7255813181400299
+    },
+    {
+      "word": "-ta",
+      "start": 21.22,
+      "end": 21.74,
+      "probability": 0.9378630816936493
+    },
+    {
+      "word": "-pa",
+      "start": 21.74,
+      "end": 22.56,
+      "probability": 0.7314123511314392
+    },
+    {
+      "word": "-la",
+      "start": 22.56,
+      "end": 23.3,
+      "probability": 0.9815481603145599
+    }
+  ]
+}

@@ -470,6 +470,53 @@ and [contracts/regions.v1.md](contracts/regions.v1.md).
   `"preserve"` (default) writes at the input's own rate; an integer resamples the rendered output
   to that rate. An explicit `resample` stage in the plan always takes precedence.
 
+### Changed
+
+- **The `speech` extra's recognition engine is `openai-whisper`, not `faster-whisper`** (issue
+  #44). `faster-whisper` hard-imports `av` (PyAV), whose PyPI wheel bundles an FFmpeg build with
+  `libx264`/`libx265` (GPL-2.0-or-later, genuinely dynamically linked) and a `libmp3lame` with the
+  GPL-only `mpglib` decoder compiled in -- a real, measured licence problem, not a hypothetical
+  one (confirmed against `av==19.0.0`; see `docs/DESIGN-ENVELOPE.md`'s "Dependency licences").
+  `openai-whisper` is MIT (code and model weights) and has no such dependency. `src/aud/dsp/speech.py`
+  now calls `whisper.load_model(model_size).transcribe(audio, word_timestamps=True, fp16=False)`;
+  each word comes back as a plain dict (not an attribute-access object like faster-whisper's
+  `Word`), bridged through a new `_WordAdapter`. `detection.engine` in the regions document is now
+  `"openai-whisper"`.
+- **`torch` (pulled in by `openai-whisper`) is pinned to PyPI's CPU-only wheel index** for this
+  project's own `uv sync`/`uv run`/local `uv tool install ./tool`, via `[[tool.uv.index]]` +
+  `[tool.uv.sources]` in `pyproject.toml`. Measured: this resolves `torch==2.14.1+cpu` (~187 MB
+  download, ~2.1 GB installed `.venv` with `speech`), vs. the default PyPI resolution's
+  `torch==2.14.1` (no `+cpu` tag) which pulls `nvidia-cuda-*`/`nvidia-cudnn-*`/etc. wheels on
+  Linux. **`[tool.uv.sources]` only takes effect for a package that is a DIRECT project
+  dependency** -- `torch` is listed explicitly in the `speech` extra for exactly this reason,
+  even though `openai-whisper` already depends on it transitively; left implicit, uv resolves
+  `torch` straight from PyPI regardless of the pinned index (measured directly, not assumed).
+  **This pin does NOT apply when `aud` is installed as a dependency from git** (e.g.
+  `uv tool install 'aud[speech] @ git+...'`) -- that command must carry
+  `--index https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match` itself; every
+  documented install command for the `speech` extra now carries it (README.md,
+  docs/CONFIGURATION.md, `src/aud/dsp/speech.py`'s own error remedy), and
+  `tests/test_docs_cpu_index_guard.py` fails by name if any of them ever lose it.
+- **Licence policy (`tests/license_policy.py`) extended for the new dependency graph**: added
+  `BSL-1.0`/`LLVM-exception`/`CNRI-Python` to the permissive SPDX allow-list (torch, llvmlite,
+  regex); added a narrow, explicitly-reviewed `WEAK_COPYLEFT_ACKNOWLEDGEMENTS` list for `certifi`
+  (MPL-2.0, pulled in transitively via `tiktoken`'s optional network-download path, which `aud`
+  never reaches -- `openai-whisper`'s tokenizer loads bundled `.tiktoken` vocab files from disk)
+  and `tqdm` (dual MPL-2.0/MIT); extended `_FORBIDDEN_RE` to also catch the `MPL`/`EPL`/`CDDL`/
+  `CPL` acronym forms a legacy `License` field can carry (closing a real gap the acronym check
+  found: `tqdm`'s own `"MPL-2.0 AND MIT"` field was slipping through as ALLOWED via its `"MIT"`
+  half, before this fix); extended the long-legacy-`License`-field classifier to recognise a
+  known, single, unmixed licence header (e.g. `tiktoken`'s full MIT text) instead of blanket-
+  failing every >200-char `License` field to UNKNOWN. See each addition's own code comment for
+  the full reasoning and evidence.
+- **`av.libs/`/`ctranslate2.libs/` no longer exist in the resolved `speech` tree** -- the GPL-family
+  binaries flagged (not fixed) by issue #44's discovery are gone along with `faster-whisper`
+  itself. A DIFFERENT, smaller scope gap was found while verifying this (`torch/lib/` and the
+  `triton` package bundle `.so` files directly in their own directory tree, not under a `*.libs/`
+  sibling, so the existing discovery-based scan does not see them -- including `triton`'s bundled
+  NVIDIA `libcupti.so*`, unused on this CPU-only build) -- filed as a new, separate issue (#46),
+  not fixed here.
+
 ### Fixed
 
 - **`aud advise` returned `bad_model_output` ("Extra data") for a real, correct plan the model had

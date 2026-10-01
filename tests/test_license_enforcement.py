@@ -394,6 +394,12 @@ _SPECIFIED_ALLOW_LIST = frozenset(
         "Unlicense",
         "CC0-1.0",
         "HPND",
+        # Added for the `speech` extra's openai-whisper/torch dependency graph
+        # (issue #44) -- see license_policy._ALLOWED_SPDX_IDS's own comments
+        # for the per-id justification.
+        "BSL-1.0",
+        "LLVM-exception",
+        "CNRI-Python",
     }
 )
 
@@ -416,7 +422,7 @@ def test_anything_off_the_allow_list_is_unknown_not_allowed():
     """ "ANYTHING ELSE FAILS, INCLUDING UNKNOWN" -- a plausible-sounding but
     unlisted permissive SPDX id (e.g. a licence real projects use, but not on
     this project's reviewed allow-list) must not slip through as ALLOWED."""
-    for unlisted in ("BSL-1.0", "OFL-1.1", "WTFPL", "CDDL-1.0", "EPL-2.0"):
+    for unlisted in ("OFL-1.1", "WTFPL", "CDDL-1.0", "EPL-2.0"):
         verdict = _classify_spdx_expression(unlisted)
         assert verdict is not Verdict.ALLOWED, f"{unlisted} is not on the specified allow-list but classified ALLOWED"
 
