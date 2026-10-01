@@ -14,7 +14,7 @@ from tests import replay
 
 def test_load_recording_fails_loudly_for_a_missing_recording() -> None:
     with pytest.raises(replay.RecordingNotFoundError):
-        replay.load_recording("faster_whisper", "does-not-exist")
+        replay.load_recording("openai_whisper", "does-not-exist")
 
 
 def test_wav_path_fails_loudly_for_an_unshipped_long_variant() -> None:
@@ -30,40 +30,40 @@ def test_wav_path_fails_loudly_for_an_unshipped_long_variant() -> None:
 def test_assert_matches_recorded_source_fails_loudly_on_a_mismatched_wav() -> None:
     """The one rule this harness cannot relax: a replay bound to the wrong
     input bytes must fail loudly, not silently proceed."""
-    recording = replay.load_recording("faster_whisper", "speech_short_16000__resampled_16k")
+    recording = replay.load_recording("openai_whisper", "speech_short_16000__resampled_16k")
     wrong_wav = replay.wav_path("speech_short_48000.wav")  # real file, just the wrong one
     with pytest.raises(replay.RecordingNotFoundError):
         replay.assert_matches_recorded_source(recording, wrong_wav)
 
 
 def test_assert_matches_recorded_source_accepts_the_real_matching_wav() -> None:
-    recording = replay.load_recording("faster_whisper", "speech_short_16000__resampled_16k")
+    recording = replay.load_recording("openai_whisper", "speech_short_16000__resampled_16k")
     right_wav = replay.wav_path("speech_short_16000.wav")
     replay.assert_matches_recorded_source(recording, right_wav)  # must not raise
 
 
-def test_install_faster_whisper_replay_requires_a_source_argument(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_install_openai_whisper_replay_requires_a_source_argument(monkeypatch: pytest.MonkeyPatch) -> None:
     """`source` has no default -- a caller MUST say which source drives the
     call, or declare `UNBOUND(...)` explicitly. This is the structural form
     of the trap RECORDING.md warns about: a replay that never says what it
     is bound to is testing nothing about correspondence to real audio.
     """
     with pytest.raises(TypeError):
-        replay.install_faster_whisper_replay(monkeypatch, "speech_short_16000__raw")  # type: ignore[call-arg]
+        replay.install_openai_whisper_replay(monkeypatch, "speech_short_16000__raw")  # type: ignore[call-arg]
 
 
-def test_install_faster_whisper_replay_verifies_the_sha256_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_install_openai_whisper_replay_verifies_the_sha256_itself(monkeypatch: pytest.MonkeyPatch) -> None:
     """Passing a `Path` as `source` must be checked against the recording's
     own provenance -- the wrong wav must fail loudly, not silently bind.
     """
     wrong_wav = replay.wav_path("speech_short_48000.wav")  # real file, just the wrong one
     with pytest.raises(replay.RecordingNotFoundError):
-        replay.install_faster_whisper_replay(monkeypatch, "speech_short_16000__resampled_16k", source=wrong_wav)
+        replay.install_openai_whisper_replay(monkeypatch, "speech_short_16000__resampled_16k", source=wrong_wav)
 
 
-def test_install_faster_whisper_replay_accepts_the_real_matching_source(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_install_openai_whisper_replay_accepts_the_real_matching_source(monkeypatch: pytest.MonkeyPatch) -> None:
     right_wav = replay.wav_path("speech_short_16000.wav")
-    replayed = replay.install_faster_whisper_replay(monkeypatch, "speech_short_16000__resampled_16k", source=right_wav)
+    replayed = replay.install_openai_whisper_replay(monkeypatch, "speech_short_16000__resampled_16k", source=right_wav)
     assert replayed.source == right_wav
 
 
@@ -75,14 +75,14 @@ def test_unbound_rejects_an_empty_reason() -> None:
         replay.UNBOUND("   ")
 
 
-def test_install_faster_whisper_replay_accepts_an_explicit_unbound_declaration(
+def test_install_openai_whisper_replay_accepts_an_explicit_unbound_declaration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`source=UNBOUND("reason")` is the visible, greppable opt-out -- no
     sha256 check runs, and the reason travels with the installed replay.
     """
     unbound = replay.UNBOUND("this test does not drive the call with real audio at all")
-    replayed = replay.install_faster_whisper_replay(monkeypatch, "speech_short_16000__raw", source=unbound)
+    replayed = replay.install_openai_whisper_replay(monkeypatch, "speech_short_16000__raw", source=unbound)
     assert replayed.source is unbound
     assert isinstance(replayed.source, replay.UnboundSource)
     assert replayed.source.reason == "this test does not drive the call with real audio at all"
@@ -112,8 +112,8 @@ def test_recorded_versions_are_pinned_and_visible() -> None:
     """
     versions = replay.recorded_versions()
     assert versions == {
-        "faster_whisper": "1.2.1",
-        "ctranslate2": "4.8.2",
+        "openai_whisper": "20250625",
+        "torch": "2.14.1+cpu",
         "python_stretch": "0.3.1",
         "anthropic_api_version": "2023-06-01",
     }

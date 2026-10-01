@@ -74,6 +74,10 @@ def test_detect_silence_missing_file_is_file_not_found(tmp_path: Path) -> None:
     assert "Traceback" not in proc.stderr
 
 
+_SPEECH_EXTRA_MISSING_REASON = "requires the 'speech' extra (openai-whisper) to be ABSENT on this host"
+
+
+@pytest.mark.skipif(dsp_speech.is_available(), reason=_SPEECH_EXTRA_MISSING_REASON)
 def test_detect_fillers_on_this_host_gives_speech_extra_missing_never_a_traceback(tiny_wav: Path) -> None:
     proc = _run(["detect", "fillers", str(tiny_wav)])
     assert proc.returncode != 0
@@ -84,6 +88,7 @@ def test_detect_fillers_on_this_host_gives_speech_extra_missing_never_a_tracebac
     assert "Traceback" not in proc.stderr
 
 
+@pytest.mark.skipif(dsp_speech.is_available(), reason=_SPEECH_EXTRA_MISSING_REASON)
 def test_detect_fillers_missing_extra_fails_before_the_input_is_ever_decoded(tmp_path: Path) -> None:
     """Deviation-fix regression guard: the prerequisite check must fire
 
@@ -104,6 +109,7 @@ def test_detect_fillers_missing_extra_fails_before_the_input_is_ever_decoded(tmp
     assert "Traceback" not in proc.stderr
 
 
+@pytest.mark.skipif(dsp_speech.is_available(), reason=_SPEECH_EXTRA_MISSING_REASON)
 def test_detect_fillers_checks_the_speech_extra_before_touching_the_file(tmp_path: Path) -> None:
     """A missing prerequisite fails BEFORE the work: the extra-availability
     check must run before the input file is even opened, not after. Proven
@@ -219,7 +225,7 @@ def test_detect_fillers_cli_default_vocabulary_is_speechs_filler_words(
     one place that vocabulary is defined, is what actually runs.
 
     Proved end-to-end through the REAL `dsp.speech.detect_fillers`, with
-    only faster-whisper itself replayed (a real recorded transcription,
+    only openai-whisper itself replayed (a real recorded transcription,
     tests/replay.py) -- not by monkeypatching `lib.detect_fillers` and
     inventing its return value. `tiny_wav` drives the call, which is NOT
     the wav that produced `speech_short_16000__raw` -- declared explicitly
@@ -227,7 +233,7 @@ def test_detect_fillers_cli_default_vocabulary_is_speechs_filler_words(
     CLI -> lib -> dsp.speech vocabulary wiring, not correspondence between
     the replayed transcript and `tiny_wav`'s content.
     """
-    replay.install_faster_whisper_replay(
+    replay.install_openai_whisper_replay(
         monkeypatch,
         "speech_short_16000__raw",
         source=replay.UNBOUND(

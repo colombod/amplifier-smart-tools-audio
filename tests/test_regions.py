@@ -11,7 +11,7 @@ from aud.schemas import AudError
 
 _SILENCE_DETECTION = {"threshold_above_floor_db": 6.0, "min_len_ms": 400.0, "noise_floor_dbfs": -58.3}
 _TRANSIENT_DETECTION = {"sensitivity": 1.0, "min_gap_ms": 50.0}
-_FILLER_DETECTION = {"words": ["um", "uh"], "min_pause_ms": 700.0, "engine": "faster-whisper", "model": "base"}
+_FILLER_DETECTION = {"words": ["um", "uh"], "min_pause_ms": 700.0, "engine": "openai-whisper", "model": "base"}
 
 
 def _silence_region(start: float = 12.48, end: float = 13.94) -> dict:

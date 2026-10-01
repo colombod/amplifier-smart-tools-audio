@@ -57,6 +57,62 @@ jobs:
         # AGENTS.md section 1 for the licence rule this enforces.
         run: uv run pytest tests/test_license_enforcement.py -v
 
+  speech-extra:
+    name: Speech extra (openai-whisper, CPU torch)
+    # A new job, not a step folded into `test`: this is the only place the
+    # `speech` extra -- and its licence-policy consequences (issue #44) --
+    # are exercised in CI at all. `test`'s plain `uv sync` installs no
+    # optional extra, so without this job the entire torch/openai-whisper
+    # path (including the CPU-index pin and the no-ffmpeg guarantee) would
+    # be untested in CI, checked only by whoever happens to install it
+    # locally. Measured cost on a GitHub-hosted runner's class of hardware:
+    # ~187 MiB torch download (CPU wheel, confirmed no nvidia-* packages),
+    # ~139 MiB whisper `base` model download (first transcribe call only,
+    # not cached across runs -- see the note below), full suite ~2 minutes.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Create the environment with the speech extra, CPU-only torch
+        # The exact command docs/CONFIGURATION.md and README.md document --
+        # kept in sync with tests/test_docs_cpu_index_guard.py, which fails
+        # if any documented install command (including this one's shape)
+        # ever loses the --index/--index-strategy flags.
+        run: uv sync --extra speech
+
+      - name: Prove no nvidia-* package was pulled in
+        # The entire reason for pinning torch's own index: without it, a
+        # plain `uv sync --extra speech` on Linux resolves CUDA wheels
+        # instead of the ~187 MiB CPU-only build. Asserted here, not just
+        # hoped for.
+        shell: bash
+        run: |
+          if uv pip list --python .venv/bin/python | grep -i '^nvidia-'; then
+            echo "::error::an nvidia-* package was resolved -- the CPU-only torch index pin failed"
+            exit 1
+          fi
+          echo "no nvidia-* package present"
+
+      - name: Licence enforcement with the speech extra installed
+        # The whole point of this job's existence for licence purposes:
+        # with `speech` installed, torch/openai-whisper/tiktoken/certifi/
+        # tqdm/etc. all appear in the resolved environment and must all
+        # classify ALLOWED -- see tests/license_policy.py's
+        # WEAK_COPYLEFT_ACKNOWLEDGEMENTS and _ALLOWED_SPDX_IDS additions.
+        run: uv run pytest tests/test_license_enforcement.py -v
+
+      - name: Speech-extra tests (real openai-whisper, no replay)
+        # Deliberately scoped to the files that actually call the real
+        # library -- not the full suite, to keep this job's purpose (prove
+        # the real install works) distinct from `test`'s job (prove the
+        # deterministic default tree works). The no-ffmpeg guard
+        # (test_detect_fillers_never_spawns_ffmpeg) and the CLI-level
+        # `detect fillers` tests both need the real model downloaded once.
+        run: uv run pytest tests/test_dsp_detect.py tests/test_detect_cli.py tests/test_docs_cpu_index_guard.py -v
+
   conformance:
     name: Smart-tool conformance
     runs-on: ubuntu-latest

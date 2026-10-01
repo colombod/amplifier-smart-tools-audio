@@ -342,7 +342,7 @@ def preset_show(name: str) -> Plan:
 _SNAP_MODES = ("zero_crossing", "silence", "transient", "none")
 _CROSSFADE_SHAPES = ("equal_power", "linear")
 
-# `aud detect fillers` (faster-whisper) reports a filler word's END timestamp
+# `aud detect fillers` (openai-whisper) reports a filler word's END timestamp
 # systematically 175-200 ms EARLY -- it closes the word before the vowel
 # actually decays. Measured against exact ground truth (two filler words,
 # forced-aligned): "um" truth 0.599-0.938s, returned 0.600-0.740s (end error
@@ -1796,7 +1796,7 @@ def detect_fillers(path: str, words: list[str] | None = None, min_pause_ms: floa
     """Find filler words ('umm', 'uh', 'ehm') and long hesitations.
 
     Emits a regions document (`kind="filler"`), never a plan. Needs the
-    optional `speech` extra (faster-whisper); with it absent, raises
+    optional `speech` extra (openai-whisper); with it absent, raises
     `AudError(code="speech_extra_missing")` -- see `aud.dsp.speech`. Never
     degrades to an energy-only guess.
 
@@ -1823,8 +1823,9 @@ def detect_fillers(path: str, words: list[str] | None = None, min_pause_ms: floa
             message="'detect fillers' needs word-level speech timings, and the 'speech' extra is not installed.",
             remedy=(
                 "Install aud with the speech extra: uv tool install 'aud[speech] @ "
-                "git+https://github.com/colombod/amplifier-smart-tools-audio' -- see docs/CONFIGURATION.md. "
-                "The other detect verbs need nothing extra."
+                "git+https://github.com/colombod/amplifier-smart-tools-audio' "
+                "--index https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match -- "
+                "see docs/CONFIGURATION.md. The other detect verbs need nothing extra."
             ),
         )
 

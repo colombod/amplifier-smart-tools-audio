@@ -124,7 +124,7 @@ Why transients matter even when you only asked about silence:
 
 'detect fillers' needs the speech extra:
   Word-level timings need speech recognition. That is the optional
-  'speech' extra (faster-whisper, MIT). It is a LOCAL model -- no AI
+  'speech' extra (openai-whisper, MIT). It is a LOCAL model -- no AI
   provider, no credential, no network call at run time. With the extra
   absent, 'detect fillers' REFUSES and names it; it never falls back to an
   energy-only guess, because those regions would look like words and 'cut'
@@ -155,7 +155,7 @@ Failures:
   file_not_found        path does not exist.
   audio_decode_error    path is not decodable audio.
   speech_extra_missing  'detect fillers' only: the 'speech' extra
-                        (faster-whisper) is not installed; names the extra
+                        (openai-whisper) is not installed; names the extra
                         rather than degrading to an energy-only guess.
 
 Example:

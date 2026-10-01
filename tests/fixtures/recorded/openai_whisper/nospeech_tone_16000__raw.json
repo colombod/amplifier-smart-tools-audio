@@ -1,0 +1,45 @@
+{
+  "provenance": {
+    "recorded_at_utc": "2026-10-01T07:18:41.355207+00:00",
+    "openai_whisper_version": "20250625",
+    "torch_version": "2.14.1+cpu",
+    "numpy_version": "2.4.6",
+    "scipy_version": "1.17.1",
+    "soundfile_version": "0.13.1",
+    "python_version": "3.11.15 (main, Jun 11 2026, 04:03:40) [Clang 22.1.3 ]",
+    "model": "base",
+    "model_constructor": "whisper.load_model(\"base\")",
+    "transcribe_call": "model.transcribe(audio, word_timestamps=True, fp16=False)",
+    "source_wav": "nospeech_tone_16000.wav",
+    "source_wav_sha256": "540a6e57921a7e468b8d8a0a6b87ee3217f344161045ed7c9aacb214cec55bec",
+    "source_sample_rate": 16000,
+    "input_path": "raw",
+    "snippet": "import numpy as np, soundfile as sf\nimport whisper\nx, sr = sf.read(WAV, dtype=\"float64\", always_2d=False)\nif x.ndim == 2:\n    x = x.mean(axis=1)\n# path == \"resampled_16k\" only:\n#   from fractions import Fraction; from scipy import signal\n#   frac = Fraction(16000, sr).limit_denominator(2000)\n#   x = signal.resample_poly(x, up=frac.numerator, down=frac.denominator)\naudio = x.astype(\"float32\")\nmodel = whisper.load_model(\"base\")\nresult = model.transcribe(audio, word_timestamps=True, fp16=False)\n",
+    "wall_seconds": 7.056,
+    "recorded_in": "repo's own .venv (not a DTU) -- see RECORDING.md"
+  },
+  "input": {
+    "path_mode": "raw",
+    "source_sample_rate": 16000,
+    "source_channels": 1,
+    "source_samples": 80000,
+    "source_duration_s": 5.0,
+    "fed_sample_rate_assumed_by_library": 16000,
+    "fed_samples": 80000,
+    "fed_dtype": "float32",
+    "fed_duration_s_if_16k": 5.0,
+    "true_duration_s": 5.0,
+    "resampled_before_transcribe": false,
+    "declared_sample_rate_of_fed_array": 16000
+  },
+  "summary": {
+    "n_segments": 0,
+    "n_words": 0,
+    "text": "",
+    "last_word_end": null,
+    "degenerate_word_count": 0,
+    "degenerate_words": []
+  },
+  "segments": [],
+  "words_flat": []
+}

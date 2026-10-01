@@ -1,0 +1,220 @@
+{
+  "provenance": {
+    "recorded_at_utc": "2026-10-01T07:17:36.148835+00:00",
+    "openai_whisper_version": "20250625",
+    "torch_version": "2.14.1+cpu",
+    "numpy_version": "2.4.6",
+    "scipy_version": "1.17.1",
+    "soundfile_version": "0.13.1",
+    "python_version": "3.11.15 (main, Jun 11 2026, 04:03:40) [Clang 22.1.3 ]",
+    "model": "base",
+    "model_constructor": "whisper.load_model(\"base\")",
+    "transcribe_call": "model.transcribe(audio, word_timestamps=True, fp16=False)",
+    "source_wav": "speech_short_44100.wav",
+    "source_wav_sha256": "b99586b48c4fc7ed3c051ee331a2c504750f21d6ae179d9e00c9836ad9de1961",
+    "source_sample_rate": 44100,
+    "input_path": "raw",
+    "snippet": "import numpy as np, soundfile as sf\nimport whisper\nx, sr = sf.read(WAV, dtype=\"float64\", always_2d=False)\nif x.ndim == 2:\n    x = x.mean(axis=1)\n# path == \"resampled_16k\" only:\n#   from fractions import Fraction; from scipy import signal\n#   frac = Fraction(16000, sr).limit_denominator(2000)\n#   x = signal.resample_poly(x, up=frac.numerator, down=frac.denominator)\naudio = x.astype(\"float32\")\nmodel = whisper.load_model(\"base\")\nresult = model.transcribe(audio, word_timestamps=True, fp16=False)\n",
+    "wall_seconds": 219.856,
+    "recorded_in": "repo's own .venv (not a DTU) -- see RECORDING.md"
+  },
+  "input": {
+    "path_mode": "raw",
+    "source_sample_rate": 44100,
+    "source_channels": 1,
+    "source_samples": 355908,
+    "source_duration_s": 8.070476,
+    "fed_sample_rate_assumed_by_library": 16000,
+    "fed_samples": 355908,
+    "fed_dtype": "float32",
+    "fed_duration_s_if_16k": 22.24425,
+    "true_duration_s": 8.070476,
+    "resampled_before_transcribe": false,
+    "declared_sample_rate_of_fed_array": 44100
+  },
+  "summary": {
+    "n_segments": 2,
+    "n_words": 11,
+    "text": " This man, he nourch his emotions. This is what humans love.",
+    "last_word_end": 11.4,
+    "degenerate_word_count": 4,
+    "degenerate_words": [
+      {
+        "index": 1,
+        "word": " man,",
+        "start": 0.72,
+        "end": 0.72
+      },
+      {
+        "index": 5,
+        "word": " emotions.",
+        "start": 6.5,
+        "end": 6.5
+      },
+      {
+        "index": 8,
+        "word": " what",
+        "start": 10.34,
+        "end": 10.34
+      },
+      {
+        "index": 10,
+        "word": " love.",
+        "start": 11.4,
+        "end": 11.4
+      }
+    ]
+  },
+  "segments": [
+    {
+      "id": 0,
+      "start": 0.0,
+      "end": 6.5,
+      "text": " This man, he nourch his emotions.",
+      "words": [
+        {
+          "word": " This",
+          "start": 0.0,
+          "end": 0.72,
+          "probability": 0.003329758532345295
+        },
+        {
+          "word": " man,",
+          "start": 0.72,
+          "end": 0.72,
+          "probability": 0.0030207003001123667
+        },
+        {
+          "word": " he",
+          "start": 1.06,
+          "end": 1.84,
+          "probability": 0.0527544803917408
+        },
+        {
+          "word": " nourch",
+          "start": 1.84,
+          "end": 3.64,
+          "probability": 8.940895213527256e-06
+        },
+        {
+          "word": " his",
+          "start": 3.64,
+          "end": 6.5,
+          "probability": 0.2960948646068573
+        },
+        {
+          "word": " emotions.",
+          "start": 6.5,
+          "end": 6.5,
+          "probability": 0.001784664811566472
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "start": 7.62,
+      "end": 11.4,
+      "text": " This is what humans love.",
+      "words": [
+        {
+          "word": " This",
+          "start": 7.62,
+          "end": 9.02,
+          "probability": 0.28080812096595764
+        },
+        {
+          "word": " is",
+          "start": 9.02,
+          "end": 10.34,
+          "probability": 0.10233098268508911
+        },
+        {
+          "word": " what",
+          "start": 10.34,
+          "end": 10.34,
+          "probability": 0.043554723262786865
+        },
+        {
+          "word": " humans",
+          "start": 10.34,
+          "end": 11.4,
+          "probability": 0.0018069049110636115
+        },
+        {
+          "word": " love.",
+          "start": 11.4,
+          "end": 11.4,
+          "probability": 0.154981330037117
+        }
+      ]
+    }
+  ],
+  "words_flat": [
+    {
+      "word": " This",
+      "start": 0.0,
+      "end": 0.72,
+      "probability": 0.003329758532345295
+    },
+    {
+      "word": " man,",
+      "start": 0.72,
+      "end": 0.72,
+      "probability": 0.0030207003001123667
+    },
+    {
+      "word": " he",
+      "start": 1.06,
+      "end": 1.84,
+      "probability": 0.0527544803917408
+    },
+    {
+      "word": " nourch",
+      "start": 1.84,
+      "end": 3.64,
+      "probability": 8.940895213527256e-06
+    },
+    {
+      "word": " his",
+      "start": 3.64,
+      "end": 6.5,
+      "probability": 0.2960948646068573
+    },
+    {
+      "word": " emotions.",
+      "start": 6.5,
+      "end": 6.5,
+      "probability": 0.001784664811566472
+    },
+    {
+      "word": " This",
+      "start": 7.62,
+      "end": 9.02,
+      "probability": 0.28080812096595764
+    },
+    {
+      "word": " is",
+      "start": 9.02,
+      "end": 10.34,
+      "probability": 0.10233098268508911
+    },
+    {
+      "word": " what",
+      "start": 10.34,
+      "end": 10.34,
+      "probability": 0.043554723262786865
+    },
+    {
+      "word": " humans",
+      "start": 10.34,
+      "end": 11.4,
+      "probability": 0.0018069049110636115
+    },
+    {
+      "word": " love.",
+      "start": 11.4,
+      "end": 11.4,
+      "probability": 0.154981330037117
+    }
+  ]
+}

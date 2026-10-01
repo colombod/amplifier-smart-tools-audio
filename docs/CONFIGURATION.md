@@ -223,11 +223,15 @@ before running the deterministic suite.
 ## Optional extra: speech recognition (`aud[speech]`)
 
 Not configuration either, and **not a credential**. One verb — `aud detect fillers` — needs
-word-level speech timings to locate "umm", "uh" and "ehm". Those come from `faster-whisper`, a
-**local** model, installed as an extra of this package:
+word-level speech timings to locate "umm", "uh" and "ehm". Those come from `openai-whisper`
+(MIT code AND model weights), a **local** model, installed as an extra of this package. It pulls
+in `torch`, which MUST be installed from PyPI's CPU-only wheel index -- without the explicit
+index below, a plain `uv tool install 'aud[speech] @ git+...'` resolves the default torch build,
+which on Linux includes ~6.5 GB of NVIDIA CUDA wheels this tool never uses (measured: ~8 GB total
+vs ~187 MB for the CPU-only wheel):
 
 ```bash
-uv tool install 'aud[speech] @ git+https://github.com/colombod/amplifier-smart-tools-audio'
+uv tool install 'aud[speech] @ git+https://github.com/colombod/amplifier-smart-tools-audio' --index https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match
 ```
 
 It is worth being precise about what this is and is not:
@@ -235,10 +239,12 @@ It is worth being precise about what this is and is not:
 - **No AI provider, no credential, no network call at run time.** The model is downloaded once
   and cached; after that `detect fillers` runs offline. It has nothing to do with the provider
   variables above, and `advise`/`master` have nothing to do with this extra.
-- **`faster-whisper` is MIT**, and CPU-capable without CUDA. The alternatives were rejected on
-  install cost, not on quality: `whisper.cpp` bindings need a build toolchain, and OpenAI's
-  `whisper` package pulls in torch. An agent should be able to install this unattended and have
-  it work.
+- **`openai-whisper` is MIT** (code and weights). It was chosen over `faster-whisper` (also MIT,
+  used until issue #44) because faster-whisper hard-imports `av` (PyAV), whose PyPI wheel bundles
+  an FFmpeg build with `libx264`/`libx265` (GPL-2.0-or-later, genuinely dynamically linked) and a
+  `libmp3lame` with the GPL-only `mpglib` decoder compiled in -- a real, not hypothetical,
+  licence problem (see `docs/DESIGN-ENVELOPE.md`'s "Dependency licences" section). `whisper.cpp`
+  bindings still need a build toolchain, which an unattended agent install should not require.
 - **With the extra absent, exactly one verb is lost.** `detect fillers` exits non-zero with
   `speech_extra_missing`, naming the extra and pointing here. `detect silence`, `detect
   transients`, `cut`, `strip-silence` and the whole mastering chain are unaffected — none of

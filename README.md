@@ -33,12 +33,15 @@ Prerequisites:
 uv tool install git+https://github.com/colombod/amplifier-smart-tools-audio
 ```
 
-With the optional extras — `speech` for `aud detect fillers` (faster-whisper, MIT: a **local**
-model, no provider and no credential), `stretch` for the higher-quality time-stretch engine
-(Signalsmith Stretch, MIT):
+With the optional extras — `speech` for `aud detect fillers` (openai-whisper, MIT code and
+model weights: a **local** model, no provider and no credential), `stretch` for the
+higher-quality time-stretch engine (Signalsmith Stretch, MIT). `speech` pulls in `torch`; the
+`--index`/`--index-strategy` flags pin it to PyPI's CPU-only wheel (~187 MB) instead of the
+default build, which on Linux otherwise pulls ~8 GB including NVIDIA CUDA wheels this tool
+never uses:
 
 ```bash
-uv tool install 'aud[speech,stretch] @ git+https://github.com/colombod/amplifier-smart-tools-audio'
+uv tool install 'aud[speech,stretch] @ git+https://github.com/colombod/amplifier-smart-tools-audio' --index https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match
 ```
 
 To use it as a library:

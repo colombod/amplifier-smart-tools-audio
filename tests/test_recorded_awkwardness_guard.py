@@ -35,71 +35,57 @@ from tests import replay
 # ---------------------------------------------------------------------------
 
 
-def test_recording_speech_long_48000_resampled_16k_has_the_real_degenerate_um() -> None:
-    """RECORDING.md: a filler word with `start == end` is real, not
-    hypothetical -- ' um,' at 24.0s in speech_long_48000__resampled_16k,
-    on the *correct* (resampled) path.
-    """
-    recording = replay.load_recording("faster_whisper", "speech_long_48000__resampled_16k")
-    degenerate = [w for w in recording["words_flat"] if w["start"] == w["end"]]
-    assert len(degenerate) == 1, "speech_long_48000__resampled_16k must contain exactly one degenerate word"
-    word = degenerate[0]
-    assert word["start"] == 24.0
-    assert word["word"] == " um,"
-
-
 @pytest.mark.parametrize(
     ("recording_name", "expected_degenerate_count"),
     [
-        ("speech_short_44100__raw", 3),
-        ("speech_short_48000__raw", 4),
-        ("speech_long_44100__raw", 5),
-        ("speech_long_48000__resampled_16k", 1),
+        ("speech_short_44100__raw", 4),
+        ("speech_short_48000__raw", 5),
     ],
 )
 def test_recording_degenerate_word_counts_match_recording_md(
     recording_name: str, expected_degenerate_count: int
 ) -> None:
-    """RECORDING.md: "Thirteen of them, across four different runs". If a
-    re-recording changes any of these four counts, the thirteen-word claim
-    this repo's tests rely on is no longer true and must fail loudly here,
-    not be silently absorbed by a looser downstream assertion.
+    """RECORDING.md: re-recorded against openai-whisper for issue #44, the
+    short-fixture matrix really produced 9 degenerate words across these two
+    runs (none of them fillers -- see test_dsp_detect.py). If a re-recording
+    changes either count, RECORDING.md's claim needs re-verifying, not just
+    this test updating.
     """
-    recording = replay.load_recording("faster_whisper", recording_name)
+    recording = replay.load_recording("openai_whisper", recording_name)
     degenerate = [w for w in recording["words_flat"] if w["start"] == w["end"]]
     assert len(degenerate) == expected_degenerate_count, (
         f"{recording_name} must still contain {expected_degenerate_count} degenerate word(s) -- "
-        f"found {len(degenerate)}. If this recording was refreshed, RECORDING.md's 'thirteen "
-        f"degenerate words across four runs' claim needs re-verifying, not just this test updating."
+        f"found {len(degenerate)}. If this recording was refreshed, RECORDING.md's degenerate-word "
+        f"claim needs re-verifying, not just this test updating."
     )
 
 
-def test_recording_degenerate_words_sum_to_thirteen_across_all_eighteen_runs() -> None:
-    index = replay.load_recording("faster_whisper", "_index")
+def test_recording_degenerate_words_sum_to_nine_across_the_short_fixture_matrix() -> None:
+    index = replay.load_recording("openai_whisper", "_index")
     total = sum(run["degenerate_word_count"] for run in index["runs"])
-    assert total == 13, "RECORDING.md's 'thirteen degenerate words, across four different runs' must still hold"
+    assert total == 9, "RECORDING.md's openai-whisper degenerate-word total must still hold"
 
 
-def test_recording_silence_has_one_hallucinated_word_not_zero() -> None:
-    """RECORDING.md: on silence, faster-whisper does NOT return nothing --
-    it returns one segment with one hallucinated word. Code that treats
-    'no speech' as 'empty result' is wrong about this library, and a
-    recording that came back empty on a re-record would silently erase the
-    one case that proves it.
+def test_recording_silence_returns_zero_segments_not_a_hallucination() -> None:
+    """RECORDING.md: unlike faster-whisper (which returned one segment with
+    one hallucinated word on digital silence -- see RECORDING.md's
+    old-vs-new comparison), openai-whisper returns NOTHING on the same
+    silence fixture -- measured directly while resolving issue #44. A
+    recording that came back non-empty on a re-record would silently erase
+    this real, measured behavioural difference between the two engines.
     """
-    recording = replay.load_recording("faster_whisper", "nospeech_silence_16000__raw")
-    assert len(recording["segments"]) == 1
-    assert len(recording["words_flat"]) == 1
-    assert recording["words_flat"][0]["word"].strip() != ""
+    recording = replay.load_recording("openai_whisper", "nospeech_silence_16000__raw")
+    assert recording["segments"] == []
+    assert recording["words_flat"] == []
 
 
 def test_recording_pure_tone_returns_zero_segments() -> None:
-    """The other half of the same fact: a pure tone (no hallucination
-    trigger the way digital silence is) returns zero segments, not one.
-    Pinned alongside the silence case because the *contrast* between the
-    two -- not either fact alone -- is what RECORDING.md documents.
+    """The other half of the same fact: a pure tone also returns zero
+    segments. Pinned alongside the silence case because openai-whisper's
+    behaviour is now IDENTICAL on both (unlike faster-whisper, where
+    silence and tone diverged) -- see RECORDING.md.
     """
-    recording = replay.load_recording("faster_whisper", "nospeech_tone_16000__raw")
+    recording = replay.load_recording("openai_whisper", "nospeech_tone_16000__raw")
     assert recording["segments"] == []
     assert recording["words_flat"] == []
 
@@ -180,43 +166,39 @@ def test_recording_anthropic_has_both_a_text_only_and_a_thinking_plus_text_respo
 
 
 def test_replay_surfaces_the_degenerate_word_unaltered(monkeypatch: pytest.MonkeyPatch) -> None:
-    words = replay.load_words("speech_long_48000__resampled_16k")
+    words = replay.load_words("speech_short_48000__raw")
     degenerate = [w for w in words if w.start == w.end]
-    assert len(degenerate) == 1
-    assert degenerate[0].start == 24.0
-    assert degenerate[0].word == " um,"
+    assert len(degenerate) == 5
+    assert all(w.word.strip() for w in degenerate), "a degenerate word still carries real recognised text"
 
-    # And through the full installed WhisperModel replay surface, not just load_words:
-    installed = replay.install_faster_whisper_replay(
+    # And through the full installed replay surface, not just load_words:
+    installed = replay.install_openai_whisper_replay(
         monkeypatch,
-        "speech_long_48000__resampled_16k",
+        "speech_short_48000__raw",
         source=replay.UNBOUND("this guard checks the replayed ANSWER only, not correspondence to any audio"),
     )
-    all_words = [w for seg in installed.segments() for w in seg.words]
-    degenerate_via_segments = [w for w in all_words if w.start == w.end]
-    assert len(degenerate_via_segments) == 1
-    assert degenerate_via_segments[0].word == " um,"
+    all_words = [w for seg in installed.result()["segments"] for w in seg["words"]]
+    degenerate_via_segments = [w for w in all_words if w["start"] == w["end"]]
+    assert len(degenerate_via_segments) == 5
 
 
-def test_replay_surfaces_silence_hallucination_and_tone_zero_segments_unaltered(
+def test_replay_surfaces_silence_and_tone_zero_segments_unaltered(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    silence = replay.install_faster_whisper_replay(
+    silence = replay.install_openai_whisper_replay(
         monkeypatch,
         "nospeech_silence_16000__raw",
         source=replay.UNBOUND("proving the replayed segment/word count, not correspondence to driving audio"),
     )
-    silence_segments = silence.segments()
-    assert len(silence_segments) == 1
-    assert sum(len(seg.words) for seg in silence_segments) == 1
+    assert silence.result()["segments"] == []
 
     with pytest.MonkeyPatch.context() as mp:
-        tone = replay.install_faster_whisper_replay(
+        tone = replay.install_openai_whisper_replay(
             mp,
             "nospeech_tone_16000__raw",
             source=replay.UNBOUND("proving the replayed segment count, not correspondence to driving audio"),
         )
-        assert tone.segments() == []
+        assert tone.result()["segments"] == []
 
 
 def test_replay_surfaces_signalsmith_timefactor_reciprocal_unaltered(monkeypatch: pytest.MonkeyPatch) -> None:

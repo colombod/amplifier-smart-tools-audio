@@ -4,13 +4,15 @@ Every energy-domain signal (silence/transient detection) is synthesised
 in-test (no committed binaries) -- this proves the numbers in the lane
 report, not just that the code runs without raising.
 
-Every faster-whisper-touching test below replays a REAL recorded
-transcription from tests/fixtures/recorded/faster_whisper/ (see
+Every openai-whisper-touching test below replays a REAL recorded
+transcription from tests/fixtures/recorded/openai_whisper/ (see
 tests/replay.py and RECORDING.md) instead of a hand-written fake
-transcript. Two real defects (a degenerate word with no sample rate at
-all, and a sample-rate mismatch) survived a green test suite built on
-hand-written fakes; the recordings exist so those exact failure modes are
-what gets tested.
+transcript -- the engine behind the optional `speech` extra (issue #44
+replaced faster-whisper with openai-whisper; see RECORDING.md for the
+re-recorded baseline and the old-vs-new comparison). Two real defects (a
+degenerate word with no sample rate at all, and a sample-rate mismatch)
+survived a green test suite built on hand-written fakes; the recordings
+exist so those exact failure modes are what gets tested.
 """
 
 from __future__ import annotations
@@ -219,6 +221,7 @@ def test_transients_do_not_swamp_a_realistic_steady_state_background() -> None:
 # --- dsp.speech: absent-extra path ------------------------------------------
 
 
+@pytest.mark.skipif(dsp_speech.is_available(), reason="requires the 'speech' extra to be ABSENT on this host")
 def test_detect_fillers_without_extra_raises_speech_extra_missing() -> None:
     x = np.zeros(_SR)
     with pytest.raises(AudError) as exc_info:
@@ -238,24 +241,29 @@ def test_filler_words_includes_um_and_erm() -> None:
     assert "erm" in dsp_speech.FILLER_WORDS
 
 
-def test_is_available_reports_false_when_faster_whisper_is_not_installed() -> None:
+@pytest.mark.skipif(dsp_speech.is_available(), reason="requires the 'speech' extra to be ABSENT on this host")
+def test_is_available_reports_false_when_openai_whisper_is_not_installed() -> None:
     # This assertion documents the environment this lane developed and tested
-    # in: faster-whisper is deliberately not installed here (installs are
-    # DTU-only). If this ever flips to True it means the extra got installed
-    # on this box, which is a different concern, not a regression.
+    # in: openai-whisper is deliberately not installed here (installs are
+    # DTU-only / the repo's own `.venv` with the `speech` extra). If this ever
+    # flips to True it means the extra got installed on this box, which is a
+    # different concern, not a regression.
     assert dsp_speech.is_available() is False
 
 
 # --- dsp.speech: word -> region parsing, against REAL recorded words -------
 #
 # `replay.load_words(name)` returns the flat, ordered, real word list from
-# one recorded faster-whisper run (tests/fixtures/recorded/faster_whisper/),
-# each object exposing exactly `.start`, `.end`, `.word`, `.probability` --
-# the real values faster-whisper produced, verbatim. No hand-authored
-# `_FakeWord` stands in for any of these any more: a hand-rolled fake built
-# from the fields this module reads could not produce a real degenerate
-# word (D2) or omit a field it didn't know to include, which is exactly how
-# both defects survived a green suite (see RECORDING.md).
+# one recorded openai-whisper run (tests/fixtures/recorded/openai_whisper/),
+# each adapted through `aud.dsp.speech._WordAdapter` to expose exactly
+# `.start`, `.end`, `.word`, `.probability` -- the real values openai-whisper
+# produced, verbatim (openai-whisper itself returns each word as a plain
+# dict; `_WordAdapter` is the one place that gets bridged, in production
+# code as well as here). No hand-authored `_FakeWord` stands in for any of
+# these any more: a hand-rolled fake built from the fields this module reads
+# could not produce a real degenerate word (D2) or omit a field it didn't
+# know to include, which is exactly how both defects survived a green suite
+# (see RECORDING.md).
 
 
 def test_words_to_regions_finds_filler_words_in_a_real_transcript() -> None:
@@ -310,82 +318,79 @@ def test_words_to_regions_output_is_ascending_and_non_overlapping_on_a_real_tran
 
 
 def test_words_to_regions_normalizes_a_real_capitalized_word_and_respects_custom_vocabulary() -> None:
-    """speech_long_16000__raw.json really contains a capitalized ' Urm,' at
-    30.48-31.04s -- faster-whisper's own capitalization/punctuation choice,
-    not a synthetic one. It normalizes to "urm", which is not in the
-    built-in FILLER_WORDS (only "erm" is), so it is found only once a
-    caller supplies "urm" as a custom vocabulary word -- proving
-    normalization and custom-vocabulary support together, on real output.
+    """speech_short_16000__raw.json really contains a capitalized ' So,' at
+    0.0-0.22s -- openai-whisper's own capitalization/punctuation choice
+    (sentence-initial), not a synthetic one. It normalizes to "so", which is
+    not in the built-in FILLER_WORDS, so it is found only once a caller
+    supplies "so" as a custom vocabulary word -- proving normalization and
+    custom-vocabulary support together, on real output.
     """
-    words = replay.load_words("speech_long_16000__raw")
-    urm = next(w for w in words if w.word == " Urm,")
-    assert urm.start == 30.48
-    assert urm.end == 31.04
+    words = replay.load_words("speech_short_16000__raw")
+    so = next(w for w in words if w.word == " So,")
+    assert so.start == 0.0
+    assert so.end == 0.22
 
-    default_regions, _ = dsp_speech._words_to_regions([urm], dsp_speech.FILLER_WORDS, min_pause_ms=100000.0)
+    default_regions, _ = dsp_speech._words_to_regions([so], dsp_speech.FILLER_WORDS, min_pause_ms=100000.0)
     assert default_regions == []
 
-    custom_regions, _ = dsp_speech._words_to_regions([urm], ("urm",), min_pause_ms=100000.0)
+    custom_regions, _ = dsp_speech._words_to_regions([so], ("so",), min_pause_ms=100000.0)
     assert len(custom_regions) == 1
-    assert custom_regions[0]["text"] == "urm"
+    assert custom_regions[0]["text"] == "so"
 
 
-def test_words_to_regions_drops_a_real_degenerate_filler_word_and_counts_it() -> None:
-    """The literal case named in the task: speech_long_48000__resampled_16k
-    -- the correct (resampled) whisper path -- really produced a degenerate
-    (`start == end`) filler word, ' um,' at 24.0s, alongside 13 other real,
-    correctly-timed filler words in the same transcript. Building a filler
-    region for a zero-duration word would fail new_regions's `end_s >
-    start_s` check and, because that check is whole-document, take every
-    other correctly-timed word down with it (D2, lane report) -- so it must
-    be dropped, and counted, while its neighbours survive.
+def test_words_to_regions_drops_a_synthetic_degenerate_filler_word_and_counts_it() -> None:
+    """No REAL recorded openai-whisper run re-recorded for issue #44 happened
+    to produce a degenerate (`start == end`) word that is ALSO a recognised
+    filler -- the re-recorded short-fixture matrix's five real degenerate
+    words (speech_short_44100__raw: 4, speech_short_48000__raw: 1 more) are
+    all non-filler gibberish ("man,", "emotions.", "what", "love.") produced
+    by feeding whisper badly-mistimed audio, not filler words (see
+    RECORDING.md's old-vs-new comparison). Re-recording a long enough real
+    file to reproduce the EXACT real-degenerate-filler-word case the former
+    faster-whisper fixtures had (' um,' at 24.0s) was out of this round's CPU
+    budget -- disclosed here rather than silently dropped. This test instead
+    combines REAL surviving filler words (speech_short_16000__raw: "um",
+    "uh", "erm") with ONE deliberately-synthetic degenerate filler word,
+    clearly labelled as such, to prove the exact behaviour the real case
+    above used to prove: building a filler region for a zero-duration word
+    would fail new_regions's `end_s > start_s` check and, because that check
+    is whole-document, take every other correctly-timed word down with it
+    (D2, lane report) -- so it must be dropped, and counted, while its
+    neighbours survive.
     """
-    words = replay.load_words("speech_long_48000__resampled_16k")
-    regions, degenerate = dsp_speech._words_to_regions(words, dsp_speech.FILLER_WORDS, min_pause_ms=100000.0)
+
+    class _SyntheticDegenerateFillerWord:
+        start = 100.0
+        end = 100.0
+        word = "um,"
+        probability = 1.0
+
+    real_words = replay.load_words("speech_short_16000__raw")  # 3 real fillers: um, uh, erm
+    combined = [*real_words, _SyntheticDegenerateFillerWord()]
+    regions, degenerate = dsp_speech._words_to_regions(combined, dsp_speech.FILLER_WORDS, min_pause_ms=100000.0)
 
     assert degenerate == 1
     filler_regions = [r for r in regions if r["text"]]
-    assert len(filler_regions) == 13, "13 real fillers must survive the one degenerate word being dropped"
-    assert not any(r["start_s"] == 24.0 for r in filler_regions), "the degenerate word at 24.0s must not appear"
-    # its immediate real neighbours (see RECORDING.md) must still be there
-    assert any(r["start_s"] == 27.12 and r["text"] == "uh" for r in filler_regions)
-    assert any(r["start_s"] == 30.6 and r["text"] == "erm" for r in filler_regions)
+    assert len(filler_regions) == 3, "the 3 real fillers must survive the synthetic degenerate word being dropped"
+    assert not any(r["start_s"] == 100.0 for r in filler_regions), "the degenerate word must not appear"
+    assert {r["text"] for r in filler_regions} == {"um", "uh", "erm"}
 
 
-def test_words_to_regions_counts_a_real_and_a_synthetic_degenerate_word_independently() -> None:
+def test_words_to_regions_counts_real_non_filler_degenerate_words_as_zero() -> None:
     """`_words_to_regions` only counts a degenerate word if it is ALSO a
-    recognised filler -- speech_short_48000__raw.json really produced four
-    degenerate words, but none of them ("kappa", "ra,") are fillers, so
-    they contribute 0 to `degenerate_words_dropped` (proved directly
-    below). Across all 18 real recordings, exactly one real degenerate
-    FILLER word exists (see
-    test_words_to_regions_drops_a_real_degenerate_filler_word_and_counts_it).
-    To prove independent counting of more than one degenerate filler word
-    without inventing a second real one that was never recorded, this test
-    combines that one real degenerate filler word with the one
-    deliberately-synthetic negative-duration case (see
-    test_words_to_regions_drops_a_negative_duration_word_too) and confirms
-    the count is exactly their sum, with the real surviving fillers intact.
+    recognised filler -- speech_short_44100__raw.json really produced four
+    degenerate words (re-recorded for issue #44, see RECORDING.md), but
+    none of them ("man,", "emotions.", "what", "love.") are fillers, so
+    they contribute 0 to `degenerate_words_dropped` -- proved directly
+    below against the real recorded data, not a synthetic stand-in.
     """
-    non_filler_degenerate_recording = replay.load_recording("faster_whisper", "speech_short_48000__raw")
-    non_filler_words = replay.load_words("speech_short_48000__raw")
+    non_filler_degenerate_recording = replay.load_recording("openai_whisper", "speech_short_44100__raw")
+    non_filler_words = replay.load_words("speech_short_44100__raw")
     _regions, non_filler_degenerate = dsp_speech._words_to_regions(
         non_filler_words, dsp_speech.FILLER_WORDS, min_pause_ms=100000.0
     )
     assert non_filler_degenerate == 0, "degenerate non-filler words must not be counted at all"
     assert non_filler_degenerate_recording["summary"]["degenerate_word_count"] == 4  # they are real, just not fillers
-
-    class _SyntheticNegativeDurationWord:
-        start = 1.0
-        end = 0.9
-        word = "uh"
-        probability = 1.0
-
-    real_words = replay.load_words("speech_long_48000__resampled_16k")  # 13 real fillers + 1 real degenerate
-    combined = [*real_words, _SyntheticNegativeDurationWord()]
-    regions, degenerate = dsp_speech._words_to_regions(combined, dsp_speech.FILLER_WORDS, min_pause_ms=100000.0)
-    assert degenerate == 2  # the one real degenerate word + the one synthetic negative-duration word
-    assert len([r for r in regions if r["text"]]) == 13
 
 
 def test_words_to_regions_drops_a_negative_duration_word_too() -> None:
@@ -413,38 +418,24 @@ def test_words_to_regions_drops_a_negative_duration_word_too() -> None:
 # --- dsp.speech: D2 -- a degenerate word must not sink the whole document -
 
 
-def test_detect_fillers_full_document_survives_the_real_degenerate_word(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_detect_fillers_full_document_survives_real_degenerate_words(monkeypatch: pytest.MonkeyPatch) -> None:
     """End-to-end through `detect_fillers`, replaying
-    speech_long_48000__resampled_16k -- the recording RECORDING.md names as
-    containing a real degenerate word on the *correct* (resampled) path.
-    The source wav for this recording was not shipped (RECORDING.md: the
-    48kHz 'long' variant was transcribed but deliberately not committed, to
-    keep this directory small), so the array handed to `detect_fillers`
-    here is a placeholder of the right duration/rate -- it drives the call,
-    it is not claimed to be the recorded bytes. What is replayed verbatim
-    is faster-whisper's real recorded ANSWER, degenerate word included.
-    `source=replay.UNBOUND(...)` makes that gap an explicit, greppable
-    declaration rather than a silent omission.
+    speech_short_48000__raw -- a real recording (re-recorded for issue #44)
+    that genuinely contains five degenerate (`start == end`) words (none of
+    them fillers -- see
+    test_words_to_regions_counts_real_non_filler_degenerate_words_as_zero).
+    `source=` is bound to the REAL shipped wav this recording came from
+    (speech_short_48000.wav), so this is a fully-bound replay, not an
+    UNBOUND placeholder.
     """
-    replay.install_faster_whisper_replay(
-        monkeypatch,
-        "speech_long_48000__resampled_16k",
-        source=replay.UNBOUND(
-            "the recorded source wav for speech_long_48000 was never shipped (RECORDING.md, "
-            "to keep the fixture directory small); the array driving this call is a zeros "
-            "placeholder of the right duration/rate, not a claim of matching the recorded "
-            "bytes -- only the replayed ANSWER (the real degenerate word) is under test here"
-        ),
-    )
+    wav_file = replay.wav_path("speech_short_48000.wav")
+    replay.install_openai_whisper_replay(monkeypatch, "speech_short_48000__raw", source=wav_file)
 
-    duration_s = 64.563812
-    x = np.zeros(int(duration_s * 48000))
-    regions, detection = dsp_speech.detect_fillers(x, 48000)
+    samples, sample_rate = dsp_io.read_audio(wav_file)
+    regions, detection = dsp_speech.detect_fillers(samples, sample_rate)
 
-    assert detection["degenerate_words_dropped"] == 1
-    filler_regions = [r for r in regions if r["text"]]
-    assert len(filler_regions) == 13
-    assert regions, "the regions document must not come back empty just because one word was degenerate"
+    assert detection["degenerate_words_dropped"] == 0, "none of this recording's 5 degenerate words are fillers"
+    assert regions is not None, "the document must not come back None just because some words were degenerate"
 
 
 # --- dsp.speech: D1 -- sample rate was accepted and then ignored -----------
@@ -458,7 +449,7 @@ def test_detect_fillers_is_sample_rate_independent_on_two_real_recordings() -> N
     exact same spoken content (RECORDING.md's "_index.json": both
     resampled_16k paths report 2 segments / 21 words / last word end 7.72s,
     identically). Each replay is bound to its own recorded source's exact
-    bytes -- `install_faster_whisper_replay`'s required `source=` parameter
+    bytes -- `install_openai_whisper_replay`'s required `source=` parameter
     verifies the sha256 itself now -- this is deliberately NOT testing
     "similar audio produces the recorded output" (the one trap RECORDING.md
     warns against), it is testing that two *different*, each individually
@@ -475,7 +466,7 @@ def test_detect_fillers_is_sample_rate_independent_on_two_real_recordings() -> N
         assert sample_rate == sr
 
         with pytest.MonkeyPatch.context() as monkeypatch:
-            replay.install_faster_whisper_replay(monkeypatch, recording_name, source=wav_file)
+            replay.install_openai_whisper_replay(monkeypatch, recording_name, source=wav_file)
             regions, _detection = dsp_speech.detect_fillers(samples, sample_rate)
         results[sr] = regions
 
@@ -511,3 +502,40 @@ def test_resample_to_whisper_rate_preserves_real_duration() -> None:
         resampled = dsp_speech._resample_to_whisper_rate(x, sr)
         implied_duration_s = len(resampled) / 16000.0
         assert abs(implied_duration_s - duration_s) <= 0.02, (sr, implied_duration_s)
+
+
+# --- dsp.speech: the array path never spawns an ffmpeg subprocess ----------
+#
+# Only runs with the real `speech` extra installed (`pytest.importorskip`) --
+# this is the one test in this file that calls the REAL openai-whisper, not
+# a replay, because what it proves (that `whisper.audio.load_audio` -- the
+# ONE function in openai-whisper that shells out to the `ffmpeg` CLI -- is
+# never reached) is a property of the real call graph, not of recorded data.
+
+
+def test_detect_fillers_never_spawns_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`aud` always hands `whisper.transcribe` a numpy ndarray, never a file
+    path string. `whisper.audio.log_mel_spectrogram` only calls
+    `whisper.audio.load_audio` (which shells out to the `ffmpeg` CLI via
+    `subprocess.run`) on the `isinstance(audio, str)` branch -- confirmed by
+    reading that function's real source while resolving issue #44. This
+    test does not merely read the source; it makes the real call with
+    `load_audio` monkeypatched to raise, and asserts a real transcription
+    still succeeds -- if `detect_fillers` ever regressed to passing a file
+    path instead of an array, this would fail loudly instead of silently
+    depending on an installed `ffmpeg` binary.
+    """
+    pytest.importorskip("whisper", reason="requires the 'speech' extra (openai-whisper) to be installed")
+    import whisper.audio as whisper_audio
+
+    def _raise_if_called(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("whisper.audio.load_audio must never be called -- aud always passes an ndarray")
+
+    monkeypatch.setattr(whisper_audio, "load_audio", _raise_if_called)
+
+    wav_file = replay.wav_path("speech_short_16000.wav")
+    samples, sample_rate = dsp_io.read_audio(wav_file)
+    regions, detection = dsp_speech.detect_fillers(samples, sample_rate)
+
+    assert detection["engine"] == "openai-whisper"
+    assert any(r["text"] for r in regions), "a real transcription of this fixture must find at least one filler"

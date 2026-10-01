@@ -37,7 +37,9 @@ one. See [docs/VISION.md](docs/VISION.md).
 
 Permitted today: `numpy` (BSD), `scipy` (BSD), `soundfile` (BSD-3), `pyloudnorm` (MIT),
 `pydantic` (MIT), `pyyaml` (MIT), and the optional extras `python-stretch` (Signalsmith Stretch,
-MIT) and `faster-whisper` (MIT).
+MIT) and `openai-whisper` (MIT code and model weights; `torch`, its dependency, is pinned in
+`pyproject.toml` to PyPI's CPU-only wheel index -- see docs/CONFIGURATION.md). `faster-whisper`
+was removed (issue #44): its `av` dependency bundles a GPL-family FFmpeg build.
 **Any new dependency needs its licence checked and named in the pull request** — MIT, BSD, ISC,
 Apache-2.0 or PSF. Anything GPL-family, or unlicensed, is a no.
 

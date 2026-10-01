@@ -1,12 +1,20 @@
-"""The faster-whisper adapter behind the optional `speech` extra.
+"""The openai-whisper adapter behind the optional `speech` extra.
 
 This is the one place `detect fillers` depends on anything beyond the core
-DSP stack, and it is a genuinely optional dependency: `faster-whisper` is
-imported lazily, inside `detect_fillers`, never at module import time --
-the same rule the AI-provider backends follow (AGENTS.md #3) and for the
-same reason: a top-level import would make importing `aud.dsp.speech`
-itself depend on the extra being installed, which defeats the entire point
-of it being optional.
+DSP stack, and it is a genuinely optional dependency: `whisper` (the
+`openai-whisper` package) is imported lazily, inside `detect_fillers`, never
+at module import time -- the same rule the AI-provider backends follow
+(AGENTS.md #3) and for the same reason: a top-level import would make
+importing `aud.dsp.speech` itself depend on the extra being installed, which
+defeats the entire point of it being optional.
+
+Previously this module wrapped `faster-whisper` (MIT). It was REPLACED (see
+issue #44): `faster-whisper` hard-imports `av` (PyAV), whose PyPI wheel
+bundles an FFmpeg build with `libx264`/`libx265` (GPL-2.0-or-later,
+genuinely dynamically linked) and a `libmp3lame` with the GPL-only `mpglib`
+decoder compiled in. `openai-whisper` is MIT (code AND model weights) and has
+no such dependency; its own cost is `torch`, pinned in `pyproject.toml` to
+PyPI's CPU-only wheel index for this project's own install.
 
 A deliberate, stated exception to the `dsp/` boundary in AGENTS.md #8 ("dsp/
 modules ... do not raise user-facing errors"): this module raises
@@ -53,20 +61,23 @@ FILLER_WORDS: tuple[str, ...] = ("um", "umm", "uh", "erm", "ehm", "ah", "er")
 
 _MODEL_SIZE_DEFAULT = "base"
 
-# faster-whisper's ndarray input path has no sample-rate parameter: it
-# always assumes the array it is handed is already 16 kHz mono PCM. Handing
-# it audio at any other rate does not fail -- it silently mis-times every
-# word, because every sample is treated as 1/16000 s regardless of the
-# rate it was actually captured at (see D1 in the lane report: measured
-# ~1.37x timestamp drift on a 22.05 kHz file, scaling to ~3x at 48 kHz).
+# whisper's ndarray input path has no sample-rate parameter: it always
+# assumes the array it is handed is already 16 kHz mono PCM (see
+# `whisper.audio.log_mel_spectrogram`'s own docstring: "containing the audio
+# waveform in 16 kHz"). Handing it audio at any other rate does not fail --
+# it silently mis-times every word, exactly the same failure mode measured
+# against faster-whisper before it (D1 in the lane report: ~1.37x timestamp
+# drift on a 22.05 kHz file, scaling to ~3x at 48 kHz) and re-confirmed
+# against openai-whisper directly while resolving issue #44 (see
+# tests/fixtures/recorded/RECORDING.md's "Versions recorded" table).
 _WHISPER_SR = 16000
 
 
 def _resample_to_whisper_rate(mono: np.ndarray, sr: int) -> np.ndarray:
-    """Resample a mono float array to the 16 kHz rate faster-whisper assumes.
+    """Resample a mono float array to the 16 kHz rate whisper assumes.
 
-    Pure and faster-whisper-free -- exercised directly in tests without the
-    real dependency installed. Uses the same `scipy.signal.resample_poly`
+    Pure and whisper-free -- exercised directly in tests without the real
+    dependency installed. Uses the same `scipy.signal.resample_poly`
     polyphase approach the rest of the DSP stack uses for rate conversion
     (see `aud.dsp.reverb`/`aud.dsp.timepitch`), with the ratio reduced to
     small integers via `Fraction` so `resample_poly` does not choke on a
@@ -84,14 +95,22 @@ def _resample_to_whisper_rate(mono: np.ndarray, sr: int) -> np.ndarray:
 
 # The exact command contracts/regions.v1.md and this module's error remedy
 # point a caller at -- kept in sync with the `speech` extra declared in
-# pyproject.toml's [project.optional-dependencies].
-_INSTALL_COMMAND = "uv tool install 'aud[speech] @ git+https://github.com/colombod/amplifier-smart-tools-audio'"
+# pyproject.toml's [project.optional-dependencies]. The CPU-only PyTorch
+# index is REQUIRED here: `[tool.uv.sources]` in pyproject.toml only applies
+# to this project's own `uv sync`/`uv run`, never to installing `aud` as a
+# dependency from git -- measured directly while resolving issue #44 (see
+# that PR's body). Without the explicit index, this exact command pulls the
+# default (possibly CUDA, ~8 GB) torch build instead of the ~187 MB CPU one.
+_INSTALL_COMMAND = (
+    "uv tool install 'aud[speech] @ git+https://github.com/colombod/amplifier-smart-tools-audio' "
+    "--index https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match"
+)
 
 
 def is_available() -> bool:
-    """Whether the `speech` extra (faster-whisper) is importable on this host."""
+    """Whether the `speech` extra (openai-whisper) is importable on this host."""
     try:
-        import faster_whisper  # noqa: F401
+        import whisper  # noqa: F401
     except ImportError:
         return False
     return True
@@ -113,17 +132,43 @@ def _normalize_word(text: str) -> str:
 
 
 class _TimedWord(Protocol):
-    """Structural shape of a word-timing object, e.g. faster-whisper's `Word`.
+    """Structural shape of a word-timing object this module's internals consume.
 
     Only the three attributes this module reads are declared, so tests can
-    hand in a plain namedtuple/dataclass instead of a real faster-whisper
-    result -- see tests/test_dsp_detect.py's fake-transcript tests, which
-    exercise `_words_to_regions` without faster-whisper installed.
+    hand in a plain namedtuple/dataclass instead of a real whisper result --
+    see tests/test_dsp_detect.py's fake-transcript tests, which exercise
+    `_words_to_regions` without openai-whisper installed. openai-whisper
+    itself returns each word as a plain `dict` (keys `word`/`start`/`end`/
+    `probability`), not an attribute-access object -- see `_WordAdapter`,
+    which bridges that shape to this one.
     """
 
     start: float
     end: float
     word: str
+
+
+class _WordAdapter:
+    """Attribute-access wrapper around one of openai-whisper's word DICTS.
+
+    `whisper.transcribe(..., word_timestamps=True)` returns
+    `result["segments"][i]["words"][j]` as a plain dict with keys `word`,
+    `start`, `end`, `probability` -- confirmed directly against a real
+    installation while resolving issue #44 (unlike faster-whisper's `Word`,
+    which was already an attribute-access dataclass). `_words_to_regions`
+    is written once, against `_TimedWord`'s dot-access shape, for both the
+    real call path and the replay harness -- this thin adapter is the only
+    place that bridges openai-whisper's dict shape to it, so swapping
+    engines again later only touches this one spot.
+    """
+
+    __slots__ = ("end", "probability", "start", "word")
+
+    def __init__(self, raw: dict[str, Any]) -> None:
+        self.start = raw.get("start")
+        self.end = raw.get("end")
+        self.word = raw.get("word", "") or ""
+        self.probability = raw.get("probability", 1.0)
 
 
 def _words_to_regions(
@@ -133,9 +178,9 @@ def _words_to_regions(
 ) -> tuple[list[dict[str, Any]], int]:
     """Turn a sequence of word timings into filler-word and hesitation regions.
 
-    Pure and faster-whisper-free: `words` need only expose `.start`,
-    `.end` and `.word` (see `_TimedWord`), which is what makes this testable
-    against a fake transcript with the real dependency absent.
+    Pure and whisper-free: `words` need only expose `.start`, `.end` and
+    `.word` (see `_TimedWord`), which is what makes this testable against a
+    fake transcript with the real dependency absent.
 
     A single left-to-right pass, so the returned list is already ascending
     and non-overlapping: a hesitation region only ever spans the gap
@@ -143,9 +188,12 @@ def _words_to_regions(
     filler-word region only ever spans one recognised word's own timing.
 
     Returns:
-        `(regions, degenerate_dropped)`. faster-whisper can emit a word
-        with `start == end` (observed in production -- see D2 in the lane
-        report). A filler region needs `end_s > start_s`
+        `(regions, degenerate_dropped)`. The underlying engine can emit a
+        word with `start == end` (observed in production against
+        faster-whisper -- see D2 in the lane report; not yet observed
+        against openai-whisper on the fixtures re-recorded for issue #44,
+        but the handling is kept because nothing guarantees it cannot
+        happen on other input). A filler region needs `end_s > start_s`
         (contracts/regions.v1.md); building one for a zero-duration word
         would fail `new_regions` validation, and because that validation
         is whole-document, would take every other correctly-timed word in
@@ -189,7 +237,7 @@ def detect_fillers(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Locate filler words and long hesitations using word-level speech timings.
 
-    Runs faster-whisper locally (no AI provider, no credential, no network
+    Runs openai-whisper locally (no AI provider, no credential, no network
     call once the model is cached) to get word-level timestamps, then finds
     every word in `vocabulary` plus every gap of at least `min_pause_ms`
     between recognised words.
@@ -203,7 +251,8 @@ def detect_fillers(
             `FILLER_WORDS`.
         min_pause_ms: Gaps between words at least this long are reported as
             hesitations (`text=""`, `confidence=1.0`).
-        model_size: The faster-whisper model identifier to run.
+        model_size: The whisper model identifier to run (e.g. `"base"`,
+            `"small"`, `"tiny"`).
 
     Returns:
         `(regions, detection)`: `regions` is a list of dicts shaped for
@@ -212,28 +261,34 @@ def detect_fillers(
         `engine`, `model`, `degenerate_words_dropped`).
 
     Raises:
-        AudError: code `speech_extra_missing` if faster-whisper is not
+        AudError: code `speech_extra_missing` if openai-whisper is not
             installed. Never falls back to an energy-only guess -- see
             contracts/regions.v1.md#producing-a-regions-document.
 
-    Resampling: faster-whisper's ndarray input path has no sample-rate
-    parameter of its own -- it always assumes 16 kHz mono PCM, so `x` is
-    resampled to that rate (`_resample_to_whisper_rate`) before it is
-    handed to the model. Without this, every timestamp faster-whisper
-    returns is wrong by the ratio `sr / 16000`, and those positions feed
-    straight into `cut` -- see D1 in the lane report.
+    Resampling: whisper's ndarray input path has no sample-rate parameter of
+    its own -- it always assumes 16 kHz mono PCM, so `x` is resampled to
+    that rate (`_resample_to_whisper_rate`) before it is handed to the
+    model. Without this, every timestamp whisper returns is wrong by the
+    ratio `sr / 16000`, and those positions feed straight into `cut` -- see
+    D1 in the lane report.
 
-    Verification status: the faster-whisper call path below (model load,
-    `transcribe`, iterating `segments`/`.words`) is written against its
-    documented API but has not been exercised against a real installation
-    in this environment -- installs are DTU-only here. `_resample_to_whisper_rate`
-    and `_words_to_regions`, the pure logic around that call, are fully
-    tested (including a fake-`faster_whisper`-module test that proves
-    resampling happens before the model ever sees the audio); only the
-    live model call itself is unverified.
+    No ffmpeg, ever: `x` is always a `numpy.ndarray` by the time it reaches
+    `model.transcribe`, never a file path string -- whisper's own
+    `load_audio` (which shells out to the `ffmpeg` CLI) is reached ONLY on
+    the string-path branch of `whisper.audio.log_mel_spectrogram`, which
+    this call never takes. See
+    `tests/test_dsp_detect.py::test_detect_fillers_never_spawns_ffmpeg` for
+    the enforced proof (monkeypatches `whisper.audio.load_audio` to raise
+    and asserts a real transcription still succeeds).
+
+    `fp16=False` is passed explicitly: on a CPU-only install (this
+    project's default -- see pyproject.toml's `speech` extra), openai-whisper
+    otherwise prints `UserWarning: FP16 is not supported on CPU; using FP32
+    instead` on every call. Passing `fp16=False` up front gets the same FP32
+    behaviour with no warning.
     """
     try:
-        from faster_whisper import WhisperModel
+        import whisper
     except ImportError as exc:
         raise _missing_extra_error() from exc
 
@@ -241,33 +296,33 @@ def detect_fillers(
 
     # Analysis-only mono fold -- see aud.dsp.channels.fold_to_mono's docstring.
     mono = fold_to_mono(np.asarray(x, dtype=np.float64))
-    # faster-whisper's ndarray path always assumes 16 kHz; resample to that
-    # rate here so the timestamps it returns are already real seconds, no
-    # matter what rate `sr` actually is (see `_resample_to_whisper_rate`
-    # and D1 in the lane report).
+    # whisper's ndarray path always assumes 16 kHz; resample to that rate
+    # here so the timestamps it returns are already real seconds, no matter
+    # what rate `sr` actually is (see `_resample_to_whisper_rate` and D1 in
+    # the lane report).
     mono = _resample_to_whisper_rate(mono, sr)
     audio = mono.astype("float32")
 
-    model = WhisperModel(model_size)
-    segments, _info = model.transcribe(audio, word_timestamps=True)
+    model = whisper.load_model(model_size)
+    result = model.transcribe(audio, word_timestamps=True, fp16=False)
 
     all_words: list[Any] = []
-    for segment in segments:
-        segment_words = getattr(segment, "words", None) or []
-        all_words.extend(segment_words)
+    for segment in result.get("segments", []):
+        segment_words = segment.get("words", None) or []
+        all_words.extend(_WordAdapter(w) for w in segment_words)
 
     regions, degenerate_dropped = _words_to_regions(all_words, vocabulary, min_pause_ms)
     detection = {
         "words": list(vocabulary),
         "min_pause_ms": float(min_pause_ms),
-        "engine": "faster-whisper",
+        "engine": "openai-whisper",
         "model": model_size,
         # Optional (contracts/regions.v1.md: additive detection keys stay
         # compatible within regions_format 1) -- how many words this run
-        # dropped because faster-whisper reported them with start == end
-        # (see `_words_to_regions`). Always emitted by this build so the
-        # caller never has to guess whether zero means "none dropped" or
-        # "this build doesn't report it".
+        # dropped because the engine reported them with start == end (see
+        # `_words_to_regions`). Always emitted by this build so the caller
+        # never has to guess whether zero means "none dropped" or "this
+        # build doesn't report it".
         "degenerate_words_dropped": degenerate_dropped,
     }
     return regions, detection

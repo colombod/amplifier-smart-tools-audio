@@ -5,7 +5,7 @@ modules already needed for an internal ANALYSIS signal -- a measurement that
 is never itself written to disk. Before this module existed, three of them
 carried their own identical one-line copy: `aud.dsp.eqmatch._mono`,
 `aud.dsp.speech.detect_fillers`'s inline fold before resampling to
-faster-whisper's rate, and `aud.dsp.reverb`'s IR-channel downmix. All three
+whisper's rate, and `aud.dsp.reverb`'s IR-channel downmix. All three
 computed exactly `x if x.ndim == 1 else np.mean(x, axis=1)`, so they are
 consolidated here rather than left as three copies of the same nine
 characters. A fourth copy, `aud.dsp.resolve._mono_sum`, uses `np.sum`

@@ -167,6 +167,73 @@ DENYLIST: tuple[DenylistEntry, ...] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Weak-copyleft Python-distribution acknowledgements -- the allow-side mirror
+# of DENYLIST above: an explicitly-reviewed, narrowly-scoped EXCEPTION for a
+# named *installed Python distribution* whose metadata genuinely classifies
+# FORBIDDEN or UNKNOWN by the general rule, reviewed and accepted anyway with
+# a recorded reason. This is NOT a blanket relaxation of `_FORBIDDEN_RE` (that
+# would silently re-allow every GPL/LGPL/AGPL/MPL package everywhere); it
+# allows exactly the named distribution(s) below, nothing else.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class WeakCopyleftAcknowledgement:
+    name: str  # exact, normalized distribution name
+    reason: str
+
+
+WEAK_COPYLEFT_ACKNOWLEDGEMENTS: tuple[WeakCopyleftAcknowledgement, ...] = (
+    WeakCopyleftAcknowledgement(
+        "certifi",
+        "MPL-2.0 (confirmed via PyPI trove classifier 'License :: OSI Approved :: Mozilla "
+        "Public License 2.0 (MPL 2.0)', 2026-10-01) -- a transitive dependency of the "
+        "`speech` extra's openai-whisper -> tiktoken -> requests chain (issue #44). "
+        "NOT GPL-family: MPL-2.0 is FILE-LEVEL weak copyleft -- its disclosure obligation "
+        "attaches only to a MODIFIED MPL-covered file that is then distributed, never to a "
+        "program that merely imports/links against an unmodified MPL-licensed dependency "
+        "(Mozilla's own MPL-2.0 FAQ: 'the MPL's reciprocal share-alike requirement applies "
+        "only to the files that are MPL-licensed, and you can combine them with files under "
+        "a different licence ... in a larger work'). This project does not vendor, fork, or "
+        "modify certifi's source -- it is pulled unmodified from PyPI by the dependency "
+        "resolver. Concretely: `aud` never calls `requests` or `certifi` at all -- "
+        "`openai-whisper`'s tokenizer loads its BPE vocabulary from bundled `.tiktoken` "
+        "files on disk (see `whisper.tokenizer.get_encoding`), never from tiktoken's "
+        "network-download code path, so certifi's CA bundle is installed but structurally "
+        "unreachable from any code path `detect fillers` exercises. Distinct from this "
+        "project's existing GPL-family `_FORBIDDEN_RE` match on 'Mozilla Public License', "
+        "which stays in place for every OTHER package -- this is a single, named, reviewed "
+        "exception, not a change to the general rule. Flagged in the PR that introduced it "
+        "as needing explicit sign-off, per AGENTS.md section 1's relicensing-decision "
+        "framing -- see docs/DESIGN-ENVELOPE.md 'Dependency licences'.",
+    ),
+    WeakCopyleftAcknowledgement(
+        "tqdm",
+        "Dual-licensed 'MPL-2.0 AND MIT' per its own PyPI `License` field (confirmed "
+        "2026-10-01) -- tqdm states plainly in its own README/LICENCE that files are "
+        "individually MIT OR MPL-2.0, at the licensor's choice per file, and the project "
+        "itself describes this as permissively usable. A direct dependency of "
+        "`openai-whisper` (progress bars during transcription/model load) -- issue #44. "
+        "Same reasoning as the `certifi` entry above: this project vendors, forks, or "
+        "modifies none of tqdm's source, so no MPL-covered file's share-alike obligation "
+        "is ever triggered by using tqdm unmodified. Recorded explicitly per the task's "
+        "own instruction to surface (not hide) tqdm's dual licence, rather than let it "
+        "pass silently through the permissive-token fallback in "
+        "`_classify_license_field` the way it did before `_FORBIDDEN_RE` was extended to "
+        "catch the 'MPL' acronym (see that regex's own comment).",
+    ),
+)
+
+
+def weak_copyleft_acknowledgement(name: str) -> WeakCopyleftAcknowledgement | None:
+    normalized = _normalize_pkg_name(name)
+    for entry in WEAK_COPYLEFT_ACKNOWLEDGEMENTS:
+        if _normalize_pkg_name(entry.name) == normalized:
+            return entry
+    return None
+
+
 def _normalize_pkg_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
@@ -192,7 +259,16 @@ def denylist_match(name: str) -> DenylistEntry | None:
 _FORBIDDEN_RE = re.compile(
     r"\bAGPL\b|\bGPL\b|\bLGPL\b|General Public License|Affero"
     r"|Mozilla Public License|Eclipse Public License"
-    r"|Common Development and Distribution License|Common Public License",
+    r"|Common Development and Distribution License|Common Public License"
+    # Acronym forms -- added for issue #44's dependency graph: tqdm's legacy
+    # `License` field reads the SPDX-style short form "MPL-2.0 AND MIT"
+    # rather than the spelled-out classifier name, which the pre-existing
+    # "Mozilla Public License" phrase match does not catch. Without this,
+    # tqdm's MPL half would silently slip through as ALLOWED via its "MIT"
+    # half matching the permissive-token fallback in `_classify_license_field`
+    # -- found and closed in the same change that documented certifi's own,
+    # equivalent acknowledgement below.
+    r"|\bMPL\b|\bMPL-\d\.\d\b|\bEPL\b|\bCDDL\b|\bCPL\b",
     re.IGNORECASE,
 )
 
@@ -235,6 +311,27 @@ _ALLOWED_SPDX_IDS = frozenset(
         "UNLICENSE",
         "CC0-1.0",
         "HPND",
+        # Added for the `speech` extra's openai-whisper/torch dependency graph
+        # (issue #44): each is a genuinely permissive licence or a permissive
+        # EXCEPTION token the SPDX-expression splitter in
+        # `_classify_spdx_expression` treats as a standalone token (it splits on
+        # " WITH " the same as " AND "/" OR ", so an exception name must be
+        # listed here in its own right, exactly like an ordinary licence id).
+        "BSL-1.0",  # Boost Software License 1.0 -- OSI-approved, permissive,
+        # no copyleft, no attribution-in-binary requirement beyond the
+        # licence notice. Present in torch's own `License-Expression`
+        # (confirmed via `importlib.metadata`, 2026-10-01).
+        "LLVM-EXCEPTION",  # The LLVM/Apache-2.0 exception -- functionally the
+        # same shape as the already-acknowledged GCC Runtime Library
+        # Exception for libgfortran (BUNDLED_RUNTIME_ACKNOWLEDGEMENTS below):
+        # it exists precisely to let LLVM-licensed runtime/compiler code be
+        # linked into a program under any licence without propagating terms.
+        # Appears in torch's AND llvmlite's `License-Expression` as
+        # "Apache-2.0 WITH LLVM-exception".
+        "CNRI-PYTHON",  # The original CNRI/Python 1.6.1 licence -- OSI-approved,
+        # permissive (no copyleft), predates the PSF licence this project
+        # already allows. Appears in `regex`'s `License-Expression` as
+        # "Apache-2.0 AND CNRI-Python".
     }
 )
 
@@ -286,13 +383,50 @@ def _classify_license_field(text: str) -> Verdict:
     if not text:
         return Verdict.UNKNOWN
     if len(text) > _LICENSE_FIELD_MAX_LEN_FOR_SHORT_MATCH:
-        return Verdict.UNKNOWN
+        return _classify_long_license_blob(text)
     if _FORBIDDEN_RE.search(text):
         return Verdict.FORBIDDEN
     upper = text.upper()
     if any(tok in upper for tok in ("MIT", "BSD", "ISC", "APACHE", "PSF", "PUBLIC DOMAIN", "UNLICENSE")):
         return Verdict.ALLOWED
     return Verdict.UNKNOWN
+
+
+# Exact, case-insensitive first-line headers this project recognises as "the
+# WHOLE blob is a single, unmixed licence text" -- added for `tiktoken`
+# (issue #44's dependency graph), whose `License` field is openai-whisper's
+# real, complete MIT licence text (copyright notice + full disclaimer, ~950
+# chars) with no bundled third-party notices alongside it -- confirmed against
+# https://pypi.org/pypi/tiktoken/json 2026-10-01. Deliberately a SHORT,
+# enumerated set of exact headers, not a substring scan of the whole blob:
+# the whole point of the 200-char length guard this function already has
+# (see its docstring's scipy example) is that a long blob might mix in
+# bundled-dependency notices whose OWN text mentions a different licence.
+# Requiring the licence name on its own first line is a much narrower signal
+# that the blob is a single, unmixed licence -- and the forbidden-licence
+# regex is still run over the ENTIRE text before this path can return ALLOWED.
+_LONG_BLOB_SINGLE_LICENCE_HEADERS = (
+    "MIT LICENSE",
+    "BSD LICENSE",
+    "BSD 2-CLAUSE LICENSE",
+    "BSD 3-CLAUSE LICENSE",
+    "APACHE LICENSE",
+    "ISC LICENSE",
+)
+
+
+def _classify_long_license_blob(text: str) -> Verdict:
+    """A long legacy `License` field whose first line names a single, known
+    permissive licence and whose full text carries no forbidden-licence
+    keyword is ALLOWED; everything else is UNKNOWN, unchanged from before --
+    see `_LONG_BLOB_SINGLE_LICENCE_HEADERS` for why this is narrow rather than
+    a general substring match."""
+    first_line = text.splitlines()[0].strip().upper() if text.splitlines() else ""
+    if first_line not in _LONG_BLOB_SINGLE_LICENCE_HEADERS:
+        return Verdict.UNKNOWN
+    if _FORBIDDEN_RE.search(text):
+        return Verdict.FORBIDDEN
+    return Verdict.ALLOWED
 
 
 @dataclass(frozen=True)
@@ -347,6 +481,19 @@ def classify(info: DistInfo) -> tuple[Verdict, str]:
     if denylisted is not None and verdict is not Verdict.FORBIDDEN:
         reason = f"denylisted despite metadata verdict {verdict.value}: {denylisted.reason}"
         verdict = Verdict.FORBIDDEN
+
+    # The weak-copyleft acknowledgement is checked LAST and can override even a
+    # FORBIDDEN metadata verdict (that is the entire point -- certifi's MPL-2.0
+    # classifier IS correctly detected as FORBIDDEN by the general rule above;
+    # this is a reviewed, named, auditable exception to that specific verdict,
+    # never a change to the general rule itself). It is NOT consulted for a
+    # package that is ALSO on DENYLIST -- the denylist backstop always wins, so
+    # this cannot be used to launder a denylisted package back to ALLOWED.
+    if denylisted is None:
+        acknowledgement = weak_copyleft_acknowledgement(info.name)
+        if acknowledgement is not None and verdict is not Verdict.ALLOWED:
+            reason = f"weak-copyleft acknowledgement (was {verdict.value}): {acknowledgement.reason}"
+            verdict = Verdict.ALLOWED
 
     if verdict is not Verdict.ALLOWED:
         reason = f"package {info.name!r}: {reason} -- {_GOVERNING_DOC_NOTE}"

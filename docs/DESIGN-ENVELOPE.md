@@ -207,15 +207,32 @@ extra installed:
   ships **zero** bundled binaries in python-stretch 0.3.1 -- a scope gap in the old scan, not
   a live licence problem. `test_python_stretch_libs_dir_itself_is_empty_of_binaries_today`
   guards this premise and will fail loudly the day that changes.
-- **`av.libs/` and `ctranslate2.libs/`** (the `speech` extra, transitively via
-  `faster-whisper` -> `av`/`ctranslate2`) are a different story: at least three GPL-family
-  binaries with no LGPL/GCC-exception escape hatch (`libx264`, `libx265`, and a GPL `mpglib`
-  decoder compiled into this build's `libmp3lame`) -- see **issue #44** for the full evidence.
-  None of the ~20 binaries under those two directories are acknowledged in
-  `BUNDLED_RUNTIME_ACKNOWLEDGEMENTS`, on purpose, pending that issue's resolution. CI's
-  `uv sync` installs no optional extra, so the default tree this table otherwise describes
-  stays clean; anyone who installs `speech` locally and runs the licence suite gets a loud,
-  correct failure naming every one of those binaries.
+- **`av.libs/` and `ctranslate2.libs/` -- RESOLVED by replacing the `speech` extra's engine**
+  (issue #44). These arrived transitively via `faster-whisper` -> `av`/`ctranslate2`, and at
+  least three of the ~20 binaries under them were GPL-family with no LGPL/GCC-exception escape
+  hatch (`libx264`, `libx265`, and a GPL `mpglib` decoder compiled into that build's
+  `libmp3lame`). `faster-whisper` is no longer a dependency of this project at all (replaced
+  by `openai-whisper`, MIT code and weights, with `torch` pinned to PyPI's CPU-only wheel
+  index) -- `av.libs/` and `ctranslate2.libs/` do not exist in the resolved `speech` tree
+  anymore; there is nothing left to acknowledge or deny.
+- **`torch/lib/` and the `triton` package's own directory -- a DIFFERENT, NOT-YET-CLOSED scope
+  gap**, surfaced while resolving issue #44 and tracked separately as **issue #46**.
+  `discover_bundled_runtime_libs_dirs()` only walks a
+  `*.libs/` SIBLING directory (the auditwheel/delvewheel convention) -- it does not walk a
+  `.so` file bundled directly inside an installed package's own directory tree, which is the
+  shape both `torch` (`torch/lib/*.so`) and `triton` (its own package root) use. Spot-checked
+  by hand, not yet covered by the automated scan: `torch/lib/` carries `libgomp.so.1` (same
+  GPL-3.0-or-later WITH GCC-exception-3.1 shape as `libgfortran` above -- argued the same
+  way) alongside torch's own first-party compiled extensions (`libtorch*.so`,
+  `libc10.so`, `libshm.so`, covered by torch's own `License-Expression`, not third-party
+  vendoring). More notably, `triton` -- installed transitively as a CPU-route dependency of
+  `torch` on Linux, even though no CUDA device exists on this build -- bundles
+  `libcupti.so*` (NVIDIA's CUDA Profiling Tools Interface), which ships under NVIDIA's own
+  proprietary CUDA Toolkit redistribution terms, not an OSI licence. It is present on disk but
+  structurally unreachable by `aud` (no CUDA device, no code path that loads the profiling
+  backend), the same "installed but unused" shape as `certifi` above -- but it is a different
+  CATEGORY of concern (proprietary-redistributable, not copyleft) and deserves its own
+  review rather than being folded into this acknowledgement table silently.
 
 **Stated assumption, not yet covered: macOS.** Discovery keys on the
 auditwheel/delvewheel `*.libs/` layout that Linux and Windows wheels use. A

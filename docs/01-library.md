@@ -97,7 +97,7 @@ All three are read-only: they open `path` and write nothing. Each returns a **re
 threshold is dB above *this file's own measured noise floor*, not an absolute dBFS value, for
 the same reason `strip_silence` below uses the same convention.
 
-`detect_fillers` needs the optional `speech` extra (`faster-whisper`, a local model — no
+`detect_fillers` needs the optional `speech` extra (`openai-whisper`, a local model — no
 provider, no credential, no network call once cached). **0.11.0:** the extra is checked *before*
 `path` is decoded — a missing prerequisite fails immediately, naming the extra, rather than
 paying for a decode the call was always going to refuse. With the extra absent this raises
